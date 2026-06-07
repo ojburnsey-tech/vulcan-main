@@ -1,399 +1,687 @@
 # api/export_pdf.py
-# Generates a professional A4 Bill of Quantities PDF using ReportLab Platypus.
-#
-# ReportLab Platypus is a high-level layout engine.  Think of it like RDLC / SSRS
-# in .NET: you describe a list of "flowables" (paragraphs, tables, spacers) and
-# the engine arranges them on pages, inserting page breaks as needed.
-#
-# Two layers exist in ReportLab:
-#   1. Canvas   — low-level drawing API (lines, text at exact x,y coordinates)
-#   2. Platypus — high-level "flowable" layout engine built on top of Canvas
-# This file uses Platypus for the table/paragraphs and drops to Canvas only for
-# the page header and footer that must appear at a fixed position on every page.
+# Generates a professional NRM2-compliant A4 Bill of Quantities PDF using ReportLab Platypus.
 
-import io                               # in-memory byte buffer — like MemoryStream in C#
-from datetime import date               # date.today() — like DateTime.Today in C#
+import io
+import unicodedata
+from datetime import date
 
 from reportlab.platypus import (
-    SimpleDocTemplate,   # manages pages, margins, and the flowables list
-    Table,               # renders a 2-D grid of cells
-    TableStyle,          # a collection of formatting rules applied to a Table
-    Paragraph,           # a styled, word-wrapping block of text
-    Spacer,              # inserts blank vertical space — like an empty panel in a layout
-    HRFlowable,          # draws a horizontal rule (like <hr> in HTML)
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer,
+    HRFlowable,
+    PageBreak,
 )
-from reportlab.lib.pagesizes import A4  # A4 = (595.28, 841.89) points; 1 pt = 1/72 inch
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle  # CSS-like text styles
-from reportlab.lib.units import mm      # 1*mm = 2.8346 points; use to specify sizes in mm
-from reportlab.lib import colors        # named colour constants and Color() constructor
-from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT  # text-alignment enum values
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
-# ── Page geometry ─────────────────────────────────────────────────────────────────────
-# All measurements in points (pts).  1 mm = 2.8346 pts.
-PAGE_W, PAGE_H = A4                         # unpack the tuple — like a C# value tuple
-LEFT_M  = RIGHT_M = 20 * mm                # 20 mm side margins
-TOP_M   = 30 * mm                          # tall top margin leaves room for the drawn header
-BOT_M   = 18 * mm                          # bottom margin leaves room for the drawn footer
-CONTENT_W = PAGE_W - LEFT_M - RIGHT_M      # usable line width ≈ 482 pts (170 mm)
+# ── Page geometry ──────────────────────────────────────────────────────────────
+PAGE_W, PAGE_H = A4
+LEFT_M  = RIGHT_M = 20 * mm
+TOP_M   = 30 * mm
+BOT_M   = 18 * mm
+CONTENT_W = PAGE_W - LEFT_M - RIGHT_M
 
-# Table column widths must sum to CONTENT_W.
-# Description gets whatever remains after the fixed numeric columns are allocated.
-_C_QTY   = 38                              # Qty — narrow; right-aligned
-_C_UNIT  = 34                              # Unit — narrow; centred
-_C_MAT   = 58                              # Mat Rate — right-aligned £
-_C_LAB   = 58                              # Lab Rate — right-aligned £
-_C_TOTAL = 64                              # Total — slightly wider for large £ values
-_C_DESC  = CONTENT_W - _C_QTY - _C_UNIT - _C_MAT - _C_LAB - _C_TOTAL  # remainder ≈ 230 pts
-COL_WIDTHS = [_C_DESC, _C_QTY, _C_UNIT, _C_MAT, _C_LAB, _C_TOTAL]     # used by Table()
+# Measured Works column widths — Description | Qty | Unit | Mat Rate | Lab Rate | Total
+_C_QTY   = 38
+_C_UNIT  = 34
+_C_MAT   = 58
+_C_LAB   = 58
+_C_TOTAL = 64
+_C_DESC  = CONTENT_W - _C_QTY - _C_UNIT - _C_MAT - _C_LAB - _C_TOTAL
+COL_WIDTHS = [_C_DESC, _C_QTY, _C_UNIT, _C_MAT, _C_LAB, _C_TOTAL]
 
-# Column index constants — makes style rules readable instead of magic numbers
 _I_DESC, _I_QTY, _I_UNIT, _I_MAT, _I_LAB, _I_TOTAL = range(6)
 
+# ── Static section content (module-level constants — edit these to update documents) ──
 
-# ── Helpers ───────────────────────────────────────────────────────────────────────────
+PREAMBLE_ITEMS = [
+    ("1.", "This Bill of Quantities has been prepared in accordance with the RICS New Rules "
+           "of Measurement: Detailed Measurement for Building Works (NRM2)."),
+    ("2.", "All quantities are net as fixed in place. No allowance has been made for waste, "
+           "bulking, or shrinkage. Contractors must apply their own waste factors when "
+           "pricing materials."),
+    ("3.", "Rates inserted by the contractor are deemed to include all labour, materials, "
+           "plant, equipment, fixings, fastenings, and all other costs necessary to complete "
+           "each item in accordance with the specification."),
+    ("4.", "Unless stated otherwise, all work is measured in accordance with NRM2 and the "
+           "descriptions are abbreviated. Full details are contained in the project "
+           "specification and drawings listed in the Form of Tender."),
+    ("5.", "This document is an AI-generated draft. All quantities and rates must be verified "
+           "by a chartered quantity surveyor before issue for tender or contract."),
+]
+
+# (description, qty, unit, rate_per_unit)
+PRELIM_ITEMS = [
+    ("Scaffold erection, hire (8 weeks), and strike to full perimeter",  1,  "item", 3200.00),
+    ("Skip hire for duration of works (10 skips estimated)",             10, "nr",    280.00),
+    ("Temporary site hoarding and security fencing",                      1,  "item",  850.00),
+    ("Temporary welfare facilities and site WC hire (8 weeks)",           8,  "wk",     95.00),
+    ("Site insurance and all-risks policy allowance",                     1,  "item",  600.00),
+    ("Project management and site supervision",                           8,  "wk",    750.00),
+]
+
+# (description, allowance_amount)
+PROVISIONAL_ITEMS = [
+    ("Connection to existing sewer — Provisional Sum "
+     "(subject to Thames Water / NI Water survey)",                    1500.00),
+    ("External landscaping and reinstatement — Provisional Sum",  2000.00),
+    ("Client’s fixture and fitting allowance — Prime Cost Sum", 3500.00),
+    ("Statutory authority fees and building control — Provisional Sum", 1200.00),
+]
+
+# (resource, grade_description, unit_string)
+DAYWORKS_ROWS = [
+    ("Labour",    "Ganger / Foreman",                                                           "/hr"),
+    ("Labour",    "Skilled tradesperson (bricklayer, carpenter, electrician, plumber)",         "/hr"),
+    ("Labour",    "Semi-skilled operative",                                                     "/hr"),
+    ("Labour",    "General labourer",                                                           "/hr"),
+    ("Plant",     "Excavator / 360° machine (up to 5t)",                                  "/hr"),
+    ("Plant",     "Skip lorry / grab lorry",                                                    "/load"),
+    ("Plant",     "Scaffold tower (weekly hire)",                                               "/wk"),
+    ("Materials", "Percentage addition on net invoiced cost of materials for emergency procurement", "%"),
+]
+
+DAYWORKS_NOTE = (
+    "Dayworks rates to be used only for variations and unforeseen works instructed "
+    "in writing by the Contract Administrator."
+)
+
+# Substring replacements applied to item descriptions before rendering
+NRM2_SUBSTITUTIONS = [
+    (
+        "Concrete C25 strip foundations",
+        "Concrete C25 (20mm aggregate) poured into structural foundation trenches "
+        "not exceeding 2.0m deep",
+    ),
+    (
+        "External cavity wall 300mm",
+        "External cavity wall comprising 102mm facing brick outer leaf, 100mm clear cavity "
+        "with partial fill mineral wool insulation batts, stainless steel wall ties at "
+        "2.5/m², 100mm dense aggregate concrete block inner leaf",
+    ),
+    (
+        "Timber roof structure",
+        "Pitched timber roof structure comprising C24 treated softwood rafters, ceiling "
+        "joists, purlins, ridge board and wall plates, all at centres to engineer’s details",
+    ),
+    (
+        "UPVC fascia",
+        "112mm UPVC half-round eaves gutter fixed to fascia boards with brackets at "
+        "maximum 1.0m centres",
+    ),
+]
+
+VALID_UNITS = {"nr", "m", "m2", "m3", "item", "wk", "kg"}
+
+_UNIT_ALIASES = {
+    "no": "nr", "no.": "nr", "each": "nr", "ea": "nr",
+    "lin m": "m", "lm": "m", "lin.m": "m",
+    "sqm": "m2", "sq.m": "m2", "sq m": "m2",
+    "m²": "m2", "m^2": "m2",
+    "cum": "m3", "cub m": "m3", "m³": "m3", "m^3": "m3",
+    "week": "wk", "weeks": "wk",
+    "sum": "item", "ls": "item", "l.s": "item",
+}
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _fmt(n) -> str:
-    """Format a number as UK sterling with comma thousands separator.
-    Equivalent to n.ToString("C", new CultureInfo("en-GB")) in C#."""
-    return f"£{float(n):,.2f}"          # £ = £ (avoids encoding issues in source)
+    """Format a number as UK sterling: £1,234.56"""
+    return f"£{float(n):,.2f}"
+
+
+def _sanitise_unit(raw: str) -> str:
+    """Normalise any unit string to an ASCII-only NRM2-valid unit; default 'nr'."""
+    if not raw:
+        return "nr"
+    s = unicodedata.normalize("NFKC", str(raw).strip())
+    s = s.replace("²", "2").replace("³", "3").lower()
+    if s in VALID_UNITS:
+        return s
+    return _UNIT_ALIASES.get(s, "nr")
+
+
+def _apply_nrm2_desc(desc: str) -> str:
+    """Upgrade abbreviated descriptions to NRM2-standard wording via substring replacement."""
+    for old, new in NRM2_SUBSTITUTIONS:
+        if old in desc:
+            desc = desc.replace(old, new)
+    return desc
 
 
 def _normalise_boq(boq_json):
     """Convert any Claude JSON shape to a list of (trade_name, [item_dict]) tuples.
     Mirrors normaliseBoq() in the React front end and _enrich_boq() in app.py."""
     if not boq_json or not isinstance(boq_json, (list, dict)):
-        return []                            # null / primitive — nothing to parse
+        return []
 
-    if isinstance(boq_json, list):           # shape: [{trade, items}]
+    if isinstance(boq_json, list):
         groups = boq_json
-    else:                                    # boq_json is a dict
+    else:
         if isinstance(boq_json.get('bill_of_quantities'), list):
             groups = boq_json['bill_of_quantities']
         elif isinstance(boq_json.get('trades'), list):
             groups = boq_json['trades']
-        else:                                # shape: {groundworks: [...], brickwork: [...]}
+        else:
             groups = [{'trade': k, 'items': v}
                       for k, v in boq_json.items() if isinstance(v, list)]
 
-    if not isinstance(groups, list):         # belt-and-suspenders before iterating
+    if not isinstance(groups, list):
         return []
 
     result = []
     for g in groups:
-        if not isinstance(g, dict):          # skip strings or other non-dict entries
+        if not isinstance(g, dict):
             continue
         trade = g.get('trade') or g.get('name') or 'General'
         items = g.get('items') or g.get('line_items') or []
-        if not isinstance(items, list):      # guard against items being a scalar or dict
+        if not isinstance(items, list):
             items = []
-        result.append((trade, items))        # each element is a 2-tuple — like a ValueTuple in C#
+        result.append((trade, items))
     return result
 
 
-# ── Paragraph style factory ───────────────────────────────────────────────────────────
-# Styles are like CSS classes: define once, apply repeatedly.
-# getSampleStyleSheet() returns a dict of built-in ReportLab styles.
+# ── Paragraph style factory ────────────────────────────────────────────────────
 _BASE = getSampleStyleSheet()
+
 
 def _style(name, *, parent='Normal', font='Helvetica', size=8.5, leading=12,
            align=TA_LEFT, color=colors.black, bold=False):
-    """One-liner helper for creating a named ParagraphStyle — avoids repetition."""
     return ParagraphStyle(
         name,
         parent=_BASE[parent],
         fontName='Helvetica-Bold' if bold else font,
         fontSize=size,
-        leading=leading,                     # line height; leading < fontSize causes overlap
+        leading=leading,
         alignment=align,
         textColor=color,
     )
 
-# All styles used in the document defined here so the table-building loop stays clean
+
 S_NORMAL        = _style('BoqNormal')
-S_BOLD          = _style('BoqBold',     bold=True)
-S_RIGHT         = _style('BoqRight',    align=TA_RIGHT)
-S_RIGHT_BOLD    = _style('BoqRightBold',align=TA_RIGHT, bold=True)
-S_CENTER        = _style('BoqCenter',   align=TA_CENTER)
-S_COL_HDR       = _style('BoqColHdr',  bold=True, color=colors.white)          # black-bg row
-S_COL_HDR_R     = _style('BoqColHdrR', bold=True, color=colors.white, align=TA_RIGHT)
-S_COL_HDR_C     = _style('BoqColHdrC', bold=True, color=colors.white, align=TA_CENTER)
-S_TRADE         = _style('BoqTrade',   bold=True, size=9.5, leading=14)        # trade section
-S_DISCLAIMER    = _style('BoqDisc',    font='Helvetica-Oblique', size=7,
+S_BOLD          = _style('BoqBold',       bold=True)
+S_RIGHT         = _style('BoqRight',      align=TA_RIGHT)
+S_RIGHT_BOLD    = _style('BoqRightBold',  align=TA_RIGHT, bold=True)
+S_CENTER        = _style('BoqCenter',     align=TA_CENTER)
+S_COL_HDR       = _style('BoqColHdr',     bold=True, color=colors.white)
+S_COL_HDR_R     = _style('BoqColHdrR',    bold=True, color=colors.white, align=TA_RIGHT)
+S_COL_HDR_C     = _style('BoqColHdrC',    bold=True, color=colors.white, align=TA_CENTER)
+S_TRADE         = _style('BoqTrade',      bold=True, size=9.5, leading=14)
+S_DISCLAIMER    = _style('BoqDisc',       font='Helvetica-Oblique', size=7,
                           color=colors.Color(0.4, 0.4, 0.4))
+S_TITLE         = _style('BoqTitle',      bold=True, size=14, leading=18)
+S_SECTION       = _style('BoqSection',    bold=True, size=11, leading=14)
+S_BODY          = _style('BoqBody',       size=9, leading=13)
+S_BODY_BOLD     = _style('BoqBodyBold',   bold=True, size=9, leading=13)
+S_TENDER_AMT    = _style('BoqTenderAmt',  bold=True, size=11, leading=16)
 
-# Light greys — these are still "black and white" (monochromatic), just different shades
-_GREY_TRADE = colors.Color(0.91, 0.91, 0.91)   # trade section header background
-_GREY_ALT   = colors.Color(0.97, 0.97, 0.97)   # alternating item row shading
-_GREY_LINE  = colors.Color(0.75, 0.75, 0.75)   # inner grid line colour
+_GREY_TRADE = colors.Color(0.91, 0.91, 0.91)
+_GREY_ALT   = colors.Color(0.97, 0.97, 0.97)
+_GREY_LINE  = colors.Color(0.75, 0.75, 0.75)
 
 
-# ── Main function ─────────────────────────────────────────────────────────────────────
+# ── Shared table style base ────────────────────────────────────────────────────
 
-def generate_boq_pdf(boq_json: dict) -> bytes:
-    """Generate a professional A4 Bill of Quantities PDF and return it as raw bytes.
+def _base_table_cmds():
+    """Return the standard TableStyle commands applied to all BoQ tables."""
+    return [
+        ('FONT',          (0, 0), (-1, -1), 'Helvetica', 8.5),
+        ('LEADING',       (0, 0), (-1, -1), 12),
+        ('BOX',           (0, 0), (-1, -1), 0.8, colors.black),
+        ('INNERGRID',     (0, 0), (-1, -1), 0.25, _GREY_LINE),
+        ('TOPPADDING',    (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+    ]
 
-    The caller can write the bytes to disk, store them in cloud storage, or send
-    them directly to the browser — equivalent to returning a byte[] in C# and then
-    using File(bytes, "application/pdf", "filename.pdf") in an MVC controller.
 
-    Args:
-        boq_json: priced BoQ dict returned by /process.  Accepts all common shapes
-                  (list of trade objects, keyed dict, or wrapper dict).
-
-    Returns:
-        Raw PDF bytes.  Raises ValueError if boq_json contains no trade data.
-    """
-    # ── Validate input ────────────────────────────────────────────────────────────
-    trade_groups = _normalise_boq(boq_json)
-    if not trade_groups:                    # guard — like ArgumentException in C#
-        raise ValueError("boq_json contains no recognisable trade groups.")
-
-    # ── Output buffer ─────────────────────────────────────────────────────────────
-    buf = io.BytesIO()                      # write PDF bytes here; like new MemoryStream()
-
-    # ── Date string captured once at call time ────────────────────────────────────
-    d = date.today()
-    today_str = f"{d.day} {d.strftime('%B %Y')}"   # e.g. "6 June 2026" — no leading zero
-
-    # ── Page header / footer callback ─────────────────────────────────────────────
-    # SimpleDocTemplate calls this function after rendering each page.
-    # We use the low-level canvas API here because headers/footers must be drawn
-    # at exact coordinates outside the flowing content area — like overriding
-    # OnRenderPage in a C# ReportViewer or PdfWriter.GetDirectContent() in iTextSharp.
-    def _draw_chrome(canvas, doc):
-        canvas.saveState()                  # push graphics state — like Graphics.Save() in GDI+
-
-        # ── Header ────────────────────────────────────────────────────────────────
-        y_title = PAGE_H - TOP_M + 13 * mm  # Y baseline for the title text
-
-        canvas.setFont('Helvetica-Bold', 16)
-        canvas.setFillColor(colors.black)
-        canvas.drawString(LEFT_M, y_title, 'Vulcan Quanta')            # left-aligned company name
-
-        canvas.setFont('Helvetica', 8.5)
-        canvas.drawRightString(PAGE_W - RIGHT_M, y_title, today_str)  # right-aligned date
-
-        canvas.setFont('Helvetica', 8)
-        canvas.setFillColor(colors.Color(0.3, 0.3, 0.3))
-        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI Draft')
-
-        # Horizontal rule separating header from body
-        rule_y = PAGE_H - TOP_M + 4 * mm
-        canvas.setStrokeColor(colors.black)
-        canvas.setLineWidth(0.8)
-        canvas.line(LEFT_M, rule_y, PAGE_W - RIGHT_M, rule_y)
-
-        # Page number — right-aligned just below the rule
-        canvas.setFont('Helvetica', 7.5)
-        canvas.setFillColor(colors.black)
-        canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
-
-        # ── Footer ────────────────────────────────────────────────────────────────
-        footer_rule_y = BOT_M - 4 * mm
-        canvas.setLineWidth(0.5)
-        canvas.setStrokeColor(colors.Color(0.5, 0.5, 0.5))
-        canvas.line(LEFT_M, footer_rule_y, PAGE_W - RIGHT_M, footer_rule_y)
-
-        canvas.setFont('Helvetica-Oblique', 7.5)
-        canvas.setFillColor(colors.Color(0.35, 0.35, 0.35))
-        canvas.drawCentredString(                                       # note: ReportLab uses "Centred" not "Centered"
-            PAGE_W / 2,
-            footer_rule_y - 9,
-            'AI-generated draft. Professional review required before issue.',
-        )
-
-        canvas.restoreState()              # pop graphics state — like Graphics.Restore()
-
-    # ── Document ──────────────────────────────────────────────────────────────────
-    doc = SimpleDocTemplate(
-        buf,                               # output target: our in-memory buffer
-        pagesize=A4,
-        leftMargin=LEFT_M,
-        rightMargin=RIGHT_M,
-        topMargin=TOP_M,                   # reserved for the drawn header
-        bottomMargin=BOT_M,               # reserved for the drawn footer
-        title='Bill of Quantities',
-        author='Vulcan Quanta',
-    )
-
-    # ── Build the table rows ──────────────────────────────────────────────────────
-    # We build ONE large table for the entire BoQ rather than one table per trade.
-    # This keeps all columns perfectly aligned across trade sections.
-    # all_rows: list[list[Paragraph|str]] — one inner list per table row
-    # row_cmds: list[tuple] — TableStyle commands collected row-by-row
-    all_rows  = []
-    row_cmds  = []
-
-    # ── Column header row (row 0) ─────────────────────────────────────────────────
-    all_rows.append([
-        Paragraph('Description',   S_COL_HDR),    # left-aligned on black background
-        Paragraph('Qty',           S_COL_HDR_R),
-        Paragraph('Unit',          S_COL_HDR_C),
-        Paragraph('Mat Rate',      S_COL_HDR_R),
-        Paragraph('Lab Rate',      S_COL_HDR_R),
-        Paragraph('Total',         S_COL_HDR_R),
-    ])
-    row_cmds += [
-        ('BACKGROUND',    (0, 0), (-1, 0), colors.black),   # black background for header row
+def _col_header_cmds():
+    """Return TableStyle commands for a black-background column header at row 0."""
+    return [
+        ('BACKGROUND',    (0, 0), (-1, 0), colors.black),
         ('TOPPADDING',    (0, 0), (-1, 0), 6),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
     ]
 
-    # ── Trade sections ────────────────────────────────────────────────────────────
-    grand_subtotal = 0.0                   # running total across all trades
+
+# ── Section-heading helper ────────────────────────────────────────────────────
+
+def _section_heading(title: str) -> list:
+    """Return flowables for a standard bold section heading with rule."""
+    return [
+        Spacer(1, 4 * mm),
+        Paragraph(title, S_SECTION),
+        Spacer(1, 2 * mm),
+        HRFlowable(width=CONTENT_W, thickness=1.2, color=colors.black),
+        Spacer(1, 4 * mm),
+    ]
+
+
+# ── Section builders ──────────────────────────────────────────────────────────
+
+def _build_form_of_tender(boq_json, today_str: str) -> list:
+    """Page 1 — Form of Tender."""
+    if isinstance(boq_json, dict):
+        project  = boq_json.get('project_title', 'Residential Extension')
+        location = boq_json.get('location', '—')
+    else:
+        project  = 'Residential Extension'
+        location = '—'
+
+    story = []
+    story.append(Spacer(1, 8 * mm))
+    story.append(Paragraph("FORM OF TENDER", S_TITLE))
+    story.append(Spacer(1, 6 * mm))
+    story.append(HRFlowable(width=CONTENT_W, thickness=1.5, color=colors.black))
+    story.append(Spacer(1, 6 * mm))
+
+    label_w = 38 * mm
+    value_w = CONTENT_W - label_w
+
+    def _field_row(label, text):
+        return [Paragraph(label, S_BODY_BOLD), Paragraph(text, S_BODY)]
+
+    fields = Table(
+        [
+            _field_row("Project:",
+                       project),
+            _field_row("Location:",
+                       location),
+            _field_row("Drawing Refs:",
+                       "Measured from Architect’s Drawings Ref: PL-01 through PL-10 and "
+                       "Structural Engineer’s Calculation Sheet Ref: SE-04"),
+            _field_row("Date:",        today_str),
+            _field_row("Prepared by:", "Vulcan Quanta (AI-assisted draft)"),
+        ],
+        colWidths=[label_w, value_w],
+    )
+    fields.setStyle(TableStyle([
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+    story.append(fields)
+    story.append(Spacer(1, 8 * mm))
+    story.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=colors.black))
+    story.append(Spacer(1, 7 * mm))
+
+    story.append(Paragraph(
+        "We the undersigned offer to carry out and complete the works described herein "
+        "in accordance with the Contract Conditions for the sum of:",
+        S_BODY,
+    ))
+    story.append(Spacer(1, 7 * mm))
+    story.append(Paragraph(
+        "£ ____________________________________________ (excluding VAT)",
+        S_TENDER_AMT,
+    ))
+    story.append(Spacer(1, 12 * mm))
+
+    col1 = 28 * mm
+    col2 = 75 * mm
+    col3 = 20 * mm
+    col4 = CONTENT_W - col1 - col2 - col3
+    sign_table = Table(
+        [
+            [Paragraph("Signed:",  S_BODY_BOLD),
+             Paragraph("_________________________", S_BODY),
+             Paragraph("Date:",    S_BODY_BOLD),
+             Paragraph("_____________", S_BODY)],
+            [Paragraph("Company:", S_BODY_BOLD),
+             Paragraph("_________________________", S_BODY),
+             Paragraph("", S_BODY),
+             Paragraph("", S_BODY)],
+        ],
+        colWidths=[col1, col2, col3, col4],
+    )
+    sign_table.setStyle(TableStyle([
+        ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING',    (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+    ]))
+    story.append(sign_table)
+    return story
+
+
+def _build_preambles() -> list:
+    """Page 2 — Preambles & General Notes."""
+    story = []
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("PREAMBLES AND GENERAL NOTES", S_TITLE))
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width=CONTENT_W, thickness=1.5, color=colors.black))
+    story.append(Spacer(1, 6 * mm))
+
+    num_w  = 12 * mm
+    text_w = CONTENT_W - num_w
+    for num, text in PREAMBLE_ITEMS:
+        row = Table(
+            [[Paragraph(num, S_BODY_BOLD), Paragraph(text, S_BODY)]],
+            colWidths=[num_w, text_w],
+        )
+        row.setStyle(TableStyle([
+            ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+            ('TOPPADDING',    (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 7),
+            ('LEFTPADDING',   (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING',  (0, 0), (-1, -1), 0),
+        ]))
+        story.append(row)
+    return story
+
+
+def _build_preliminaries() -> tuple:
+    """Section 01 — Preliminaries. Returns (flowables, prelim_total)."""
+    # Five-column table: Description | Qty | Unit | Rate | Total
+    # The two Measured Works rate columns are merged into a single "Rate" column here.
+    rate_w = _C_MAT + _C_LAB
+    col_w  = [_C_DESC, _C_QTY, _C_UNIT, rate_w, _C_TOTAL]
+
+    rows = [[
+        Paragraph("Description", S_COL_HDR),
+        Paragraph("Qty",         S_COL_HDR_R),
+        Paragraph("Unit",        S_COL_HDR_C),
+        Paragraph("Rate",        S_COL_HDR_R),
+        Paragraph("Total",       S_COL_HDR_R),
+    ]]
+    cmds = list(_col_header_cmds())
+    prelim_total = 0.0
+
+    for desc, qty, unit, rate in PRELIM_ITEMS:
+        line_tot = round(qty * rate, 2)
+        prelim_total += line_tot
+        ir = len(rows)
+        rows.append([
+            Paragraph(desc,            S_NORMAL),
+            Paragraph(str(qty),        S_RIGHT),
+            Paragraph(unit,            S_CENTER),
+            Paragraph(_fmt(rate),      S_RIGHT),
+            Paragraph(_fmt(line_tot),  S_RIGHT),
+        ])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    tr = len(rows)
+    rows.append([
+        Paragraph("Preliminaries Total", S_RIGHT_BOLD),
+        "", "", "",
+        Paragraph(_fmt(prelim_total), S_RIGHT_BOLD),
+    ])
+    cmds += [
+        ('SPAN',          (0, tr), (3, tr)),
+        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
+        ('TOPPADDING',    (0, tr), (-1, tr), 6),
+        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+    ]
+
+    base = _base_table_cmds() + [
+        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
+        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+    ]
+    tbl = Table(rows, colWidths=col_w, repeatRows=1, splitByRow=True, hAlign='LEFT')
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("SECTION 01 — PRELIMINARIES")
+    story.append(tbl)
+    return story, prelim_total
+
+
+def _build_measured_works(trade_groups) -> tuple:
+    """Section 02 — Measured Works. Returns (flowables, measured_works_total).
+
+    Column order is fixed throughout: Description | Qty | Unit | Mat Rate | Lab Rate | Total.
+    One Table per trade so column headers repeat correctly on page splits.
+    """
+    story = _section_heading("SECTION 02 — MEASURED WORKS")
+    trade_summaries = []
 
     for trade_name, items in trade_groups:
+        rows = [[
+            Paragraph('Description', S_COL_HDR),
+            Paragraph('Qty',         S_COL_HDR_R),
+            Paragraph('Unit',        S_COL_HDR_C),
+            Paragraph('Mat Rate',    S_COL_HDR_R),
+            Paragraph('Lab Rate',    S_COL_HDR_R),
+            Paragraph('Total',       S_COL_HDR_R),
+        ]]
+        cmds = list(_col_header_cmds())
 
-        # Trade header row — spans all columns to act as a section divider
-        tr = len(all_rows)                 # current row index ("tr" for trade row)
-        all_rows.append([
-            Paragraph(trade_name.upper(), S_TRADE),
-            '', '', '', '', '',            # empty strings occupy the remaining cells
-        ])
-        row_cmds += [
-            ('SPAN',          (0, tr), (-1, tr)),              # merge all 6 cells into one
+        # Trade name spanning all columns
+        tr = len(rows)
+        rows.append([Paragraph(trade_name.upper(), S_TRADE), '', '', '', '', ''])
+        cmds += [
+            ('SPAN',          (0, tr), (-1, tr)),
             ('BACKGROUND',    (0, tr), (-1, tr), _GREY_TRADE),
-            ('LINEABOVE',     (0, tr), (-1, tr), 0.8, colors.black),   # strong line above each trade
+            ('LINEABOVE',     (0, tr), (-1, tr), 0.8, colors.black),
             ('TOPPADDING',    (0, tr), (-1, tr), 5),
             ('BOTTOMPADDING', (0, tr), (-1, tr), 5),
         ]
 
-        # Line items
-        trade_total = 0.0                  # running total for this trade only
-
+        trade_total = 0.0
         for item in items:
-            if not isinstance(item, dict):   # skip strings or other non-dict line items
+            if not isinstance(item, dict):
                 continue
-            desc     = item.get('description') or item.get('desc') or ''
-            qty      = float(item.get('quantity') or item.get('qty') or 0)
-            unit     = item.get('unit') or ''
-            mat      = float(item.get('material_rate') or 0)
-            lab      = float(item.get('labour_rate')   or 0)
-            # Use stored line_total if present; otherwise compute from rates × qty.
-            # item.get('line_total') returns None if the key is missing.
-            stored   = item.get('line_total')
-            line_tot = float(stored) if stored is not None else (mat + lab) * qty
+            desc  = _apply_nrm2_desc(item.get('description') or item.get('desc') or '')
+            qty   = float(item.get('quantity') or item.get('qty') or 0)
+            unit  = _sanitise_unit(item.get('unit') or '')
+            mat   = float(item.get('material_rate')      or 0)
+            lab   = float(item.get('labour_rate')        or 0)
+            plant = float(item.get('plant_rate')         or 0)
+            waste = float(item.get('waste_disposal_rate') or 0)
+            # Always recalculate — never trust a stored line_total
+            line_tot = round(qty * (mat + lab + plant + waste), 2)
+            trade_total += line_tot
 
-            trade_total += line_tot        # accumulate
-
-            ir = len(all_rows)             # item row index
-            all_rows.append([
-                Paragraph(desc,             S_NORMAL),  # wraps automatically if long
-                Paragraph(f'{qty:g}',       S_RIGHT),   # :g strips trailing zeros (3.0 → "3")
-                Paragraph(unit,             S_CENTER),
-                Paragraph(_fmt(mat),        S_RIGHT),
-                Paragraph(_fmt(lab),        S_RIGHT),
-                Paragraph(_fmt(line_tot),   S_RIGHT),
+            ir = len(rows)
+            rows.append([
+                Paragraph(desc,            S_NORMAL),
+                Paragraph(f'{qty:g}',      S_RIGHT),
+                Paragraph(unit,            S_CENTER),
+                Paragraph(_fmt(mat),       S_RIGHT),
+                Paragraph(_fmt(lab),       S_RIGHT),
+                Paragraph(_fmt(line_tot),  S_RIGHT),
             ])
-            # Alternate row tinting every other item row (not counting headers/subtotals)
             if ir % 2 == 0:
-                row_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+                cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-        grand_subtotal += trade_total
-
-        # Trade subtotal row — description spans cols 0-4, total in col 5
-        sr = len(all_rows)                 # subtotal row index
-        all_rows.append([
+        # Trade subtotal — description spans cols 0–4, total in col 5
+        sr = len(rows)
+        rows.append([
             Paragraph(f'Subtotal — {trade_name}', S_RIGHT_BOLD),
-            '', '', '', '',                # empty: absorbed by the SPAN below
-            Paragraph(_fmt(trade_total),   S_RIGHT_BOLD),
+            '', '', '', '',
+            Paragraph(_fmt(trade_total), S_RIGHT_BOLD),
         ])
-        row_cmds += [
-            ('SPAN',          (0, sr), (_I_LAB, sr)),          # merge description through lab-rate cell
+        cmds += [
+            ('SPAN',          (0, sr), (_I_LAB, sr)),
             ('LINEABOVE',     (0, sr), (-1, sr), 0.5, colors.black),
             ('TOPPADDING',    (0, sr), (-1, sr), 4),
             ('BOTTOMPADDING', (0, sr), (-1, sr), 6),
         ]
 
-    # ── Totals section ────────────────────────────────────────────────────────────
-    contingency     = grand_subtotal * 0.10          # 10 % risk allowance
-    grand_total_inc = grand_subtotal + contingency   # final figure including contingency
+        trade_summaries.append((trade_name, trade_total))
 
-    # Works subtotal (sum of all trades before contingency)
-    wr = len(all_rows)
-    all_rows.append([
-        Paragraph('Works subtotal', S_RIGHT_BOLD),
-        '', '', '', '',
-        Paragraph(_fmt(grand_subtotal), S_RIGHT_BOLD),
+        base = _base_table_cmds() + [
+            ('ALIGN', (_I_QTY,  0), (-1,        -1), 'RIGHT'),
+            ('ALIGN', (_I_UNIT, 0), (_I_UNIT, -1), 'CENTER'),
+        ]
+        tbl = Table(rows, colWidths=COL_WIDTHS, repeatRows=1, splitByRow=True, hAlign='LEFT')
+        tbl.setStyle(TableStyle(base + cmds))
+        story.append(tbl)
+        story.append(Spacer(1, 4 * mm))
+
+    # Trade Collection Summary
+    story += _section_heading("TRADE COLLECTION SUMMARY")
+
+    coll_rows = [
+        [Paragraph("Trade", S_COL_HDR), Paragraph("Total", S_COL_HDR_R)],
+    ]
+    coll_cmds = list(_col_header_cmds())
+    measured_total = 0.0
+
+    for tn, tt in trade_summaries:
+        measured_total += tt
+        ir = len(coll_rows)
+        coll_rows.append([
+            Paragraph(tn, S_NORMAL),
+            Paragraph(_fmt(tt), S_RIGHT),
+        ])
+        if ir % 2 == 0:
+            coll_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    mr = len(coll_rows)
+    coll_rows.append([
+        Paragraph("Measured Works Total", S_RIGHT_BOLD),
+        Paragraph(_fmt(measured_total), S_RIGHT_BOLD),
     ])
-    row_cmds += [
-        ('SPAN',      (0, wr), (_I_LAB, wr)),
-        ('LINEABOVE', (0, wr), (-1, wr), 1.2, colors.black),  # heavier rule before totals
-        ('TOPPADDING',    (0, wr), (-1, wr), 7),
-        ('BOTTOMPADDING', (0, wr), (-1, wr), 4),
+    coll_cmds += [
+        ('LINEABOVE',     (0, mr), (-1, mr), 1.0, colors.black),
+        ('TOPPADDING',    (0, mr), (-1, mr), 6),
+        ('BOTTOMPADDING', (0, mr), (-1, mr), 6),
     ]
 
-    # Contingency line
-    cr = len(all_rows)
-    all_rows.append([
-        Paragraph('Contingency / risk allowance (10%)', S_RIGHT),
-        '', '', '', '',
-        Paragraph(_fmt(contingency), S_RIGHT),
+    coll_widths = [CONTENT_W - 100, 100]
+    coll_base   = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+    coll_tbl    = Table(coll_rows, colWidths=coll_widths, repeatRows=1, hAlign='LEFT')
+    coll_tbl.setStyle(TableStyle(coll_base + coll_cmds))
+    story.append(coll_tbl)
+
+    return story, measured_total
+
+
+def _build_provisional_sums() -> tuple:
+    """Section 03 — Provisional & PC Sums. Returns (flowables, prov_total)."""
+    col_w = [CONTENT_W - 100, 100]
+    rows  = [[Paragraph("Description", S_COL_HDR), Paragraph("Allowance", S_COL_HDR_R)]]
+    cmds  = list(_col_header_cmds())
+    prov_total = 0.0
+
+    for desc, amt in PROVISIONAL_ITEMS:
+        prov_total += amt
+        ir = len(rows)
+        rows.append([Paragraph(desc, S_NORMAL), Paragraph(_fmt(amt), S_RIGHT)])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    tr = len(rows)
+    rows.append([
+        Paragraph("Provisional & PC Sums Total", S_RIGHT_BOLD),
+        Paragraph(_fmt(prov_total), S_RIGHT_BOLD),
     ])
-    row_cmds += [
-        ('SPAN',          (0, cr), (_I_LAB, cr)),
-        ('TOPPADDING',    (0, cr), (-1, cr), 3),
-        ('BOTTOMPADDING', (0, cr), (-1, cr), 3),
+    cmds += [
+        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
+        ('TOPPADDING',    (0, tr), (-1, tr), 6),
+        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
     ]
 
-    # Grand total (the headline figure)
-    gr = len(all_rows)
-    all_rows.append([
-        Paragraph('GRAND TOTAL (excluding VAT)', S_RIGHT_BOLD),
-        '', '', '', '',
-        Paragraph(_fmt(grand_total_inc), S_RIGHT_BOLD),
-    ])
-    row_cmds += [
-        ('SPAN',          (0, gr), (_I_LAB, gr)),
-        ('LINEABOVE',     (0, gr), (-1, gr), 1.5, colors.black),
-        ('LINEBELOW',     (0, gr), (-1, gr), 1.5, colors.black),
-        ('TOPPADDING',    (0, gr), (-1, gr), 7),
-        ('BOTTOMPADDING', (0, gr), (-1, gr), 7),
+    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("SECTION 03 — PROVISIONAL & PC SUMS")
+    story.append(tbl)
+    return story, prov_total
+
+
+def _build_dayworks() -> list:
+    """Section 04 — Dayworks Schedule (blank rate template)."""
+    res_w   = 28 * mm
+    rate_w  = 50
+    unit_w  = 30
+    grade_w = CONTENT_W - res_w - rate_w - unit_w
+
+    rows = [[
+        Paragraph("Resource",               S_COL_HDR),
+        Paragraph("Grade / Description",    S_COL_HDR),
+        Paragraph("Contractor’s Rate (£)", S_COL_HDR_R),
+        Paragraph("Unit",                   S_COL_HDR_C),
+    ]]
+    cmds = list(_col_header_cmds())
+
+    for resource, grade, unit in DAYWORKS_ROWS:
+        ir = len(rows)
+        rows.append([
+            Paragraph(resource, S_NORMAL),
+            Paragraph(grade,    S_NORMAL),
+            Paragraph("",       S_NORMAL),
+            Paragraph(unit,     S_CENTER),
+        ])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    base = _base_table_cmds() + [
+        ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+    ]
+    tbl = Table(rows, colWidths=[res_w, grade_w, rate_w, unit_w], repeatRows=1, hAlign='LEFT')
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("SECTION 04 — DAYWORKS SCHEDULE")
+    story.append(tbl)
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(DAYWORKS_NOTE, S_DISCLAIMER))
+    return story
+
+
+def _build_grand_summary(prelim_total: float, measured_total: float, prov_total: float) -> list:
+    """Grand Summary — all figures calculated from section totals."""
+    works_total = prelim_total + measured_total + prov_total
+    contingency = round(works_total * 0.10,  2)
+    overhead    = round(works_total * 0.125, 2)
+    grand_total = round(works_total + contingency + overhead, 2)
+
+    col_w = [CONTENT_W - 100, 100]
+    rows  = [[Paragraph("Section", S_COL_HDR), Paragraph("Total", S_COL_HDR_R)]]
+    cmds  = list(_col_header_cmds())
+
+    summary_lines = [
+        ("Section 01 — Preliminaries",               prelim_total,   False),
+        ("Section 02 — Measured Works",               measured_total, False),
+        ("Section 03 — Provisional & PC Sums",        prov_total,     False),
+        ("Works Total",                                    works_total,    True),
+        ("Contingency / Risk Allowance (10%)",             contingency,    False),
+        ("Main Contractor Overhead & Profit (12.5%)",      overhead,       False),
+        ("GRAND TOTAL (excluding VAT)",                    grand_total,    True),
     ]
 
-    # ── Assemble the TableStyle ───────────────────────────────────────────────────
-    # TableStyle takes a list of (command, start_cell, end_cell, *args) tuples.
-    # Cells are referenced as (col, row) — note: column first, like (x, y) coordinates.
-    # (-1, -1) means the last column and last row respectively.
-    base_cmds = [
-        ('FONT',       (0, 0), (-1, -1), 'Helvetica', 8.5),  # default font for all cells
-        ('LEADING',    (0, 0), (-1, -1), 12),                 # default line height
-        # Outer border of the whole table
-        ('BOX',        (0, 0), (-1, -1), 0.8, colors.black),
-        # Light inner grid lines between all cells
-        ('INNERGRID',  (0, 0), (-1, -1), 0.25, _GREY_LINE),
-        # Default padding for all cells
-        ('TOPPADDING',    (0, 0), (-1, -1), 3),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
-        ('LEFTPADDING',   (0, 0), (-1, -1), 5),
-        ('RIGHTPADDING',  (0, 0), (-1, -1), 5),
-        # Vertical alignment — middle of cell height
-        ('VALIGN',     (0, 0), (-1, -1), 'MIDDLE'),
-        # Default horizontal alignment — columns 1-5 right, col 2 (Unit) centred
-        ('ALIGN',      (_I_QTY, 0),  (-1, -1),        'RIGHT'),
-        ('ALIGN',      (_I_UNIT, 0), (_I_UNIT, -1),   'CENTER'),
-    ]
-    # Merge base commands with the per-row commands accumulated above.
-    # TableStyle processes commands in order; later commands override earlier ones.
-    table_style = TableStyle(base_cmds + row_cmds)
+    for label, amount, is_bold in summary_lines:
+        ir = len(rows)
+        rows.append([
+            Paragraph(label,         S_BOLD  if is_bold else S_NORMAL),
+            Paragraph(_fmt(amount),  S_RIGHT_BOLD if is_bold else S_RIGHT),
+        ])
+        if is_bold:
+            cmds += [
+                ('LINEABOVE',     (0, ir), (-1, ir), 1.0, colors.black),
+                ('TOPPADDING',    (0, ir), (-1, ir), 6),
+                ('BOTTOMPADDING', (0, ir), (-1, ir), 6),
+            ]
+        elif ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-    # ── Create Table ──────────────────────────────────────────────────────────────
-    boq_table = Table(
-        all_rows,
-        colWidths=COL_WIDTHS,
-        repeatRows=1,       # re-draw row 0 (column headers) at the top of every new page
-        splitByRow=True,    # allow the table to split at row boundaries across pages
-        hAlign='LEFT',
-    )
-    boq_table.setStyle(table_style)
+    # Double rule under the grand total (last row)
+    gr = len(rows) - 1
+    cmds.append(('LINEBELOW', (0, gr), (-1, gr), 1.5, colors.black))
 
-    # ── Story (the flowables list) ────────────────────────────────────────────────
-    # "Story" is the ReportLab term for the ordered list of flowables.
-    # Think of it as the content of a vertical StackPanel in WPF.
-    story = [boq_table]
+    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+    tbl.setStyle(TableStyle(base + cmds))
 
-    # Disclaimer paragraph below the table
-    story.append(Spacer(1, 5 * mm))
+    story = _section_heading("GRAND SUMMARY")
+    story.append(tbl)
+    story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(
         'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon’s '
         'Architects’ & Builders’ Price Book 2025. '
@@ -401,14 +689,95 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         'Professional quantity surveyor review recommended before tender or client issue.',
         S_DISCLAIMER,
     ))
+    return story
 
-    # ── Build the PDF ─────────────────────────────────────────────────────────────
-    # doc.build() places flowables onto pages, fires _draw_chrome on each page,
-    # and writes the completed PDF into buf.
-    doc.build(
-        story,
-        onFirstPage=_draw_chrome,    # callback fired after the first page is rendered
-        onLaterPages=_draw_chrome,   # callback fired after each subsequent page
+
+# ── Main function ──────────────────────────────────────────────────────────────
+
+def generate_boq_pdf(boq_json: dict) -> bytes:
+    """Generate a professional NRM2-compliant Bill of Quantities PDF and return raw bytes.
+
+    Args:
+        boq_json: priced BoQ dict returned by /process.  Accepts all common shapes.
+
+    Returns:
+        Raw PDF bytes.  Raises ValueError if boq_json contains no trade data.
+    """
+    trade_groups = _normalise_boq(boq_json)
+    if not trade_groups:
+        raise ValueError("boq_json contains no recognisable trade groups.")
+
+    buf = io.BytesIO()
+    d   = date.today()
+    today_str = f"{d.day} {d.strftime('%B %Y')}"
+
+    def _draw_chrome(canvas, doc):
+        canvas.saveState()
+
+        y_title = PAGE_H - TOP_M + 13 * mm
+        canvas.setFont('Helvetica-Bold', 16)
+        canvas.setFillColor(colors.black)
+        canvas.drawString(LEFT_M, y_title, 'Vulcan Quanta')
+
+        canvas.setFont('Helvetica', 8.5)
+        canvas.drawRightString(PAGE_W - RIGHT_M, y_title, today_str)
+
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.Color(0.3, 0.3, 0.3))
+        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI Draft')
+
+        rule_y = PAGE_H - TOP_M + 4 * mm
+        canvas.setStrokeColor(colors.black)
+        canvas.setLineWidth(0.8)
+        canvas.line(LEFT_M, rule_y, PAGE_W - RIGHT_M, rule_y)
+
+        canvas.setFont('Helvetica', 7.5)
+        canvas.setFillColor(colors.black)
+        canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
+
+        footer_rule_y = BOT_M - 4 * mm
+        canvas.setLineWidth(0.5)
+        canvas.setStrokeColor(colors.Color(0.5, 0.5, 0.5))
+        canvas.line(LEFT_M, footer_rule_y, PAGE_W - RIGHT_M, footer_rule_y)
+
+        canvas.setFont('Helvetica-Oblique', 7.5)
+        canvas.setFillColor(colors.Color(0.35, 0.35, 0.35))
+        canvas.drawCentredString(
+            PAGE_W / 2,
+            footer_rule_y - 9,
+            'AI-generated draft. Professional review required before issue.',
+        )
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(
+        buf,
+        pagesize=A4,
+        leftMargin=LEFT_M,
+        rightMargin=RIGHT_M,
+        topMargin=TOP_M,
+        bottomMargin=BOT_M,
+        title='Bill of Quantities',
+        author='Vulcan Quanta',
     )
 
-    return buf.getvalue()            # return raw bytes — like buf.ToArray() in C#
+    prelim_flowables,   prelim_total   = _build_preliminaries()
+    measured_flowables, measured_total = _build_measured_works(trade_groups)
+    prov_flowables,     prov_total     = _build_provisional_sums()
+
+    story = []
+    story += _build_form_of_tender(boq_json, today_str)
+    story.append(PageBreak())
+    story += _build_preambles()
+    story.append(PageBreak())
+    story += prelim_flowables
+    story.append(PageBreak())
+    story += measured_flowables
+    story.append(PageBreak())
+    story += prov_flowables
+    story.append(PageBreak())
+    story += _build_dayworks()
+    story.append(PageBreak())
+    story += _build_grand_summary(prelim_total, measured_total, prov_total)
+
+    doc.build(story, onFirstPage=_draw_chrome, onLaterPages=_draw_chrome)
+    return buf.getvalue()
