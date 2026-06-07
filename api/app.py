@@ -80,6 +80,14 @@ def _auth_error_msg(exc: Exception) -> str:
     except Exception:
         return raw or "Authentication failed."
 
+
+def _get_bearer_token() -> str:
+    """Return the JWT from 'Authorization: Bearer <token>', or '' if absent."""
+    auth = request.headers.get('Authorization', '')
+    if auth.startswith('Bearer '):
+        return auth[7:].strip()
+    return ''
+
 SYSTEM_PROMPT = (                  # module-level constant so the prompt is defined once and never duplicated (like static readonly string in C#)
     "You are a UK quantity surveyor. Given the following text extracted from a "
     "construction drawing or specification, produce a Bill of Quantities broken "
@@ -280,8 +288,8 @@ def me():
 
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
-    if not session.get('access_token'):    # guard: reject unauthenticated requests before doing any work
-        return jsonify({"error": "Authentication required. Please sign in.", "login_url": "/login"}), 401
+    if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
+        return jsonify({"error": "Authentication required. Please sign in."}), 401
 
     if "file" not in request.files:        # request.files is a dict of uploaded files keyed by form field name (like IFormFileCollection in C#)
         return jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400  # 400 Bad Request
@@ -344,6 +352,9 @@ def process_pdf():                         # Flask calls this function when a ma
 @app.route("/export",   methods=["POST"])   # original route kept for backward compatibility
 @app.route("/download", methods=["POST"])   # new route used by the frontend Download PDF button
 def export_pdf():                           # Flask calls this for both URLs; stacking decorators is supported and idiomatic
+    if not _get_bearer_token():            # guard: same auth requirement as /process
+        return jsonify({"error": "Authentication required. Please sign in."}), 401
+
     # request.get_json() parses the JSON body — like JsonSerializer.Deserialize in C#
     # force=True accepts the body even if Content-Type is not application/json
     # silent=True returns None instead of raising an exception on parse failure

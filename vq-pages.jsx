@@ -513,13 +513,21 @@ function ResultsPage({ go, toast, boqData }) {
     toast('Generating PDF…', 'info');
 
     try {
+      const { data: { session: vqSession } } = window.VQAuth
+        ? await window.VQAuth.getSession()
+        : { data: { session: null } };
+      const token = vqSession?.access_token || '';
+
       // POST the BoQ JSON to the server; Flask calls generate_boq_pdf() and streams the result back.
       const res = await fetch('https://vulcan-production-d039.up.railway.app/download', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify(buildPayload()),
-  credentials: 'include',
-});
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(buildPayload()),
+        credentials: 'include',
+      });
 
       if (!res.ok) {
         // Try to read a JSON error body from Flask; fall back to the HTTP status text
@@ -727,13 +735,19 @@ function UploadPage({ go, toast, onBoqReady }) {
       const formData = new FormData();
       formData.append('file', file);   // 'file' must match the field name in Flask's request.files["file"]
 
+      const { data: { session: vqSession } } = window.VQAuth
+        ? await window.VQAuth.getSession()
+        : { data: { session: null } };
+      const token = vqSession?.access_token || '';
+
       // fetch() sends the HTTP request and returns a Promise — like HttpClient.PostAsync in C#.
-      // No Content-Type header is set manually; the browser sets multipart/form-data + boundary automatically.
+      // No Content-Type header needed; the browser sets multipart/form-data + boundary automatically.
       const res = await fetch('https://vulcan-production-d039.up.railway.app/process', {
-  method: 'POST',
-  body: formData,
-  credentials: 'include',
-});
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: formData,
+        credentials: 'include',
+      });
       clearInterval(iv);   // stop the fake progress animation now that the server has responded
 
       if (!res.ok) {
