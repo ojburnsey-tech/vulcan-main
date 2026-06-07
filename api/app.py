@@ -98,6 +98,12 @@ SYSTEM_PROMPT = (
     '"quantity": 45, "unit": "m³"}]}]}\n\n'
     "Rules:\n"
     "- Every item MUST have a rate_key from the list above.\n"
+    "- CRITICAL GROUNDWORKS RULE: Excavation and disposal items must always be measured in m³ "
+    "(volume), never m² (area). Calculate excavation volume as: plan area (m²) × excavation "
+    "depth (m). For a standard domestic extension floor slab, assume 0.15m depth unless the "
+    "specification states otherwise. Apply a 30% bulking factor to net excavation volume for "
+    "disposal quantities. Example: 45m² plan area → 45 × 0.15 = 6.75m³ excavation → "
+    "6.75 × 1.30 = 8.78m³ disposal off site.\n"
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
     "- unit must match the unit for that rate_key as listed.\n"

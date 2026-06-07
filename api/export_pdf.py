@@ -69,10 +69,12 @@ PRELIM_ITEMS = [
 # (description, allowance_amount)
 PROVISIONAL_ITEMS = [
     ("Connection to existing sewer — Provisional Sum "
-     "(subject to Thames Water / NI Water survey)",                    1500.00),
+     "(subject to NI Water (Article 163 application fee: £229.20 incl. VAT) survey)", 1500.00),
     ("External landscaping and reinstatement — Provisional Sum",  2000.00),
     ("Client’s fixture and fitting allowance — Prime Cost Sum", 3500.00),
-    ("Statutory authority fees and building control — Provisional Sum", 1200.00),
+    ("Planning application fee — Belfast City Council", 327.00),
+    ("Building Control Full Plans fee — Belfast City Council (40–60m² bracket)", 291.60),
+    ("NI Water sewer connection application and inspection fee (Article 163)", 229.20),
 ]
 
 # (resource, grade_description, unit_string)
