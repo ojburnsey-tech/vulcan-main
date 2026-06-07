@@ -8,6 +8,7 @@ import difflib                     # difflib is a stdlib module for comparing se
 import pdfplumber                  # third-party library that opens PDFs and extracts text page by page
 import anthropic                   # official Anthropic Python SDK — wraps the Claude REST API
 from flask import Flask, request, jsonify, send_file, session, send_from_directory, make_response  # session = server-signed cookie dict, like HttpContext.Session in ASP.NET
+from jsonschema import Draft202012Validator, ValidationError
 from supabase import create_client # supabase-py v2 — wraps the Supabase REST API for auth
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
@@ -93,56 +94,25 @@ def _extract_claude_text(response) -> str:
     ).strip()
 
 
-def _log_claude_response(attempt: str, response, raw_text: str) -> None:
+def _log_claude_response(attempt: str, response) -> None:
     usage = getattr(response, "usage", None)
     app.logger.info(
         "Claude response diagnostics: attempt=%s stop_reason=%s "
-        "usage.input_tokens=%s usage.output_tokens=%s response_length=%s "
-        "first_500=%r last_500=%r",
+        "usage.input_tokens=%s usage.output_tokens=%s",
         attempt,
         getattr(response, "stop_reason", None),
         getattr(usage, "input_tokens", None),
         getattr(usage, "output_tokens", None),
-        len(raw_text),
-        raw_text[:500],
-        raw_text[-500:],
     )
 
-
-def _log_json_decode_error(attempt: str, exc: json.JSONDecodeError,
-                           raw_text: str, response) -> None:
-    pos = exc.pos
-    before = raw_text[max(0, pos - 300):pos]
-    after = raw_text[pos:pos + 300]
-    app.logger.warning(
-        "Claude JSON parse failed: attempt=%s error=%s lineno=%s colno=%s "
-        "pos=%s total_response_length=%s stop_reason=%s "
-        "context_before_300=%r context_after_300=%r",
-        attempt,
-        str(exc),
-        exc.lineno,
-        exc.colno,
-        pos,
-        len(raw_text),
-        getattr(response, "stop_reason", None),
-        before,
-        after,
-    )
 
 SYSTEM_PROMPT = (
     "You are a UK quantity surveyor. Analyse the construction specification and "
-    "produce a Bill of Quantities as valid JSON only — no preamble, no markdown. "
-    "Start with { and end with }.\n\n"
-    "CRITICAL: For each line item, you MUST set the 'rate_key' field to the single "
-    "most appropriate key from this exact list — do not invent keys, do not modify keys, "
-    "copy them exactly as shown:\n\n"
+    "produce a professional Bill of Quantities for a UK residential construction project. "
+    "For each line item, set the rate_key field to the single most appropriate key from "
+    "this exact list — do not invent keys, do not modify keys, copy them exactly as shown:\n\n"
     + "\n".join(f"- {k}" for k in RATES_DB.keys())
-    + "\n\nRequired JSON output format:\n"
-    '{"bill_of_quantities": [{"trade": "Groundworks", "items": ['
-    '{"description": "human readable description", '
-    '"rate_key": "excavation_reduced_level_machine", '
-    '"quantity": 45, "unit": "m³"}]}]}\n\n'
-    "Rules:\n"
+    + "\n\nRules:\n"
     "- Every item MUST have a rate_key from the list above.\n"
     "- CRITICAL GROUNDWORKS RULE: Excavation and disposal items must always be measured in m³ "
     "(volume), never m² (area). Calculate excavation volume as: plan area (m²) × excavation "
@@ -153,9 +123,54 @@ SYSTEM_PROMPT = (
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
     "- unit must match the unit for that rate_key as listed.\n"
-    "- Do not add any fields other than description, rate_key, quantity, and unit.\n"
-    "- Respond with valid JSON only. No markdown fences, no preamble, no explanation."
 )
+
+BOQ_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "bill_of_quantities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "trade": {"type": "string"},
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "description": {"type": "string"},
+                                "rate_key": {
+                                    "type": "string",
+                                    "enum": list(RATES_DB.keys()),
+                                },
+                                "quantity": {"type": "number"},
+                                "unit": {"type": "string"},
+                            },
+                            "required": ["description", "rate_key", "quantity", "unit"],
+                            "additionalProperties": False,
+                        },
+                    },
+                },
+                "required": ["trade", "items"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["bill_of_quantities"],
+    "additionalProperties": False,
+}
+
+_BOQ_OUTPUT_VALIDATOR = Draft202012Validator(BOQ_OUTPUT_SCHEMA)
+
+
+def _validate_boq_output(boq_data):
+    """Validate Claude's structured output before pricing enrichment."""
+    try:
+        _BOQ_OUTPUT_VALIDATOR.validate(boq_data)
+    except ValidationError as exc:
+        path = ".".join(str(p) for p in exc.absolute_path) or "<root>"
+        raise ValueError(f"{path}: {exc.message}") from exc
 
 # ── Rate-matching helpers ─────────────────────────────────────────────────────────────
 # These run once at module load time — like a static constructor in C#.
@@ -398,7 +413,7 @@ def process_pdf():                         # Flask calls this function when a ma
 
     try:
         app.logger.info(
-            "Claude call diagnostics: attempt=initial model=%s max_tokens=%s "
+            "Claude structured output call: model=%s max_tokens=%s "
             "pdf_text_length=%s approximate_word_count=%s",
             "claude-sonnet-4-6",
             4096,
@@ -415,6 +430,12 @@ def process_pdf():                         # Flask calls this function when a ma
                     "content": full_text,          # the extracted PDF text is the entire user message for Claude to analyse
                 }
             ],
+            output_config={
+                "format": {
+                    "type": "json_schema",
+                    "schema": BOQ_OUTPUT_SCHEMA,
+                }
+            },
         )
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
         return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
@@ -422,53 +443,25 @@ def process_pdf():                         # Flask calls this function when a ma
         return jsonify({"error": f"Could not reach Claude API: {exc}"}), 503  # 503 Service Unavailable
 
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
-    _log_claude_response("initial", response, raw_text)
+    _log_claude_response("structured", response)
+
+    stop_reason = getattr(response, "stop_reason", None)
+    if stop_reason == "max_tokens":
+        return jsonify({"error": "Claude structured output was truncated before completion."}), 502
+    if stop_reason == "refusal":
+        return jsonify({"error": "Claude refused to produce the requested structured output."}), 502
 
     try:
-        boq_data = json.loads(raw_text)            # parse Claude's string output as JSON — like JsonSerializer.Deserialize<object>(rawText) in C#
+        boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
     except json.JSONDecodeError as exc:
-        _log_json_decode_error("initial", exc, raw_text, response)
-        # First attempt returned non-JSON — retry once with a stronger instruction that includes the bad response for context
-        try:
-            app.logger.info(
-                "Claude call diagnostics: attempt=retry model=%s max_tokens=%s "
-                "pdf_text_length=%s approximate_word_count=%s",
-                "claude-sonnet-4-6",
-                4096,
-                len(full_text),
-                len(full_text.split()),
-            )
-            retry_response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                messages=[
-                    {"role": "user", "content": full_text},
-                    {"role": "assistant", "content": raw_text},
-                    {
-                        "role": "user",
-                        "content": (
-                            "Your previous response was not valid JSON. "
-                            "You MUST respond with valid JSON ONLY. "
-                            "Start your response with { and end with }. "
-                            "No markdown fences, no preamble, no explanation. "
-                            "Return ONLY the JSON object."
-                        ),
-                    },
-                ],
-            )
-        except anthropic.APIStatusError as exc:
-            return jsonify({"error": f"Claude API error {exc.status_code} on retry: {exc.message}"}), 502
-        except anthropic.APIConnectionError as exc:
-            return jsonify({"error": f"Could not reach Claude API on retry: {exc}"}), 503
+        app.logger.exception("Claude structured output was not valid JSON: %s", exc)
+        return jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502
 
-        raw_text = _extract_claude_text(retry_response)
-        _log_claude_response("retry", retry_response, raw_text)
-        try:
-            boq_data = json.loads(raw_text)
-        except json.JSONDecodeError as exc:        # retry also failed — return error with raw output for debugging
-            _log_json_decode_error("retry", exc, raw_text, retry_response)
-            return jsonify({"error": f"Claude returned non-JSON output: {exc}", "raw": raw_text}), 502
+    try:
+        _validate_boq_output(boq_data)
+    except ValueError as exc:
+        app.logger.warning("Claude structured output failed schema validation: %s", exc)
+        return jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502
 
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
