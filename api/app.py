@@ -83,6 +83,52 @@ def _get_bearer_token() -> str:
         return auth[7:].strip()
     return ''
 
+
+def _extract_claude_text(response) -> str:
+    """Join all text blocks returned by Claude into one response string."""
+    return "".join(
+        block.text
+        for block in response.content
+        if getattr(block, "type", None) == "text"
+    ).strip()
+
+
+def _log_claude_response(attempt: str, response, raw_text: str) -> None:
+    usage = getattr(response, "usage", None)
+    app.logger.info(
+        "Claude response diagnostics: attempt=%s stop_reason=%s "
+        "usage.input_tokens=%s usage.output_tokens=%s response_length=%s "
+        "first_500=%r last_500=%r",
+        attempt,
+        getattr(response, "stop_reason", None),
+        getattr(usage, "input_tokens", None),
+        getattr(usage, "output_tokens", None),
+        len(raw_text),
+        raw_text[:500],
+        raw_text[-500:],
+    )
+
+
+def _log_json_decode_error(attempt: str, exc: json.JSONDecodeError,
+                           raw_text: str, response) -> None:
+    pos = exc.pos
+    before = raw_text[max(0, pos - 300):pos]
+    after = raw_text[pos:pos + 300]
+    app.logger.warning(
+        "Claude JSON parse failed: attempt=%s error=%s lineno=%s colno=%s "
+        "pos=%s total_response_length=%s stop_reason=%s "
+        "context_before_300=%r context_after_300=%r",
+        attempt,
+        str(exc),
+        exc.lineno,
+        exc.colno,
+        pos,
+        len(raw_text),
+        getattr(response, "stop_reason", None),
+        before,
+        after,
+    )
+
 SYSTEM_PROMPT = (
     "You are a UK quantity surveyor. Analyse the construction specification and "
     "produce a Bill of Quantities as valid JSON only — no preamble, no markdown. "
@@ -351,6 +397,14 @@ def process_pdf():                         # Flask calls this function when a ma
     client = anthropic.Anthropic(api_key=api_key)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
 
     try:
+        app.logger.info(
+            "Claude call diagnostics: attempt=initial model=%s max_tokens=%s "
+            "pdf_text_length=%s approximate_word_count=%s",
+            "claude-sonnet-4-6",
+            4096,
+            len(full_text),
+            len(full_text.split()),
+        )
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
             max_tokens=4096,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
@@ -367,13 +421,23 @@ def process_pdf():                         # Flask calls this function when a ma
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
         return jsonify({"error": f"Could not reach Claude API: {exc}"}), 503  # 503 Service Unavailable
 
-    raw_text = response.content[0].text.strip()   # .text is the generated string; strip whitespace/newlines Claude may have emitted before the JSON
+    raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
+    _log_claude_response("initial", response, raw_text)
 
     try:
         boq_data = json.loads(raw_text)            # parse Claude's string output as JSON — like JsonSerializer.Deserialize<object>(rawText) in C#
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as exc:
+        _log_json_decode_error("initial", exc, raw_text, response)
         # First attempt returned non-JSON — retry once with a stronger instruction that includes the bad response for context
         try:
+            app.logger.info(
+                "Claude call diagnostics: attempt=retry model=%s max_tokens=%s "
+                "pdf_text_length=%s approximate_word_count=%s",
+                "claude-sonnet-4-6",
+                4096,
+                len(full_text),
+                len(full_text.split()),
+            )
             retry_response = client.messages.create(
                 model="claude-sonnet-4-6",
                 max_tokens=4096,
@@ -398,10 +462,12 @@ def process_pdf():                         # Flask calls this function when a ma
         except anthropic.APIConnectionError as exc:
             return jsonify({"error": f"Could not reach Claude API on retry: {exc}"}), 503
 
-        raw_text = retry_response.content[0].text.strip()
+        raw_text = _extract_claude_text(retry_response)
+        _log_claude_response("retry", retry_response, raw_text)
         try:
             boq_data = json.loads(raw_text)
         except json.JSONDecodeError as exc:        # retry also failed — return error with raw output for debugging
+            _log_json_decode_error("retry", exc, raw_text, retry_response)
             return jsonify({"error": f"Claude returned non-JSON output: {exc}", "raw": raw_text}), 502
 
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
