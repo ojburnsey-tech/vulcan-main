@@ -8,7 +8,6 @@ import difflib                     # difflib is a stdlib module for comparing se
 import pdfplumber                  # third-party library that opens PDFs and extracts text page by page
 import anthropic                   # official Anthropic Python SDK — wraps the Claude REST API
 from flask import Flask, request, jsonify, send_file, session, send_from_directory, make_response  # session = server-signed cookie dict, like HttpContext.Session in ASP.NET
-from flask_cors import CORS        # CORS middleware so the React SPA (different port in dev) can call this API
 from supabase import create_client # supabase-py v2 — wraps the Supabase REST API for auth
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
@@ -23,44 +22,39 @@ app.config['SESSION_COOKIE_SECURE']   = os.environ.get('FLASK_ENV') != 'developm
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
-# Single source of truth for allowed origins — referenced by both Flask-CORS
-# and the manual preflight handler below.
+# Browsers always send the bare host (scheme + host only, never a path) as Origin.
 _ALLOWED_ORIGINS = [
     'https://ojburnsey-tech.github.io',
-    'https://ojburnsey-tech.github.io/vulcan-main',
-    'https://ojburnsey-tech.github.io/vulcan-main/',
     'http://localhost:8080',
     'http://localhost:5001',
 ]
 
-# supports_credentials=True allows the browser to send cookies on cross-origin
-# requests.  Flask-CORS echoes the requesting Origin instead of '*' when set.
-CORS(app,
-     origins=_ALLOWED_ORIGINS,
-     supports_credentials=True,
-     allow_headers=['Content-Type', 'Authorization'],
-     methods=['GET', 'POST', 'OPTIONS'])
 
-
-# ── Explicit OPTIONS / preflight handler ──────────────────────────────────────
-# Flask-CORS adds CORS headers via after_request, which means the router runs
-# first.  Routes that only declare POST return 405 for OPTIONS before
-# after_request ever fires.  Intercepting in before_request short-circuits
-# routing entirely and returns the preflight response directly.
+# ── OPTIONS short-circuit ─────────────────────────────────────────────────────
+# Routes declared with methods=["POST"] return 405 for OPTIONS before any
+# after_request hook fires.  This before_request intercepts OPTIONS first and
+# returns an empty 204 — the after_request hook below then adds the CORS headers
+# to that response, same as it does for every other response.
 @app.before_request
-def handle_preflight():
-    if request.method != 'OPTIONS':
-        return                              # nothing to do for non-preflight
+def handle_options():
+    if request.method == 'OPTIONS':
+        return make_response('', 204)
+
+
+# ── CORS headers on every response ───────────────────────────────────────────
+# Single place that sets Access-Control-* headers.  Runs after every request
+# including the 204 returned above, so both preflight and real POST responses
+# always carry the right headers.
+@app.after_request
+def add_cors_headers(response):
     origin = request.headers.get('Origin', '')
-    if origin not in _ALLOWED_ORIGINS:
-        return                              # unknown origin — let Flask return 403
-    res = make_response('', 204)
-    res.headers['Access-Control-Allow-Origin']      = origin
-    res.headers['Access-Control-Allow-Credentials'] = 'true'
-    res.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
-    res.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
-    res.headers['Access-Control-Max-Age']           = '86400'  # cache preflight 24 h
-    return res
+    if origin in _ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin']      = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
+        response.headers['Access-Control-Max-Age']           = '86400'
+    return response
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
 # The anon key is sufficient for client-side auth operations (sign up, sign in).
