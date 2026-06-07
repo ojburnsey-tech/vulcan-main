@@ -7,7 +7,7 @@ import json                        # json parses/serialises JSON — like System
 import difflib                     # difflib is a stdlib module for comparing sequences; used for fuzzy string matching
 import pdfplumber                  # third-party library that opens PDFs and extracts text page by page
 import anthropic                   # official Anthropic Python SDK — wraps the Claude REST API
-from flask import Flask, request, jsonify, send_file, session, send_from_directory  # session = server-signed cookie dict, like HttpContext.Session in ASP.NET
+from flask import Flask, request, jsonify, send_file, session, send_from_directory, make_response  # session = server-signed cookie dict, like HttpContext.Session in ASP.NET
 from flask_cors import CORS        # CORS middleware so the React SPA (different port in dev) can call this API
 from supabase import create_client # supabase-py v2 — wraps the Supabase REST API for auth
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
@@ -23,17 +23,43 @@ app.config['SESSION_COOKIE_SECURE']   = os.environ.get('FLASK_ENV') != 'developm
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
+# Single source of truth for allowed origins — referenced by both Flask-CORS
+# and the manual preflight handler below.
+_ALLOWED_ORIGINS = [
+    'https://ojburnsey-tech.github.io',
+    'https://ojburnsey-tech.github.io/vulcan-main',
+    'http://localhost:8080',
+    'http://localhost:5001',
+]
+
 # supports_credentials=True allows the browser to send cookies on cross-origin
-# requests (needed when the React SPA and this API run on different ports).
-# Flask-CORS responds with the requesting Origin instead of '*' when this is set.
+# requests.  Flask-CORS echoes the requesting Origin instead of '*' when set.
 CORS(app,
-     origins=[
-         'https://ojburnsey-tech.github.io',
-         'https://ojburnsey-tech.github.io/vulcan-main',
-         'http://localhost:8080',   # for local development
-         'http://localhost:5001',   # for local Flask development
-     ],
-     supports_credentials=True)
+     origins=_ALLOWED_ORIGINS,
+     supports_credentials=True,
+     allow_headers=['Content-Type', 'Authorization'],
+     methods=['GET', 'POST', 'OPTIONS'])
+
+
+# ── Explicit OPTIONS / preflight handler ──────────────────────────────────────
+# Flask-CORS adds CORS headers via after_request, which means the router runs
+# first.  Routes that only declare POST return 405 for OPTIONS before
+# after_request ever fires.  Intercepting in before_request short-circuits
+# routing entirely and returns the preflight response directly.
+@app.before_request
+def handle_preflight():
+    if request.method != 'OPTIONS':
+        return                              # nothing to do for non-preflight
+    origin = request.headers.get('Origin', '')
+    if origin not in _ALLOWED_ORIGINS:
+        return                              # unknown origin — let Flask return 403
+    res = make_response('', 204)
+    res.headers['Access-Control-Allow-Origin']      = origin
+    res.headers['Access-Control-Allow-Credentials'] = 'true'
+    res.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
+    res.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
+    res.headers['Access-Control-Max-Age']           = '86400'  # cache preflight 24 h
+    return res
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
 # The anon key is sufficient for client-side auth operations (sign up, sign in).
