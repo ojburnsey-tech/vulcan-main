@@ -28,6 +28,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 _ALLOWED_ORIGINS = [
     'https://ojburnsey-tech.github.io',
     'https://ojburnsey-tech.github.io/vulcan-main',
+    'https://ojburnsey-tech.github.io/vulcan-main/',
     'http://localhost:8080',
     'http://localhost:5001',
 ]
