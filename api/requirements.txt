@@ -5,3 +5,4 @@ anthropic==0.55.0
 reportlab==4.2.5
 supabase>=2.0.0,<3.0.0
 gunicorn==22.0.0
+gevent>=24.2.1
