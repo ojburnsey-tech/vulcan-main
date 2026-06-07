@@ -424,29 +424,48 @@ function LandingPage({ go, tweaks = {}, toast }) {
 // Claude may return several JSON shapes. This converts all of them to a flat array of
 // items with the same fields used by ResultsPage, regardless of what Claude produced.
 function normaliseBoq(raw) {
-  // Determine where the array of trade groups lives in the response.
-  // Common shapes: [{trade, items}], {groundworks:[...], brickwork:[...]},
-  // {bill_of_quantities:[...]}, {trades:[...]}
+  // Guard: null, primitives, and arrays-of-primitives are not valid BoQ objects
+  if (!raw || typeof raw !== 'object') return [];
+
+  // Resolve the array of trade groups from whichever shape Claude returned:
+  //   [{trade, items}]  |  {bill_of_quantities:[...]}  |  {trades:[...]}
+  //   {groundworks:[...], brickwork:[...]}  (trade name → items array)
   let groups;
-  if (Array.isArray(raw))           groups = raw;
-  else if (raw.bill_of_quantities)  groups = raw.bill_of_quantities;
-  else if (raw.trades)              groups = raw.trades;
-  else                              groups = Object.entries(raw).map(([trade, items]) => ({ trade, items }));
+  if (Array.isArray(raw)) {
+    groups = raw;
+  } else if (Array.isArray(raw.bill_of_quantities)) {
+    groups = raw.bill_of_quantities;
+  } else if (Array.isArray(raw.trades)) {
+    groups = raw.trades;
+  } else {
+    // Keys are trade names; only include entries whose value is an array
+    groups = Object.entries(raw)
+      .filter(([, v]) => Array.isArray(v))
+      .map(([trade, items]) => ({ trade, items }));
+  }
+
+  // Final safety net: if groups is still not an array, return empty
+  if (!Array.isArray(groups)) return [];
 
   let id = 0;
   // flatMap is like SelectMany in C# LINQ — it flattens one level of nesting
   return groups.flatMap(g => {
+    if (!g || typeof g !== 'object' || Array.isArray(g)) return [];
     const trade = g.trade || g.name || 'General';
-    const items = g.items || g.line_items || [];
-    return items.map(it => ({
-      id:   ++id,
-      trade,
-      desc: it.description || it.desc || '',
-      qty:  parseFloat(it.quantity ?? it.qty ?? 0),
-      unit: it.unit || '',
-      rate: parseFloat(it.rate ?? 0),
-      flag: false,
-    }));
+    const items = Array.isArray(g.items) ? g.items
+                : Array.isArray(g.line_items) ? g.line_items
+                : [];
+    return items
+      .filter(it => it && typeof it === 'object')
+      .map(it => ({
+        id:   ++id,
+        trade,
+        desc: it.description || it.desc || '',
+        qty:  parseFloat(it.quantity ?? it.qty ?? 0),
+        unit: it.unit || '',
+        rate: parseFloat(it.rate ?? 0),
+        flag: false,
+      }));
   });
 }
 
