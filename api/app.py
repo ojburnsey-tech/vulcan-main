@@ -89,6 +89,8 @@ def _get_bearer_token() -> str:
     return ''
 
 SYSTEM_PROMPT = (                  # module-level constant so the prompt is defined once and never duplicated (like static readonly string in C#)
+    "IMPORTANT: You must respond with valid JSON only. No preamble, no markdown, no explanation. "
+    "Start your response with { and end with }. "
     "You are a UK quantity surveyor. Given the following text extracted from a "
     "construction drawing or specification, produce a Bill of Quantities broken "
     "down by trade (groundworks, brickwork, blockwork, carpentry, roofing, "
@@ -337,13 +339,42 @@ def process_pdf():                         # Flask calls this function when a ma
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
         return jsonify({"error": f"Could not reach Claude API: {exc}"}), 503  # 503 Service Unavailable
 
-    raw_text = response.content[0].text            # response.content is a list of ContentBlock objects; [0] is the first (usually only) block; .text is the generated string
-    raw_text = raw_text.strip()                    # strip whitespace/newlines Claude may have emitted before the JSON
+    raw_text = response.content[0].text.strip()   # .text is the generated string; strip whitespace/newlines Claude may have emitted before the JSON
 
     try:
         boq_data = json.loads(raw_text)            # parse Claude's string output as JSON — like JsonSerializer.Deserialize<object>(rawText) in C#
-    except json.JSONDecodeError as exc:            # handle the case where Claude ignored the instruction and added markdown fences or a preamble
-        return jsonify({"error": f"Claude returned non-JSON output: {exc}", "raw": raw_text}), 502  # include raw output so the developer can debug
+    except json.JSONDecodeError:
+        # First attempt returned non-JSON — retry once with a stronger instruction that includes the bad response for context
+        try:
+            retry_response = client.messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": full_text},
+                    {"role": "assistant", "content": raw_text},
+                    {
+                        "role": "user",
+                        "content": (
+                            "Your previous response was not valid JSON. "
+                            "You MUST respond with valid JSON ONLY. "
+                            "Start your response with { and end with }. "
+                            "No markdown fences, no preamble, no explanation. "
+                            "Return ONLY the JSON object."
+                        ),
+                    },
+                ],
+            )
+        except anthropic.APIStatusError as exc:
+            return jsonify({"error": f"Claude API error {exc.status_code} on retry: {exc.message}"}), 502
+        except anthropic.APIConnectionError as exc:
+            return jsonify({"error": f"Could not reach Claude API on retry: {exc}"}), 503
+
+        raw_text = retry_response.content[0].text.strip()
+        try:
+            boq_data = json.loads(raw_text)
+        except json.JSONDecodeError as exc:        # retry also failed — return error with raw output for debugging
+            return jsonify({"error": f"Claude returned non-JSON output: {exc}", "raw": raw_text}), 502
 
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
