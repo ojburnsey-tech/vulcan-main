@@ -1,331 +1,951 @@
 # api/rates.py
-# Static rates database for UK residential construction, Q1 2025 – Q2 2026.
-# Sources: BCIS Price Book 2025, Spon's Architects' & Builders' Price Book 2025,
-# Laxton's Building Price Book 2025, regional SME builder quotations.
-#
+# UK Residential Construction Rates Database 2025-2026
+# Sources: Spon's Architects' & Builders' Price Book 2025 (AECOM, Sep 2024) [training-data estimates],
+#          Checkatrade cost guides 2024-2026, Rated People Jun 2025, MyBuilder Dec 2025.
+# All rates are UK national averages, exclusive of VAT.
+# Where a range was given the midpoint is used.
+# Where only a combined all-in rate is available (§) the split is 50/50.
 # material_rate : cost of materials per unit, £
-# labour_rate   : all-in labour cost per unit, £ (gang rate incl. NI, tools, plant)
-# unit          : m (linear), m² (area), m³ (volume), nr (number / item)
-#
-# Key naming convention: <trade>_<brief_spec>  e.g. 'blockwork_100mm'
-# Rates are UK national averages; London / SE uplift typically +15–25 %.
+# labour_rate   : all-in labour cost per unit, £
+# unit          : m (linear), m² (area), m³ (volume), nr (number/item)
 
 RATES_DB = {
 
-    # ── GROUNDWORKS (6 items) ────────────────────────────────────────────────────────
+    # ── TRADE 1: GROUNDWORKS ────────────────────────────────────────────────
 
-    "excavation_reduced_level": {
-        # Machine excavation to reduce site to formation level, spoil aside / away
-        "material_rate": 0.00,   # no material — labour + plant only
-        "labour_rate":   8.50,   # 360° excavator gang, includes disposal to 500 m
+    "topsoil_strip_150mm": {
+        "material_rate": 2.88,
+        "labour_rate":   2.88,
         "unit": "m²",
     },
 
-    "excavation_trench": {
-        # Machine trench excavation for strip or pad foundations, depth ≤ 1.5 m
-        "material_rate": 0.00,
-        "labour_rate":   22.00,  # includes trimming by hand and earthwork support
+    "excavation_reduced_level_machine": {
+        "material_rate": 5.88,
+        "labour_rate":   5.88,
         "unit": "m³",
     },
 
-    "concrete_strip_foundation": {
-        # Mass concrete C25/30, placed in trench, including poker vibration
-        "material_rate": 95.00,  # ready-mix delivered + pump; C25/30 ≈ £90/m³ ex-pump
-        "labour_rate":   48.00,  # pour, level and cure; formwork not required for strip
+    "excavation_reduced_level_hand": {
+        "material_rate": 21.00,
+        "labour_rate":   21.00,
         "unit": "m³",
     },
 
-    "hardcore_filling_150mm": {
-        # Granular fill (Type 1 MOT), compacted in 75 mm layers to 150 mm total depth
-        "material_rate": 7.50,   # Type 1 delivered and spread
-        "labour_rate":   4.00,   # plate-compaction gang
+    "trench_excavation_machine_600mm": {
+        "material_rate": 7.50,
+        "labour_rate":   7.50,
+        "unit": "m³",
+    },
+
+    "trench_excavation_hand_600mm": {
+        "material_rate": 24.00,
+        "labour_rate":   24.00,
+        "unit": "m³",
+    },
+
+    "earthwork_support_trench_close_boarded": {
+        "material_rate": 5.00,
+        "labour_rate":   10.50,
         "unit": "m²",
     },
 
-    "concrete_slab_150mm": {
-        # Ground-bearing slab, C25/30, 150 mm thick, mesh reinforcement A193, DPM below
-        "material_rate": 22.00,  # concrete + A193 mesh + DPM
-        "labour_rate":   14.00,  # pour, screed, power-float finish
+    "disposal_excavated_material_offsite": {
+        "material_rate": 5.63,
+        "labour_rate":   5.63,
+        "unit": "m³",
+    },
+
+    "hardcore_mot_type1_150mm": {
+        "material_rate": 9.00,
+        "labour_rate":   5.75,
         "unit": "m²",
     },
 
-    "drainage_clay_100mm": {
-        # Vitrified clay pipe (Hepworth Supersleeve or equiv.), 100 mm dia, bed & haunch in concrete
-        "material_rate": 12.00,  # pipe, couplings, bed concrete
-        "labour_rate":   18.00,  # lay, joint, test; excludes excavation (see trench above)
+    "hardcore_mot_type1_225mm": {
+        "material_rate": 13.25,
+        "labour_rate":   7.00,
+        "unit": "m²",
+    },
+
+    "sand_blinding_50mm": {
+        "material_rate": 3.25,
+        "labour_rate":   2.00,
+        "unit": "m²",
+    },
+
+    "damp_proof_membrane_1200_gauge": {
+        "material_rate": 1.60,
+        "labour_rate":   1.10,
+        "unit": "m²",
+    },
+
+    # ── TRADE 2: CONCRETE WORKS ──────────────────────────────────────────────
+
+    "concrete_c25_strip_foundations": {
+        "material_rate": 102.50,
+        "labour_rate":   23.00,
+        "unit": "m³",
+    },
+
+    "concrete_c30_pad_foundations_reinforced": {
+        "material_rate": 115.00,
+        "labour_rate":   36.50,
+        "unit": "m³",
+    },
+
+    "concrete_c30_ground_floor_slab_150mm": {
+        "material_rate": 26.00,
+        "labour_rate":   12.00,
+        "unit": "m²",
+    },
+
+    "power_float_finish_concrete_slab": {
+        "material_rate": 3.63,
+        "labour_rate":   3.63,
+        "unit": "m²",
+    },
+
+    "formwork_slab_edge_250mm": {
+        "material_rate": 8.00,
+        "labour_rate":   12.00,
         "unit": "m",
     },
 
-    # ── BRICKWORK (5 items) ──────────────────────────────────────────────────────────
+    # ── TRADE 3: MASONRY AND BRICKWORK ───────────────────────────────────────
 
-    "brickwork_half_brick_skin": {
-        # 102 mm facing brick, stretcher bond, PC £350/1000, mortar, joints struck flush
-        "material_rate": 28.00,  # bricks + mortar (allow ~60 bricks/m² + wastage)
-        "labour_rate":   38.00,  # bricklayer + labourer gang rate
+    "brickwork_common_half_brick_102mm": {
+        "material_rate": 30.00,
+        "labour_rate":   19.00,
         "unit": "m²",
     },
 
-    "brickwork_one_brick_wall": {
-        # 215 mm solid brick wall, English or Flemish bond, PC £350/1000
-        "material_rate": 56.00,  # ~120 bricks/m² + mortar
-        "labour_rate":   76.00,  # slower laying rate for solid wall
+    "brickwork_common_one_brick_215mm": {
+        "material_rate": 55.00,
+        "labour_rate":   34.00,
         "unit": "m²",
     },
 
-    "engineering_brick_dpc": {
-        # Two courses Class B engineering brick DPC, bed in 1:3 sulphate-resistant mortar
-        "material_rate": 18.00,  # engineering bricks at ~£600/1000
-        "labour_rate":   22.00,  # careful bedding and jointing required
-        "unit": "m",
-    },
-
-    "facing_brick_feature_panel": {
-        # Feature panel / patterned brickwork, PC £550/1000 brick, decorative bond
-        "material_rate": 65.00,  # premium facing brick + coloured mortar
-        "labour_rate":   62.00,  # skilled bricklayer; complex setting out
+    "facing_brickwork_half_brick_gauged_mortar": {
+        "material_rate": 67.50,
+        "labour_rate":   27.00,
         "unit": "m²",
     },
 
-    "cavity_wall_tie": {
-        # Stainless steel wall tie (Ancon or equiv.) at 900×450 mm spacing
-        "material_rate": 0.45,   # per tie including resin anchor if required
-        "labour_rate":   0.55,   # drill, insert, check alignment
-        "unit": "nr",
-    },
-
-    # ── BLOCKWORK (4 items) ──────────────────────────────────────────────────────────
-
-    "blockwork_100mm": {
-        # 100 mm dense aggregate concrete block, 7.3 N/mm², mortar bed and perpends
-        "material_rate": 12.00,  # blocks ~£1.80 each, ~10 blocks/m²
-        "labour_rate":   22.00,  # bricklayer + labourer
+    "facing_brickwork_feature_panels": {
+        "material_rate": 75.00,
+        "labour_rate":   45.00,
         "unit": "m²",
     },
 
-    "blockwork_140mm": {
-        # 140 mm dense aggregate block — commonly used for single-leaf party walls
-        "material_rate": 16.00,
-        "labour_rate":   25.00,
+    "cavity_wall_300mm_full_fill_mineral_wool": {
+        "material_rate": 87.50,
+        "labour_rate":   67.50,
         "unit": "m²",
     },
 
-    "blockwork_215mm": {
-        # 215 mm dense aggregate block, used for structural walls, 7.3 N/mm²
-        "material_rate": 22.00,
-        "labour_rate":   30.00,
+    "cavity_wall_300mm_partial_fill_pir": {
+        "material_rate": 82.50,
+        "labour_rate":   62.50,
         "unit": "m²",
     },
 
-    "aerated_blockwork_100mm": {
-        # 100 mm Thermalite / Celcon aircrete block, 3.6 N/mm², thermal inner leaf
-        "material_rate": 10.00,  # aircrete blocks ~£1.40 each
-        "labour_rate":   20.00,  # lighter blocks, faster to lay
-        "unit": "m²",
-    },
-
-    # ── CARPENTRY / TIMBER FRAME (8 items) ──────────────────────────────────────────
-
-    "stud_partition_100mm": {
-        # 100 mm metal stud or 75 × 50 C16 timber stud, single-layer 12.5 mm plasterboard each side
-        "material_rate": 18.00,  # studs, track/sole plate, plasterboard, fixings
-        "labour_rate":   22.00,  # frame erect + board (1 side only; skim extra)
-        "unit": "m²",
-    },
-
-    "floor_joist_47x195mm": {
-        # 47 × 195 mm C24 regularised timber floor joist, joist hanger or bearing on wall plate
-        "material_rate": 8.50,   # C24 regularised timber at ~£3.20/m + hangers
-        "labour_rate":   6.00,   # fix, strut and noggin
-        "unit": "m",
-    },
-
-    "roof_rafter_47x150mm": {
-        # 47 × 150 mm C24 common rafter, birdsmouth cut, fixed to ridge and wall plate
+    "cavity_closer_jambs": {
         "material_rate": 6.50,
         "labour_rate":   5.50,
         "unit": "m",
     },
 
-    "timber_wall_plate_100x75": {
-        # 100 × 75 mm C24 wall plate bedded in mortar on top of masonry, coach-bolt fixed
-        "material_rate": 4.80,
-        "labour_rate":   4.50,
+    "cavity_closer_cills": {
+        "material_rate": 5.75,
+        "labour_rate":   5.50,
         "unit": "m",
     },
 
-    "staircase_softwood_straight": {
-        # Softwood straight staircase, 13 risers, balustrading, newel post, handrail
-        "material_rate": 900.00,  # purpose-made staircase unit
-        "labour_rate":   350.00,  # fix in place, cut strings to pitch
+    "cavity_closer_eaves": {
+        "material_rate": 6.50,
+        "labour_rate":   5.50,
+        "unit": "m",
+    },
+
+    "wall_tie_stainless_steel_type4_225mm": {
+        "material_rate": 0.45,
+        "labour_rate":   0.33,
         "unit": "nr",
     },
 
-    "door_lining_set_softwood": {
-        # Softwood door lining set to suit 838 mm leaf, rebated, including fixings
-        "material_rate": 45.00,
-        "labour_rate":   35.00,
+    "dpc_hyload_100mm": {
+        "material_rate": 1.40,
+        "labour_rate":   1.25,
+        "unit": "m",
+    },
+
+    "dpc_hyload_150mm": {
+        "material_rate": 2.00,
+        "labour_rate":   1.40,
+        "unit": "m",
+    },
+
+    "lintel_boot_steel_900mm_cavity": {
+        "material_rate": 51.50,
+        "labour_rate":   24.00,
         "unit": "nr",
     },
 
-    "skirting_board_mdf_100mm": {
-        # 19 × 100 mm MDF ogee skirting, pinned and glued, joints scribed
-        "material_rate": 4.20,
-        "labour_rate":   5.00,
-        "unit": "m",
+    "lintel_boot_steel_1500mm_cavity": {
+        "material_rate": 90.00,
+        "labour_rate":   30.00,
+        "unit": "nr",
     },
 
-    "architrave_mdf_set": {
-        # 19 × 69 mm MDF ovolo architrave, door set (2 sides), mitred and pinned
-        "material_rate": 3.50,
-        "labour_rate":   4.20,
-        "unit": "m",
+    "lintel_concrete_prestressed_1200mm": {
+        "material_rate": 17.00,
+        "labour_rate":   9.00,
+        "unit": "nr",
     },
 
-    # ── ROOFING (6 items) ────────────────────────────────────────────────────────────
+    "lintel_concrete_prestressed_1800mm": {
+        "material_rate": 36.50,
+        "labour_rate":   14.00,
+        "unit": "nr",
+    },
 
-    "concrete_interlocking_tile": {
-        # Marley Ludlow Plus or equiv., nailed at min. every 4th course, on battens
-        "material_rate": 22.00,  # tiles, battens, fixings; ~14 tiles/m²
-        "labour_rate":   18.00,
+    # ── TRADE 4: BLOCKWORK ───────────────────────────────────────────────────
+
+    "blockwork_dense_100mm_partition": {
+        "material_rate": 13.50,
+        "labour_rate":   18.50,
         "unit": "m²",
     },
 
-    "clay_plain_tile": {
-        # Hand-made or machine-made clay plain tile, 265 × 165 mm, double-lap, nailed
-        "material_rate": 38.00,  # ~60 tiles/m² incl. 10 % wastage
+    "blockwork_dense_140mm": {
+        "material_rate": 17.00,
+        "labour_rate":   20.00,
+        "unit": "m²",
+    },
+
+    "blockwork_aerated_100mm": {
+        "material_rate": 11.50,
+        "labour_rate":   18.50,
+        "unit": "m²",
+    },
+
+    "blockwork_aerated_140mm": {
+        "material_rate": 15.00,
+        "labour_rate":   20.00,
+        "unit": "m²",
+    },
+
+    "blockwork_dense_100mm_fairface": {
+        "material_rate": 13.50,
         "labour_rate":   25.00,
         "unit": "m²",
     },
 
-    "natural_slate": {
-        # Welsh or Westmorland natural slate, 500 × 300 mm, double-lap, copper nails
-        "material_rate": 65.00,  # slate + copper nails + battens
-        "labour_rate":   35.00,  # skilled slater
+    # ── TRADE 5: ROOFING ─────────────────────────────────────────────────────
+
+    "roofing_concrete_interlocking_tile": {
+        "material_rate": 22.00,
+        "labour_rate":   23.00,
         "unit": "m²",
     },
 
-    "roofing_felt_underlay": {
-        # Klober Permo air or equiv. breathable roofing membrane, lapped 150 mm
-        "material_rate": 3.50,
-        "labour_rate":   2.00,
+    "roofing_clay_plain_tile": {
+        "material_rate": 40.00,
+        "labour_rate":   33.00,
+        "unit": "m²",
+    },
+
+    "roofing_natural_welsh_slate": {
+        "material_rate": 95.00,
+        "labour_rate":   46.50,
+        "unit": "m²",
+    },
+
+    "roofing_synthetic_slate": {
+        "material_rate": 35.00,
+        "labour_rate":   28.50,
+        "unit": "m²",
+    },
+
+    "roofing_epdm_flat_roof": {
+        "material_rate": 18.00,
+        "labour_rate":   18.00,
+        "unit": "m²",
+    },
+
+    "roofing_grp_fibreglass_flat_roof": {
+        "material_rate": 36.50,
+        "labour_rate":   28.50,
         "unit": "m²",
     },
 
     "lead_flashing_code4": {
-        # Code 4 milled lead (1.80 mm) step / cover flashing, dressed and wedged
-        "material_rate": 28.00,  # lead at ~£3.50/kg; code 4 ≈ 20 kg/m²
-        "labour_rate":   22.00,  # skilled plumber / roofer
+        "material_rate": 37.00,
+        "labour_rate":   28.50,
         "unit": "m",
     },
 
-    "upvc_fascia_soffit": {
-        # UPVC 250 mm fascia + 400 mm soffit board, white, including vented sections
-        "material_rate": 18.00,
-        "labour_rate":   12.00,
+    "lead_flashing_code5": {
+        "material_rate": 50.00,
+        "labour_rate":   35.00,
         "unit": "m",
     },
 
-    # ── PLASTERING (4 items) ─────────────────────────────────────────────────────────
-
-    "plaster_float_set_2coat": {
-        # Carlite browning undercoat + Carlite finish, 13 mm total, to masonry
-        "material_rate": 4.50,
-        "labour_rate":   12.00,  # plasterer + labourer; ~2 m²/hr
-        "unit": "m²",
+    "upvc_fascia_board_150mm": {
+        "material_rate": 9.50,
+        "labour_rate":   7.00,
+        "unit": "m",
     },
 
-    "plasterboard_12_5mm": {
-        # 12.5 mm Gyproc WallBoard, screwed to timber frame, joints taped and filled
-        "material_rate": 6.50,   # board, screws, tape, joint compound
-        "labour_rate":   8.50,
-        "unit": "m²",
+    "upvc_soffit_board_300mm": {
+        "material_rate": 13.00,
+        "labour_rate":   8.00,
+        "unit": "m",
     },
 
-    "skim_coat_plasterboard": {
-        # 2–3 mm Thistle MultiFinish skim coat to plasterboard, steel-trowel finish
-        "material_rate": 1.50,
+    "upvc_gutter_112mm_half_round": {
+        "material_rate": 7.25,
+        "labour_rate":   6.50,
+        "unit": "m",
+    },
+
+    "upvc_downpipe_68mm": {
+        "material_rate": 6.25,
         "labour_rate":   6.00,
-        "unit": "m²",
-    },
-
-    "external_render_2coat": {
-        # Sand-cement scratch coat + tyrolean / smooth finish coat, pebble-dash option
-        "material_rate": 8.00,   # bagged render + beads + fixings
-        "labour_rate":   18.00,  # scratch coat, dry, finish coat; includes angle beads
-        "unit": "m²",
-    },
-
-    # ── PAINTING & DECORATING (4 items) ─────────────────────────────────────────────
-
-    "emulsion_paint_2coat_walls": {
-        # Dulux / Johnstone's matt emulsion, mist coat + 2 finish coats to plaster
-        "material_rate": 1.80,   # ~6 m² per litre at 2 coats; trade 5-litre tub
-        "labour_rate":   4.50,
-        "unit": "m²",
-    },
-
-    "emulsion_paint_2coat_ceiling": {
-        # As above, ceiling rate slightly higher due to working overhead
-        "material_rate": 1.80,
-        "labour_rate":   5.50,
-        "unit": "m²",
-    },
-
-    "gloss_paint_woodwork": {
-        # Dulux Trade gloss, undercoat + 2 top coats, brush applied to timber
-        "material_rate": 0.80,   # per linear metre of skirting / architrave / door frame
-        "labour_rate":   3.50,
         "unit": "m",
     },
 
-    "masonry_paint_external": {
-        # Sandtex Smooth or Dulux Weathershield, stabilising primer + 2 finish coats
-        "material_rate": 3.50,
-        "labour_rate":   6.00,   # includes scaffold allowance in labour rate
+    "dry_ridge_system": {
+        "material_rate": 16.00,
+        "labour_rate":   11.00,
+        "unit": "m",
+    },
+
+    "dry_verge_system": {
+        "material_rate": 10.00,
+        "labour_rate":   8.50,
+        "unit": "m",
+    },
+
+    "roof_insulation_between_over_rafters_pir": {
+        "material_rate": 24.00,
+        "labour_rate":   16.00,
         "unit": "m²",
     },
 
-    # ── WINDOWS & DOORS (6 items) ────────────────────────────────────────────────────
+    "roof_insulation_between_rafters_100mm": {
+        "material_rate": 7.25,
+        "labour_rate":   9.50,
+        "unit": "m²",
+    },
 
-    "upvc_window_1200x1050": {
-        # White UPVC casement window 1200 × 1050 mm, A-rated, trickle vent, cill included
-        "material_rate": 280.00,
-        "labour_rate":   85.00,  # fix, seal, make good reveals
+    "velux_window_ck02_550x978mm": {
+        "material_rate": 370.00,
+        "labour_rate":   200.00,
         "unit": "nr",
     },
 
-    "upvc_window_600x900": {
-        # White UPVC casement window 600 × 900 mm, A-rated, trickle vent
-        "material_rate": 180.00,
-        "labour_rate":   75.00,
+    "velux_window_mk04_780x978mm": {
+        "material_rate": 490.00,
+        "labour_rate":   235.00,
         "unit": "nr",
     },
 
-    "upvc_composite_front_door": {
-        # Composite (GRP skin / timber core) front door set 920 × 2100 mm, multi-point lock
-        "material_rate": 650.00,  # door, frame, cill, letterbox, lever handle
-        "labour_rate":   120.00,
+    # ── TRADE 6: CARPENTRY – FIRST FIX ──────────────────────────────────────
+
+    "carpentry_cut_roof_traditional": {
+        "material_rate": 28.50,
+        "labour_rate":   36.50,
+        "unit": "m²",
+    },
+
+    "carpentry_roof_trusses_prefab": {
+        "material_rate": 23.00,
+        "labour_rate":   16.00,
+        "unit": "m²",
+    },
+
+    "carpentry_flat_roof_joists_50x150mm": {
+        "material_rate": 9.00,
+        "labour_rate":   10.50,
+        "unit": "m²",
+    },
+
+    "carpentry_flat_roof_joists_50x200mm": {
+        "material_rate": 12.00,
+        "labour_rate":   11.50,
+        "unit": "m²",
+    },
+
+    "carpentry_floor_joists_50x150mm": {
+        "material_rate": 10.00,
+        "labour_rate":   11.50,
+        "unit": "m²",
+    },
+
+    "carpentry_floor_joists_50x200mm": {
+        "material_rate": 13.50,
+        "labour_rate":   13.00,
+        "unit": "m²",
+    },
+
+    "carpentry_stud_partition_100mm": {
+        "material_rate": 11.50,
+        "labour_rate":   18.00,
+        "unit": "m²",
+    },
+
+    "carpentry_osb_flooring_18mm": {
+        "material_rate": 11.50,
+        "labour_rate":   9.50,
+        "unit": "m²",
+    },
+
+    "carpentry_chipboard_flooring_18mm": {
+        "material_rate": 9.75,
+        "labour_rate":   9.50,
+        "unit": "m²",
+    },
+
+    "carpentry_loft_hatch_562x726mm": {
+        "material_rate": 60.00,
+        "labour_rate":   52.50,
         "unit": "nr",
     },
 
-    "upvc_back_door": {
-        # White UPVC back door 840 × 2100 mm, half-glazed, 3-point lock
-        "material_rate": 440.00,
-        "labour_rate":   95.00,
+    # ── TRADE 7: CARPENTRY – SECOND FIX ─────────────────────────────────────
+
+    "door_lining_set_softwood": {
+        "material_rate": 55.00,
+        "labour_rate":   45.00,
         "unit": "nr",
     },
 
-    "softwood_internal_door": {
-        # Softwood flush or panelled internal door 838 × 1981 mm, PC £85, inc. ironmongery
-        "material_rate": 85.00,  # door leaf + lever latch + hinges (3 no.)
-        "labour_rate":   55.00,  # hang, adjust, fit furniture
+    "door_lining_set_hardwood": {
+        "material_rate": 115.00,
+        "labour_rate":   57.50,
         "unit": "nr",
     },
 
     "fire_door_fd30": {
-        # FD30 fire-check door 838 × 1981 mm, intumescent strip, closer, CE-marked
-        "material_rate": 180.00,  # FD30 leaf + ironmongery + intumescent strip
-        "labour_rate":   65.00,   # hang, adjust, fit closer, check gaps ≤ 3 mm
+        "material_rate": 300.00,
+        "labour_rate":   97.50,
         "unit": "nr",
+    },
+
+    "internal_door_softwood_flush": {
+        "material_rate": 170.00,
+        "labour_rate":   77.50,
+        "unit": "nr",
+    },
+
+    "internal_door_mdf_primed": {
+        "material_rate": 125.00,
+        "labour_rate":   77.50,
+        "unit": "nr",
+    },
+
+    "skirting_softwood_75x19mm": {
+        "material_rate": 3.65,
+        "labour_rate":   6.75,
+        "unit": "m",
+    },
+
+    "skirting_softwood_100x25mm": {
+        "material_rate": 5.75,
+        "labour_rate":   7.25,
+        "unit": "m",
+    },
+
+    "skirting_mdf_75x18mm": {
+        "material_rate": 3.25,
+        "labour_rate":   6.25,
+        "unit": "m",
+    },
+
+    "architrave_mdf_set_per_door": {
+        "material_rate": 19.00,
+        "labour_rate":   25.00,
+        "unit": "nr",
+    },
+
+    "staircase_softwood_straight": {
+        "material_rate": 1800.00,
+        "labour_rate":   725.00,
+        "unit": "nr",
+    },
+
+    "staircase_softwood_quarter_landing": {
+        "material_rate": 2550.00,
+        "labour_rate":   1000.00,
+        "unit": "nr",
+    },
+
+    # ── TRADE 8: WINDOWS AND EXTERNAL DOORS ─────────────────────────────────
+
+    "upvc_casement_window_600x900mm": {
+        "material_rate": 225.00,
+        "labour_rate":   112.50,
+        "unit": "nr",
+    },
+
+    "upvc_casement_window_1200x1200mm": {
+        "material_rate": 410.00,
+        "labour_rate":   137.50,
+        "unit": "nr",
+    },
+
+    "upvc_tilt_turn_window_900x1200mm": {
+        "material_rate": 360.00,
+        "labour_rate":   142.50,
+        "unit": "nr",
+    },
+
+    "aluminium_casement_window_600x900mm": {
+        "material_rate": 510.00,
+        "labour_rate":   142.50,
+        "unit": "nr",
+    },
+
+    "aluminium_casement_window_1200x1200mm": {
+        "material_rate": 875.00,
+        "labour_rate":   180.00,
+        "unit": "nr",
+    },
+
+    "timber_casement_window_600x900mm": {
+        "material_rate": 365.00,
+        "labour_rate":   127.50,
+        "unit": "nr",
+    },
+
+    "timber_casement_window_1200x1200mm": {
+        "material_rate": 640.00,
+        "labour_rate":   165.00,
+        "unit": "nr",
+    },
+
+    "upvc_external_door_solid_panel": {
+        "material_rate": 485.00,
+        "labour_rate":   165.00,
+        "unit": "nr",
+    },
+
+    "composite_external_door": {
+        "material_rate": 1375.00,
+        "labour_rate":   210.00,
+        "unit": "nr",
+    },
+
+    "timber_external_door_softwood": {
+        "material_rate": 600.00,
+        "labour_rate":   180.00,
+        "unit": "nr",
+    },
+
+    "aluminium_bifold_doors_2400x2100mm": {
+        "material_rate": 4150.00,
+        "labour_rate":   600.00,
+        "unit": "nr",
+    },
+
+    "upvc_bifold_doors_2400x2100mm": {
+        "material_rate": 2400.00,
+        "labour_rate":   475.00,
+        "unit": "nr",
+    },
+
+    "aluminium_sliding_patio_doors_1800x2100mm": {
+        "material_rate": 2450.00,
+        "labour_rate":   380.00,
+        "unit": "nr",
+    },
+
+    # ── TRADE 9: INSULATION ──────────────────────────────────────────────────
+
+    "cavity_wall_insulation_eps_bead_blown": {
+        "material_rate": 7.00,
+        "labour_rate":   5.50,
+        "unit": "m²",
+    },
+
+    "cavity_wall_insulation_rockwool_50mm": {
+        "material_rate": 9.50,
+        "labour_rate":   6.25,
+        "unit": "m²",
+    },
+
+    "floor_insulation_pir_75mm": {
+        "material_rate": 16.50,
+        "labour_rate":   11.00,
+        "unit": "m²",
+    },
+
+    "floor_insulation_eps_100mm_below_slab": {
+        "material_rate": 10.50,
+        "labour_rate":   7.00,
+        "unit": "m²",
+    },
+
+    "loft_insulation_glass_wool_270mm": {
+        "material_rate": 14.50,
+        "labour_rate":   11.00,
+        "unit": "m²",
+    },
+
+    "loft_insulation_glass_wool_100mm": {
+        "material_rate": 6.00,
+        "labour_rate":   7.00,
+        "unit": "m²",
+    },
+
+    "external_wall_insulation_ewi_100mm": {
+        "material_rate": 76.50,
+        "labour_rate":   52.50,
+        "unit": "m²",
+    },
+
+    "internal_wall_insulation_pir_60mm": {
+        "material_rate": 36.50,
+        "labour_rate":   26.00,
+        "unit": "m²",
+    },
+
+    # ── TRADE 10: PLASTERING ─────────────────────────────────────────────────
+
+    "plaster_two_coat_gypsum_masonry": {
+        "material_rate": 5.75,
+        "labour_rate":   17.00,
+        "unit": "m²",
+    },
+
+    "plaster_two_coat_bonding_multifinish": {
+        "material_rate": 5.25,
+        "labour_rate":   18.00,
+        "unit": "m²",
+    },
+
+    "skim_coat_plasterboard_walls": {
+        "material_rate": 2.75,
+        "labour_rate":   12.00,
+        "unit": "m²",
+    },
+
+    "skim_coat_plasterboard_ceilings": {
+        "material_rate": 2.75,
+        "labour_rate":   13.50,
+        "unit": "m²",
+    },
+
+    "plasterboard_dot_dab_12_5mm_walls": {
+        "material_rate": 9.00,
+        "labour_rate":   12.00,
+        "unit": "m²",
+    },
+
+    "plasterboard_dot_dab_15mm_ceilings": {
+        "material_rate": 10.75,
+        "labour_rate":   13.50,
+        "unit": "m²",
+    },
+
+    "external_render_sand_cement_two_coat": {
+        "material_rate": 5.50,
+        "labour_rate":   19.00,
+        "unit": "m²",
+    },
+
+    "external_render_monocouche": {
+        "material_rate": 24.00,
+        "labour_rate":   25.00,
+        "unit": "m²",
+    },
+
+    "external_render_silicone_thin_coat": {
+        "material_rate": 43.50,
+        "labour_rate":   33.00,
+        "unit": "m²",
+    },
+
+    # ── TRADE 11: ELECTRICAL ─────────────────────────────────────────────────
+
+    "electrical_first_fix_wiring_per_sqm": {
+        "material_rate": 10.00,
+        "labour_rate":   18.00,
+        "unit": "m²",
+    },
+
+    "consumer_unit_10way_dual_rcd": {
+        "material_rate": 170.00,
+        "labour_rate":   160.00,
+        "unit": "nr",
+    },
+
+    "double_socket_outlet_13a": {
+        "material_rate": 12.50,
+        "labour_rate":   38.00,
+        "unit": "nr",
+    },
+
+    "single_socket_outlet_13a": {
+        "material_rate": 8.50,
+        "labour_rate":   33.00,
+        "unit": "nr",
+    },
+
+    "lighting_point_loop_in": {
+        "material_rate": 12.00,
+        "labour_rate":   43.50,
+        "unit": "nr",
+    },
+
+    "smoke_detector_mains_powered": {
+        "material_rate": 35.00,
+        "labour_rate":   38.00,
+        "unit": "nr",
+    },
+
+    "electric_shower_9_5kw": {
+        "material_rate": 240.00,
+        "labour_rate":   210.00,
+        "unit": "nr",
+    },
+
+    "extractor_fan_bathroom": {
+        "material_rate": 51.50,
+        "labour_rate":   67.50,
+        "unit": "nr",
+    },
+
+    "full_rewire_3bed_semi": {
+        "material_rate": 2500.00,
+        "labour_rate":   2500.00,
+        "unit": "nr",
+    },
+
+    # ── TRADE 12: PLUMBING AND HEATING ───────────────────────────────────────
+
+    "plumbing_first_fix_pipework_per_sqm": {
+        "material_rate": 16.00,
+        "labour_rate":   24.00,
+        "unit": "m²",
+    },
+
+    "bathroom_suite_standard_white": {
+        "material_rate": 675.00,
+        "labour_rate":   700.00,
+        "unit": "nr",
+    },
+
+    "shower_enclosure_tray_900x900mm": {
+        "material_rate": 465.00,
+        "labour_rate":   220.00,
+        "unit": "nr",
+    },
+
+    "kitchen_sink_single_bowl_stainless": {
+        "material_rate": 155.00,
+        "labour_rate":   115.00,
+        "unit": "nr",
+    },
+
+    "gas_combi_boiler_30_35kw": {
+        "material_rate": 1225.00,
+        "labour_rate":   550.00,
+        "unit": "nr",
+    },
+
+    "oil_combi_boiler_26kw": {
+        "material_rate": 2100.00,
+        "labour_rate":   700.00,
+        "unit": "nr",
+    },
+
+    "radiator_single_panel_600x800mm": {
+        "material_rate": 100.00,
+        "labour_rate":   95.00,
+        "unit": "nr",
+    },
+
+    "underfloor_heating_wet_system": {
+        "material_rate": 35.00,
+        "labour_rate":   27.50,
+        "unit": "m²",
+    },
+
+    "underfloor_heating_electric_mat": {
+        "material_rate": 32.00,
+        "labour_rate":   19.00,
+        "unit": "m²",
+    },
+
+    "thermostatic_radiator_valve": {
+        "material_rate": 21.00,
+        "labour_rate":   31.00,
+        "unit": "nr",
+    },
+
+    # ── TRADE 13: FLOOR AND WALL TILING ─────────────────────────────────────
+
+    "ceramic_floor_tiles_300x300mm": {
+        "material_rate": 25.00,
+        "labour_rate":   33.50,
+        "unit": "m²",
+    },
+
+    "porcelain_floor_tiles_600x600mm": {
+        "material_rate": 44.00,
+        "labour_rate":   38.00,
+        "unit": "m²",
+    },
+
+    "ceramic_wall_tiles_200x300mm": {
+        "material_rate": 20.00,
+        "labour_rate":   30.00,
+        "unit": "m²",
+    },
+
+    "porcelain_wall_tiles_300x600mm": {
+        "material_rate": 33.50,
+        "labour_rate":   33.50,
+        "unit": "m²",
+    },
+
+    "natural_stone_floor_tiles_600x600mm": {
+        "material_rate": 87.50,
+        "labour_rate":   51.50,
+        "unit": "m²",
+    },
+
+    "wetroom_tanking_system": {
+        "material_rate": 24.00,
+        "labour_rate":   30.00,
+        "unit": "m²",
+    },
+
+    "tile_adhesive_and_grout_only": {
+        "material_rate": 7.50,
+        "labour_rate":   0.00,
+        "unit": "m²",
+    },
+
+    # ── TRADE 14: DECORATING ─────────────────────────────────────────────────
+
+    "emulsion_two_coat_new_plaster_walls": {
+        "material_rate": 2.15,
+        "labour_rate":   7.00,
+        "unit": "m²",
+    },
+
+    "emulsion_two_coat_new_plaster_ceilings": {
+        "material_rate": 2.15,
+        "labour_rate":   8.00,
+        "unit": "m²",
+    },
+
+    "gloss_paint_timber_door_both_faces": {
+        "material_rate": 10.50,
+        "labour_rate":   32.00,
+        "unit": "nr",
+    },
+
+    "gloss_paint_timber_window_both_faces": {
+        "material_rate": 9.00,
+        "labour_rate":   26.50,
+        "unit": "nr",
+    },
+
+    "gloss_paint_skirting_architrave": {
+        "material_rate": 1.15,
+        "labour_rate":   5.00,
+        "unit": "m",
+    },
+
+    "masonry_paint_external_two_coat": {
+        "material_rate": 5.25,
+        "labour_rate":   8.50,
+        "unit": "m²",
+    },
+
+    "gloss_paint_upvc_fascia_soffit": {
+        "material_rate": 3.75,
+        "labour_rate":   6.75,
+        "unit": "m",
+    },
+
+    # ── TRADE 15: DRAINAGE ───────────────────────────────────────────────────
+
+    "drainage_upvc_100mm_foul_drain": {
+        "material_rate": 15.00,
+        "labour_rate":   21.00,
+        "unit": "m",
+    },
+
+    "drainage_upvc_150mm_surface_water": {
+        "material_rate": 22.00,
+        "labour_rate":   24.00,
+        "unit": "m",
+    },
+
+    "inspection_chamber_concrete_450mm": {
+        "material_rate": 210.00,
+        "labour_rate":   210.00,
+        "unit": "nr",
+    },
+
+    "inspection_chamber_upvc_450mm": {
+        "material_rate": 130.00,
+        "labour_rate":   150.00,
+        "unit": "nr",
+    },
+
+    "rodding_eye_100mm_upvc": {
+        "material_rate": 45.00,
+        "labour_rate":   67.50,
+        "unit": "nr",
+    },
+
+    "connection_to_existing_sewer": {
+        "material_rate": 82.50,
+        "labour_rate":   165.00,
+        "unit": "nr",
+    },
+
+    # ── TRADE 16: EXTERNAL WORKS ─────────────────────────────────────────────
+
+    "block_paving_driveway": {
+        "material_rate": 46.50,
+        "labour_rate":   38.00,
+        "unit": "m²",
+    },
+
+    "concrete_paving_slabs_600x600mm": {
+        "material_rate": 21.00,
+        "labour_rate":   19.00,
+        "unit": "m²",
+    },
+
+    "tarmac_driveway_two_layer": {
+        "material_rate": 22.00,
+        "labour_rate":   25.00,
+        "unit": "m²",
+    },
+
+    "timber_fence_panels_1800mm": {
+        "material_rate": 48.00,
+        "labour_rate":   29.00,
+        "unit": "m",
+    },
+
+    "close_board_timber_fencing_1800mm": {
+        "material_rate": 56.00,
+        "labour_rate":   34.00,
+        "unit": "m",
+    },
+
+    "new_lawn_turf": {
+        "material_rate": 10.25,
+        "labour_rate":   10.00,
+        "unit": "m²",
     },
 }
