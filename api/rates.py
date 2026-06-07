@@ -881,8 +881,50 @@ RATES_DB = {
         "unit": "m²",
     },
 
+    # ── STRUCTURAL STEEL ─────────────────────────────────────────────
+
+    "structural_steel_rsj_beam_supply_fix": {
+        "material_rate":     180.00,
+        "labour_rate":        85.00,
+        "plant_rate":         35.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "m",
+    },
+
+    "steel_padstone_engineering_brick": {
+        "material_rate":      45.00,
+        "labour_rate":        35.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "nr",
+    },
+
     # ── TRADE 11: ELECTRICAL ─────────────────────────────────────────────────
     # Labour-biased: ~65% labour across M&E items.
+
+    "electrical_first_fix_power_lighting": {
+        "material_rate":    1800.00,
+        "labour_rate":      2200.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "item",
+    },
+
+    "electrical_second_fix_sockets_switches": {
+        "material_rate":     850.00,
+        "labour_rate":       950.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "item",
+    },
+
+    "consumer_unit_upgrade_18way": {
+        "material_rate":     320.00,
+        "labour_rate":       280.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "nr",
+    },
 
     "electrical_first_fix_wiring_per_sqm": {
         "material_rate":       9.80,
@@ -957,6 +999,30 @@ RATES_DB = {
     },
 
     # ── TRADE 12: PLUMBING AND HEATING ───────────────────────────────────────
+
+    "plumbing_first_fix_hot_cold_soil": {
+        "material_rate":    1200.00,
+        "labour_rate":      1400.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "item",
+    },
+
+    "central_heating_extension_pipework_rads": {
+        "material_rate":     950.00,
+        "labour_rate":      1100.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "item",
+    },
+
+    "thermostatic_radiator_valve_trv": {
+        "material_rate":      35.00,
+        "labour_rate":        25.00,
+        "plant_rate":          0.00,
+        "waste_disposal_rate": 0.00,
+        "unit": "nr",
+    },
 
     "plumbing_first_fix_pipework_per_sqm": {
         "material_rate":      16.00,
@@ -1259,7 +1325,7 @@ RATES_DB = {
 LOCATION_FACTORS = {
     "uk_average": {"material": 1.00, "labour": 1.00},
     "london_se":  {"material": 1.05, "labour": 1.30},
-    "n_ireland":  {"material": 1.02, "labour": 0.85},
+    "n_ireland":  {"material": 1.02, "labour": 1.05},
     "scotland":   {"material": 1.00, "labour": 0.95},
     "midlands":   {"material": 1.00, "labour": 0.92},
     "north_eng":  {"material": 1.00, "labour": 0.90},
