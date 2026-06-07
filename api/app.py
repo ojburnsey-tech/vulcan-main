@@ -178,7 +178,11 @@ def _enrich_boq(boq_data):
         return boq_data                            # unexpected shape — pass through untouched
 
     for group in groups:                           # iterate each trade section
+        if not isinstance(group, dict):            # skip strings or other non-dict entries Claude may have included
+            continue
         items = group.get('items') or group.get('line_items') or []
+        if not isinstance(items, list):            # guard against items being a scalar or dict
+            continue
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
