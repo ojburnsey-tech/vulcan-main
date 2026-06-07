@@ -61,23 +61,31 @@ def _fmt(n) -> str:
 def _normalise_boq(boq_json):
     """Convert any Claude JSON shape to a list of (trade_name, [item_dict]) tuples.
     Mirrors normaliseBoq() in the React front end and _enrich_boq() in app.py."""
+    if not boq_json or not isinstance(boq_json, (list, dict)):
+        return []                            # null / primitive — nothing to parse
+
     if isinstance(boq_json, list):           # shape: [{trade, items}]
         groups = boq_json
-    elif isinstance(boq_json, dict):
-        if 'bill_of_quantities' in boq_json: # shape: {bill_of_quantities: [...]}
+    else:                                    # boq_json is a dict
+        if isinstance(boq_json.get('bill_of_quantities'), list):
             groups = boq_json['bill_of_quantities']
-        elif 'trades' in boq_json:           # shape: {trades: [...]}
+        elif isinstance(boq_json.get('trades'), list):
             groups = boq_json['trades']
         else:                                # shape: {groundworks: [...], brickwork: [...]}
             groups = [{'trade': k, 'items': v}
                       for k, v in boq_json.items() if isinstance(v, list)]
-    else:
-        groups = []                          # unknown shape — return empty; caller handles gracefully
+
+    if not isinstance(groups, list):         # belt-and-suspenders before iterating
+        return []
 
     result = []
     for g in groups:
+        if not isinstance(g, dict):          # skip strings or other non-dict entries
+            continue
         trade = g.get('trade') or g.get('name') or 'General'
         items = g.get('items') or g.get('line_items') or []
+        if not isinstance(items, list):      # guard against items being a scalar or dict
+            items = []
         result.append((trade, items))        # each element is a 2-tuple — like a ValueTuple in C#
     return result
 
@@ -254,6 +262,8 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         trade_total = 0.0                  # running total for this trade only
 
         for item in items:
+            if not isinstance(item, dict):   # skip strings or other non-dict line items
+                continue
             desc     = item.get('description') or item.get('desc') or ''
             qty      = float(item.get('quantity') or item.get('qty') or 0)
             unit     = item.get('unit') or ''
