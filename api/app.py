@@ -416,13 +416,13 @@ def process_pdf():                         # Flask calls this function when a ma
             "Claude structured output call: model=%s max_tokens=%s "
             "pdf_text_length=%s approximate_word_count=%s",
             "claude-sonnet-4-6",
-            4096,
+            12000,
             len(full_text),
             len(full_text.split()),
         )
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
-            max_tokens=4096,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
+            max_tokens=12000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
             system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in Anthropic SDK (NOT a {"role":"system"} entry — that is the OpenAI convention)
             messages=[                             # messages is a list of conversation turns; here just one user turn with no prior history
                 {
