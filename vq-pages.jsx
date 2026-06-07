@@ -514,7 +514,7 @@ function ResultsPage({ go, toast, boqData }) {
 
     try {
       // POST the BoQ JSON to the server; Flask calls generate_boq_pdf() and streams the result back.
-      const res = await fetch('vulcan-production-d039.up.railway.app', {
+      const res = await fetch('https://vulcan-production-d039.up.railway.app/download', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify(buildPayload()),
@@ -729,7 +729,7 @@ function UploadPage({ go, toast, onBoqReady }) {
 
       // fetch() sends the HTTP request and returns a Promise — like HttpClient.PostAsync in C#.
       // No Content-Type header is set manually; the browser sets multipart/form-data + boundary automatically.
-      const res = await fetch('vulcan-production-d039.up.railway.app', {
+      const res = await fetch('https://vulcan-production-d039.up.railway.app/process', {
   method: 'POST',
   body: formData,
   credentials: 'include',
