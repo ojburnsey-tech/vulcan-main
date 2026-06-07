@@ -19,7 +19,7 @@ app = Flask(__name__)              # create the Flask app instance; __name__ tel
 # Without it sessions cannot be trusted.  Set this env var in production —
 # the urandom fallback regenerates on every restart, invalidating all sessions.
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)
-app.config['SESSION_COOKIE_SECURE']   = os.environ.get('FLASK_ENV') == 'production'
+app.config['SESSION_COOKIE_SECURE']   = os.environ.get('FLASK_ENV') != 'development'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 
@@ -29,6 +29,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 CORS(app,
      origins=[
          'https://ojburnsey-tech.github.io',
+         'https://ojburnsey-tech.github.io/vulcan-main',
          'http://localhost:8080',   # for local development
          'http://localhost:5001',   # for local Flask development
      ],
