@@ -83,17 +83,27 @@ def _get_bearer_token() -> str:
         return auth[7:].strip()
     return ''
 
-SYSTEM_PROMPT = (                  # module-level constant so the prompt is defined once and never duplicated (like static readonly string in C#)
-    "IMPORTANT: You must respond with valid JSON only. No preamble, no markdown, no explanation. "
-    "Start your response with { and end with }. "
-    "You are a UK quantity surveyor. Given the following text extracted from a "
-    "construction drawing or specification, produce a Bill of Quantities broken "
-    "down by trade (groundworks, brickwork, blockwork, carpentry, roofing, "
-    "plastering, electrical first fix, plumbing first fix, plastering, decorating). "
-    "For each trade, list line items with a description, estimated quantity, unit "
-    "(m, m², m³, nr, item), and leave rate as 0.00 for now. "
-    "Return valid JSON only, no preamble or markdown."
-)                                  # Python allows implicit string concatenation inside parentheses — no + operator needed
+SYSTEM_PROMPT = (
+    "You are a UK quantity surveyor. Analyse the construction specification and "
+    "produce a Bill of Quantities as valid JSON only — no preamble, no markdown. "
+    "Start with { and end with }.\n\n"
+    "CRITICAL: For each line item, you MUST set the 'rate_key' field to the single "
+    "most appropriate key from this exact list — do not invent keys, do not modify keys, "
+    "copy them exactly as shown:\n\n"
+    + "\n".join(f"- {k}" for k in RATES_DB.keys())
+    + "\n\nRequired JSON output format:\n"
+    '{"bill_of_quantities": [{"trade": "Groundworks", "items": ['
+    '{"description": "human readable description", '
+    '"rate_key": "excavation_reduced_level_machine", '
+    '"quantity": 45, "unit": "m³"}]}]}\n\n'
+    "Rules:\n"
+    "- Every item MUST have a rate_key from the list above.\n"
+    "- description is a human-readable label for the PDF output — write it clearly.\n"
+    "- quantity is your professional QS estimate based on the specification.\n"
+    "- unit must match the unit for that rate_key as listed.\n"
+    "- Do not add any fields other than description, rate_key, quantity, and unit.\n"
+    "- Respond with valid JSON only. No markdown fences, no preamble, no explanation."
+)
 
 # ── Rate-matching helpers ─────────────────────────────────────────────────────────────
 # These run once at module load time — like a static constructor in C#.
@@ -182,7 +192,14 @@ def _enrich_boq(boq_data):
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
 
-            matched_key, rate_entry = _match_rate(desc)
+            # Prefer the rate_key Claude was instructed to output — direct O(1) lookup
+            rate_key_direct = item.get('rate_key', '').strip()
+            if rate_key_direct and rate_key_direct in RATES_DB:
+                matched_key  = rate_key_direct
+                rate_entry   = RATES_DB[rate_key_direct]
+            else:
+                # Fallback: Jaccard fuzzy match on description for legacy or malformed output
+                matched_key, rate_entry = _match_rate(desc)
 
             if rate_entry:
                 mat   = rate_entry['material_rate']
