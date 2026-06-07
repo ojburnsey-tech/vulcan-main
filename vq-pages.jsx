@@ -473,6 +473,7 @@ function normaliseBoq(raw) {
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
 function ResultsPage({ go, toast, boqData }) {
   const [pdfState, setPdfState] = useState('idle');
+  const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
 
   // Demo items shown when no real upload has been processed yet
@@ -584,6 +585,54 @@ function ResultsPage({ go, toast, boqData }) {
     }
   };
 
+  const handleExcelDownload = async () => {
+    if (excelState !== 'idle') return;
+    setExcelState('generating');
+    toast('Generating Excel…', 'info');
+
+    try {
+      const { data: { session: vqSession } } = window.VQAuth
+        ? await window.VQAuth.getSession()
+        : { data: { session: null } };
+      const token = vqSession?.access_token || '';
+
+      const res = await fetch('https://vulcan-production-d039.up.railway.app/export-excel', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(buildPayload()),
+        credentials: 'include',
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        toast(err.error || 'Excel generation failed — please try again.', 'error');
+        setExcelState('idle');
+        return;
+      }
+
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'bill-of-quantities.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setExcelState('done');
+      toast('Excel downloaded.', 'success');
+      setTimeout(() => setExcelState('idle'), 3000);
+
+    } catch (err) {
+      toast('Network error — could not reach the server.', 'error');
+      setExcelState('idle');
+    }
+  };
+
   return (
     <div className="res-wrap">
       <div className="res-pad">
@@ -607,8 +656,11 @@ function ResultsPage({ go, toast, boqData }) {
             {pdfState === 'generating' && '⏳ Generating PDF…'}
             {pdfState === 'done'       && '✓ Downloaded'}
           </button>
-          <button className="btn btn-outline btn-pill" onClick={() => toast('Excel export coming soon — your BoQ data is ready.', 'info')}>📊 Excel</button>
-          <button className="btn btn-outline btn-pill" onClick={() => { navigator.clipboard?.writeText?.(window.location.href); toast('Share link copied to clipboard!', 'success'); }}>🔗 Share</button>
+<button className="btn btn-outline btn-pill" onClick={handleExcelDownload} disabled={excelState !== 'idle'}>
+  {excelState === 'idle'       && '📊 Excel'}
+  {excelState === 'generating' && '⏳ Generating…'}
+  {excelState === 'done'       && '✓ Downloaded'}
+</button>          <button className="btn btn-outline btn-pill" onClick={() => { navigator.clipboard?.writeText?.(window.location.href); toast('Share link copied to clipboard!', 'success'); }}>🔗 Share</button>
         </div>
 
         <table className="rboq">

@@ -12,6 +12,7 @@ from jsonschema import Draft202012Validator, ValidationError
 from supabase import create_client # supabase-py v2 — wraps the Supabase REST API for auth
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
+from export_excel import generate_boq_excel
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -496,6 +497,33 @@ def export_pdf():                           # Flask calls this for both URLs; st
         mimetype='application/pdf',
         as_attachment=True,                # triggers "Save As" in the browser (Content-Disposition: attachment)
         download_name='bill-of-quantities.pdf',
+    )
+
+
+@app.route("/export-excel", methods=["POST"])
+def export_excel():
+    if not _get_bearer_token():
+        return jsonify({"error": "Authentication required. Please sign in."}), 401
+
+    boq_json = request.get_json(force=True, silent=True)
+    if not boq_json:
+        return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
+
+    firm_name    = request.args.get("firm", "")
+    project_name = request.args.get("project", "")
+
+    try:
+        excel_bytes = generate_boq_excel(boq_json, firm_name, project_name)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"error": f"Excel generation failed: {exc}"}), 500
+
+    return send_file(
+        io.BytesIO(excel_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="bill-of-quantities.xlsx",
     )
 
 
