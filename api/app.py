@@ -382,6 +382,8 @@ def process_pdf():                         # Flask calls this function when a ma
 
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
+    print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
+
     return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
 
 @app.route("/export",   methods=["POST"])   # original route kept for backward compatibility
