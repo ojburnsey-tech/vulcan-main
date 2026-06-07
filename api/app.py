@@ -185,20 +185,26 @@ def _enrich_boq(boq_data):
             matched_key, rate_entry = _match_rate(desc)
 
             if rate_entry:
-                mat = rate_entry['material_rate']               # £ per unit, materials only
-                lab = rate_entry['labour_rate']                 # £ per unit, labour only
-                item['material_rate'] = mat
-                item['labour_rate']   = lab
-                item['rate']          = round(mat + lab, 2)    # all-in rate per unit
-                item['line_total']    = round((mat + lab) * qty, 2)  # rate × qty
-                item['rate_source']   = matched_key            # which RATES_DB key was matched
+                mat   = rate_entry['material_rate']
+                lab   = rate_entry['labour_rate']
+                plant = rate_entry.get('plant_rate', 0.0)
+                waste = rate_entry.get('waste_disposal_rate', 0.0)
+                item['material_rate']       = mat
+                item['labour_rate']         = lab
+                item['plant_rate']          = plant
+                item['waste_disposal_rate'] = waste
+                item['rate']                = round(mat + lab + plant + waste, 2)
+                item['line_total']          = round(item['rate'] * qty, 2)
+                item['rate_source']         = matched_key
             else:
                 # No match found — leave rates at zero so the QS can fill them in manually
-                item['material_rate'] = 0.00
-                item['labour_rate']   = 0.00
-                item['rate']          = 0.00
-                item['line_total']    = 0.00
-                item['rate_source']   = None                   # signals no automatic match
+                item['material_rate']       = 0.00
+                item['labour_rate']         = 0.00
+                item['plant_rate']          = 0.00
+                item['waste_disposal_rate'] = 0.00
+                item['rate']                = 0.00
+                item['line_total']          = 0.00
+                item['rate_source']         = None
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
