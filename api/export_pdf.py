@@ -333,6 +333,42 @@ def _section_heading(title: str) -> list:
 
 # ── Section builders ──────────────────────────────────────────────────────────
 
+def _build_doc_control_panel(boq_json, today_str: str) -> list:
+    """Compact 2-column document-control panel for the title page."""
+    if isinstance(boq_json, dict):
+        revision     = boq_json.get('revision',     'A')                              or 'A'
+        issue_status = boq_json.get('issue_status', 'Draft')                          or 'Draft'
+        prepared_by  = boq_json.get('prepared_by',  'Vulcan Quanta')                  or 'Vulcan Quanta'
+        checked_by   = boq_json.get('checked_by',   'Professional Review Required')   or 'Professional Review Required'
+        intended_use = boq_json.get('intended_use', 'Tender Pricing')                 or 'Tender Pricing'
+    else:
+        revision     = 'A'
+        issue_status = 'Draft'
+        prepared_by  = 'Vulcan Quanta'
+        checked_by   = 'Professional Review Required'
+        intended_use = 'Tender Pricing'
+
+    lbl_w = 48 * mm
+    val_w = CONTENT_W - lbl_w
+
+    rows = [
+        [Paragraph("Revision",     S_BOLD), Paragraph(revision,     S_NORMAL)],
+        [Paragraph("Issue Status", S_BOLD), Paragraph(issue_status, S_NORMAL)],
+        [Paragraph("Prepared By",  S_BOLD), Paragraph(prepared_by,  S_NORMAL)],
+        [Paragraph("Checked By",   S_BOLD), Paragraph(checked_by,   S_NORMAL)],
+        [Paragraph("Intended Use", S_BOLD), Paragraph(intended_use, S_NORMAL)],
+        [Paragraph("Issue Date",   S_BOLD), Paragraph(today_str,    S_NORMAL)],
+    ]
+
+    cmds = _base_table_cmds()
+    for i in range(len(rows)):
+        cmds.append(('BACKGROUND', (0, i), (0, i), _GREY_TRADE))
+
+    tbl = Table(rows, colWidths=[lbl_w, val_w], hAlign='LEFT')
+    tbl.setStyle(TableStyle(cmds))
+    return [tbl]
+
+
 def _build_form_of_tender(boq_json, today_str: str) -> list:
     """Page 1 — Form of Tender."""
     if isinstance(boq_json, dict):
@@ -379,7 +415,9 @@ def _build_form_of_tender(boq_json, today_str: str) -> list:
     story.append(fields)
     story.append(Spacer(1, 8 * mm))
     story.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=colors.black))
-    story.append(Spacer(1, 7 * mm))
+    story.append(Spacer(1, 5 * mm))
+    story += _build_doc_control_panel(boq_json, today_str)
+    story.append(Spacer(1, 6 * mm))
 
     story.append(Paragraph(
         "We the undersigned offer to carry out and complete the works described herein "
