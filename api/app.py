@@ -294,6 +294,20 @@ SYSTEM_PROMPT = (
     "Never output a provisional sum without a ps_type classification. If uncertain, "
     "classify as Undefined.\n"
 
+    # ── Contractor Designed Portions ─────────────────────────────────────────
+    "- CONTRACTOR DESIGNED PORTION (CDP) RULE: Flag cdp=true where the contractor "
+    "is likely to carry design responsibility for the element. Typical examples include: "
+    "boilers, heating systems, underfloor heating, MVHR, ventilation systems, "
+    "fire alarm systems, electrical design packages, specialist glazing, solar PV systems, "
+    "and specialist building systems. "
+    "Where cdp=true, include a concise performance_requirement. "
+    "Examples: "
+    "'Provide system to achieve design flow rates.' — "
+    "'Provide system to manufacturer's performance criteria.' — "
+    "'Provide installation to achieve specified thermal performance.' "
+    "Do not mark ordinary measured building elements as CDP. "
+    "Omit cdp and performance_requirement entirely from items that are not CDP.\n"
+
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
@@ -342,6 +356,14 @@ BOQ_OUTPUT_SCHEMA = {
                                 "dimension_string": {
                                     "type": "string",
                                     "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
+                                },
+                                "cdp": {
+                                    "type": "boolean",
+                                    "description": "True where the contractor carries design responsibility for this element.",
+                                },
+                                "performance_requirement": {
+                                    "type": "string",
+                                    "description": "Concise performance specification for CDP items, e.g. 'Provide system to achieve design flow rates.'",
                                 },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
