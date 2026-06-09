@@ -808,6 +808,64 @@ def _build_provisional_sums() -> tuple:
     return story, prov_total
 
 
+def _build_risk_schedule(risks: list) -> list:
+    """Risk Schedule section. Returns an empty list when no risks are present."""
+    if not risks:
+        return []
+
+    _type_w  = 55
+    _like_w  = 48
+    _imp_w   = 85
+    _mit_w   = 85
+    _desc_w  = CONTENT_W - _type_w - _like_w - _imp_w - _mit_w
+
+    rows = [[
+        Paragraph("Description", S_COL_HDR),
+        Paragraph("Risk Type",   S_COL_HDR_C),
+        Paragraph("Impact",      S_COL_HDR),
+        Paragraph("Likelihood",  S_COL_HDR_C),
+        Paragraph("Mitigation",  S_COL_HDR),
+    ]]
+    cmds = list(_col_header_cmds())
+
+    for risk in risks:
+        if not isinstance(risk, dict):
+            continue
+        desc       = html.escape(risk.get('description', ''))
+        risk_type  = html.escape(risk.get('risk_type', ''))
+        impact     = html.escape(risk.get('impact', ''))
+        likelihood = html.escape(risk.get('likelihood', ''))
+        mitigation = html.escape(risk.get('mitigation', ''))
+
+        ir = len(rows)
+        rows.append([
+            Paragraph(desc,       S_NORMAL),
+            Paragraph(risk_type,  S_CENTER),
+            Paragraph(impact,     S_NORMAL),
+            Paragraph(likelihood, S_CENTER),
+            Paragraph(mitigation, S_NORMAL),
+        ])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    base = _base_table_cmds() + [
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+    ]
+    tbl = Table(
+        rows,
+        colWidths=[_desc_w, _type_w, _imp_w, _like_w, _mit_w],
+        repeatRows=1,
+        hAlign='LEFT',
+    )
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("RISK SCHEDULE")
+    story.append(tbl)
+    story.append(Spacer(1, 4 * mm))
+    return story
+
+
 def _build_dayworks() -> list:
     """Section 04 — Dayworks Schedule (blank rate template)."""
     res_w   = 28 * mm
@@ -970,6 +1028,11 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     story.append(PageBreak())
     story += prov_flowables
     story.append(PageBreak())
+    risks = boq_json.get('risk_schedule', []) if isinstance(boq_json, dict) else []
+    risk_flowables = _build_risk_schedule(risks)
+    if risk_flowables:
+        story += risk_flowables
+        story.append(PageBreak())
     story += _build_dayworks()
     story.append(PageBreak())
     story += _build_grand_summary(prelim_total, measured_total, prov_total)
