@@ -151,11 +151,15 @@ SYSTEM_PROMPT = (
 
     # ── NRM2 section numbering ────────────────────────────────────────────────
     "- NRM2 SECTION NUMBERING: Prefix every trade heading with its NRM2 work section "
-    "number. Use these mappings: 5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
+    "number. Every section must have a unique number — never reuse the same number for "
+    "two different trade headings. Use these exact mappings and no others: "
+    "5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
     "5.9 Structural metalwork; 5.11 Carpentry and joinery; 5.12 Roofing; "
     "5.14 Mechanical services; 5.15 Electrical services; "
-    "5.17 Finishes (plastering, floor finishes, ceiling finishes); "
-    "5.20 Painting and decorating; 5.21 Drainage below ground.\n"
+    "5.17 Plastering and internal finishes; "
+    "5.20 Painting and decorating; 5.21 Drainage below ground; "
+    "5.23 Windows and external doors; "
+    "5.28 Floor finishes (tiling, screed, timber flooring).\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
