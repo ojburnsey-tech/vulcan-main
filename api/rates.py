@@ -88,12 +88,15 @@ RATES_DB = {
         "unit": "m³",
     },
     "earthwork_support_trench_close_boarded": {
-        "material_rate":       5.00,
-        "labour_rate":        10.50,
+        "material_rate":       6.50,
+        "labour_rate":        14.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "m²",
     },
+    # Updated Jun 2026 — previous £15.50/m² was below NI urban
+    # site rates; close-boarded support in Belfast typically
+    # £18-25/m² all-in.
     "disposal_excavated_material_offsite": {
         "material_rate":       0.00,
         "labour_rate":         5.00,
@@ -201,19 +204,23 @@ RATES_DB = {
         "unit": "m²",
     },
     "cavity_wall_300mm_full_fill_mineral_wool": {
-        "material_rate":      87.50,
-        "labour_rate":        67.50,
+        "material_rate":      95.00,
+        "labour_rate":        75.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "m²",
     },
+    # Updated Jun 2026 — BCIS NI Q2 2026 calibration. NI facing
+    # brick cavity wall market rate has risen; previous £155/m²
+    # was ~12% below current NI tender returns.
     "cavity_wall_300mm_partial_fill_pir": {
-        "material_rate":      82.50,
-        "labour_rate":        62.50,
+        "material_rate":      90.00,
+        "labour_rate":        72.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "m²",
     },
+    # Updated Jun 2026 — BCIS NI Q2 2026 calibration.
     "cavity_closer_jambs": {
         "material_rate":       6.50,
         "labour_rate":         5.50,
@@ -371,12 +378,14 @@ RATES_DB = {
         "unit": "m²",
     },
     "lead_flashing_code4": {
-        "material_rate":      37.00,
-        "labour_rate":        28.50,
+        "material_rate":      48.00,
+        "labour_rate":        32.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "m",
     },
+    # Updated Jun 2026 — BCIS NI Q2 2026 calibration. Lead at
+    # current commodity prices; code 4 soakers and cover flashings.
     "lead_flashing_code5": {
         "material_rate":      50.00,
         "labour_rate":        35.00,
@@ -650,19 +659,22 @@ RATES_DB = {
         "unit": "nr",
     },
     "timber_casement_window_600x900mm": {
-        "material_rate":     365.00,
-        "labour_rate":       127.50,
+        "material_rate":     495.00,
+        "labour_rate":       140.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "nr",
     },
+    # Updated Jun 2026 — BCIS NI Q2 2026 calibration.
     "timber_casement_window_1200x1200mm": {
-        "material_rate":     640.00,
+        "material_rate":     875.00,
         "labour_rate":       165.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "nr",
     },
+    # Updated Jun 2026 — timber double/triple glazed unit costs
+    # have risen; previous £640 supply rate was below 2026 market.
     "upvc_external_door_solid_panel": {
         "material_rate":     485.00,
         "labour_rate":       165.00,
