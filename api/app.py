@@ -131,6 +131,19 @@ SYSTEM_PROMPT = (
     "component — never both. If you use a composite cavity wall item, do not add separate "
     "items for the outer leaf, inner leaf, or wall ties.\n"
 
+    # ── Plasterboard double-counting prevention ───────────────────────────────
+    "- Plasterboard double-counting prevention:\n"
+    "  * Stud partitions: the composite stud partition rate already includes "
+    "plasterboard to both faces. Never add separate plasterboard line items "
+    "for the faces of stud partitions. If a stud partition item exists, "
+    "plasterboard to that partition is already priced.\n"
+    "  * Dot-and-dab plasterboard to masonry: measure to one face only — the "
+    "masonry face receiving the board. Do not measure the reverse face.\n"
+    "  * Internal partitions of any construction type: never measure plasterboard "
+    "to both faces. One face only, always.\n"
+    "  * Ceiling plasterboard and plasterboard to external walls or soffits are "
+    "measured independently and are not affected by this rule.\n"
+
     # ── Missing trades checklist ──────────────────────────────────────────────
     "- MANDATORY TRADES CHECKLIST: For any residential extension or new build, you MUST "
     "include or explicitly exclude every item in this list. If the input drawings or "
