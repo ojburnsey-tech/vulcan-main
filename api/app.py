@@ -166,16 +166,29 @@ SYSTEM_PROMPT = (
     "(7) floor finishes — screed, tiling, or timber flooring.\n"
     "- Always include a 5.41 Builder's Work in Connection with Services section. "
     "This section covers all building work carried out solely to accommodate M&E "
-    "installations. It must contain sub-items covering at minimum:\n"
-    "  * Service penetrations through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
-    "  * Service penetrations through concrete (nr) — rate_key: bwic_service_penetration_concrete\n"
-    "  * Duct sleeves 100mm dia. (nr) — rate_key: bwic_duct_sleeve_100mm\n"
-    "  * Duct sleeves 150mm dia. (nr) — rate_key: bwic_duct_sleeve_150mm\n"
-    "  * Fire stopping to penetrations through compartment walls/floors (nr) — rate_key: bwic_fire_stopping_penetration\n"
-    "  * Boxing in of pipework in timber and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
-    "  * Making good plaster/plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
-    "  * Making good masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
-    "  * Chases in masonry for conduit/pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "installations — not the M&E installation itself. "
+    "Classify items into 5.41 using the following categories:\n"
+    "  Penetrations — holes formed through walls, floors or ceilings for services to pass through:\n"
+    "    * Through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
+    "    * Through concrete floors or walls (nr) — rate_key: bwic_service_penetration_concrete\n"
+    "  Sleeves — cast-in or post-fixed service sleeves lining or protecting penetrations:\n"
+    "    * 100mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_100mm\n"
+    "    * 150mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_150mm\n"
+    "  Boxing-in — enclosing service risers, exposed ducts or pipe casings in timber and board:\n"
+    "    * Pipework boxed in timber framing and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
+    "  Fire stopping — sealing service penetrations through fire-rated compartment walls or floors:\n"
+    "    * Fire stopping to service penetration through compartment (nr) — rate_key: bwic_fire_stopping_penetration\n"
+    "  Making good — reinstating finishes around completed service installations:\n"
+    "    * Plaster or plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
+    "    * Masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
+    "  Chases — cutting service routes through masonry, including making good:\n"
+    "    * Chase in masonry for conduit or pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "BWIC NEGATIVE RULE: Do NOT classify MEP equipment installation itself as BWIC. "
+    "Boilers, radiators, pipework runs, ductwork, cable containment, luminaires, "
+    "distribution boards, consumer units, and all M&E equipment and wiring belong in "
+    "5.14 Mechanical services or 5.15 Electrical services. Only the associated building "
+    "work — the hole, sleeve, boxing-in, fire stop, or reinstatement around the service "
+    "— belongs in 5.41. Never duplicate a service item in both a services section and 5.41.\n"
     "Scale quantities to the size of the project and complexity of M&E installations "
     "described in the drawings. Never omit this section.\n"
 
@@ -201,7 +214,12 @@ SYSTEM_PROMPT = (
     "5.17 Plastering and internal finishes; "
     "5.20 Painting and decorating; 5.21 Drainage below ground; "
     "5.23 Windows and external doors; "
-    "5.28 Floor finishes (tiling, screed, timber flooring).\n"
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.31 Insulation; "
+    "5.35 External works — hard landscaping and site paving; "
+    "5.36 Fencing and gates; "
+    "5.37 Soft landscaping and planting; "
+    "5.41 Builder's Work in Connection with Services.\n"
     "- PRELIMINARIES RULE: Preliminaries items (site establishment, supervision, welfare, "
     "temporary services, insurance, health and safety, cleaning) belong in Section 1 "
     "Preliminaries. Never include these items in the Measured Works sections (5.x). "
@@ -244,6 +262,33 @@ SYSTEM_PROMPT = (
     "types or thicknesses, insert a Provisional Sum under 5.31 labelled "
     "'Thermal and acoustic insulation — specification not issued at tender stage; "
     "contractor to include own allowance'.\n"
+
+    # ── External works rule ───────────────────────────────────────────────────
+    "- EXTERNAL WORKS RULE: Where external works are present, group all external "
+    "works items together in their own dedicated sections rather than scattering "
+    "them across unrelated building trades. "
+    "External works include: paving (block paving, tarmac, concrete slabs), "
+    "kerbs, roadways, car parks, footpaths, fencing, gates, landscaping, "
+    "planting, external drainage runs (above-ground surface water routes and "
+    "connections), retaining structures, external steps, hard landscaping, "
+    "soft landscaping, and reinstatement works.\n"
+    "Use these NRM2 section allocations for external works:\n"
+    "  5.35 External works — hard landscaping and site paving: block paving, "
+    "tarmac, concrete paving slabs, kerbs, roadways, car parks, footpaths, "
+    "retaining structures, external steps, hard landscaping, reinstatement.\n"
+    "  5.36 Fencing and gates: all fencing types, gates and barriers.\n"
+    "  5.37 Soft landscaping and planting: turf, seeding, planting, topsoil, "
+    "mulching, tree and shrub planting, soft landscaping.\n"
+    "External works sections must appear after all building works sections "
+    "(5.1 to 5.41) and before any provisional sums.\n"
+    "EXTERNAL DRAINAGE NOTE: External below-ground drainage (foul and surface "
+    "water drain runs, inspection chambers, manholes, rodding eyes, connections "
+    "to sewer) remains in 5.21 Drainage below ground. Do not move below-ground "
+    "drainage to 5.35.\n"
+    "EXTERNAL WORKS NEGATIVE RULE: Do not classify internal building elements "
+    "as external works. Internal floor finishes, internal staircases, internal "
+    "drainage, and internal paving (e.g. tiled floors) belong in their correct "
+    "building trade sections — not in 5.35, 5.36, or 5.37.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
@@ -500,6 +545,27 @@ def _match_rate(description):
     return None, None
 
 
+# Canonical NRM2 ordering improves consistency across projects and export formats.
+_NRM2_SECTION_ORDER: dict[str, int] = {
+    "5.1":  10,  "5.2":  20,  "5.4":  30,  "5.8":  40,
+    "5.9":  50,  "5.11": 60,  "5.12": 70,  "5.14": 80,
+    "5.15": 90,  "5.18": 100, "5.19": 110, "5.20": 120,
+    "5.21": 130, "5.23": 140, "5.24": 150, "5.28": 160,
+    "5.29": 170, "5.31": 180, "5.35": 190, "5.36": 200,
+    "5.37": 210, "5.41": 220,
+}
+
+_RE_NRM2_PREFIX = re.compile(r'^\s*(\d+(?:\.\d+)*)')
+
+
+def _nrm2_sort_key(group: dict) -> int:
+    """Return the canonical NRM2 sort position for a trade group; unknowns sort last."""
+    if not isinstance(group, dict):
+        return 9999
+    m = _RE_NRM2_PREFIX.match(group.get('trade') or '')
+    return _NRM2_SECTION_ORDER.get(m.group(1), 9999) if m else 9999
+
+
 def _enrich_boq(boq_data):
     """
     Walk the Claude JSON (regardless of its outer shape) and apply RATES_DB rates to
@@ -575,6 +641,8 @@ def _enrich_boq(boq_data):
                 item['line_total']          = 0.00
                 item['rate_source']         = None
 
+    # Sort trade groups into canonical NRM2 section order.
+    groups.sort(key=_nrm2_sort_key)
             # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
             # This internal item_code is the future integration key for external QS software exporters.
             if not item.get('item_code'):

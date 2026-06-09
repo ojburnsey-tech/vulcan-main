@@ -49,49 +49,54 @@ PREAMBLE_ITEMS = [
             "otherwise instructed in writing by the Contract Administrator. The "
             "Contractor shall be deemed to have satisfied themselves as to the "
             "accuracy of quantities before submitting their tender."),
-    ("2.",  "This Bill of Quantities has been prepared in accordance with the RICS "
+    ("2.",  "Measurement Method: Quantities have been measured on a net basis unless "
+            "otherwise stated. No allowance for waste, laps, bulking, cutting, or working "
+            "space has been included unless specifically described. All descriptions are to "
+            "be read in conjunction with the drawings, specifications, schedules, and other "
+            "tender documents."),
+    ("3.",  "This Bill of Quantities has been prepared in accordance with the RICS "
             "New Rules of Measurement: Detailed Measurement for Building Works (NRM2), "
             "Second Edition. Work sections are numbered and ordered in accordance with "
             "NRM2 Section 5."),
-    ("3.",  "All quantities are net as fixed and measured in accordance with NRM2 "
+    ("4.",  "All quantities are net as fixed and measured in accordance with NRM2 "
             "measurement rules. No allowance has been made for waste, bulking, shrinkage, "
             "or settlement. Contractors must apply their own waste factors when pricing "
             "materials."),
-    ("4.",  "Rates inserted by the contractor are deemed to include all labour, materials, "
+    ("5.",  "Rates inserted by the contractor are deemed to include all labour, materials, "
             "plant, equipment, tools, fixings, fastenings, consumables, and all other costs "
             "necessary to complete each item fully in accordance with the contract drawings "
             "and specification."),
-    ("5.",  "Unless stated otherwise, all work is measured in accordance with NRM2 and "
+    ("6.",  "Unless stated otherwise, all work is measured in accordance with NRM2 and "
             "descriptions are abbreviated for brevity. Full details of materials, standards, "
             "and workmanship are contained in the project specification and drawings listed "
             "in the Form of Tender, which take precedence over these descriptions in all "
             "cases."),
-    ("6.",  "Provisional Sums are included where insufficient information was available at "
+    ("7.",  "Provisional Sums are included where insufficient information was available at "
             "the time of preparation to enable accurate measurement. Defined Provisional "
             "Sums are those where the nature and construction of the work is known but the "
             "exact quantity is not. Undefined Provisional Sums are those where the work "
             "cannot be fully described. Both are subject to remeasurement and adjustment "
             "by the Contract Administrator."),
-    ("7.",  "Prime Cost (PC) Sums are included for materials or goods to be supplied by "
+    ("8.",  "Prime Cost (PC) Sums are included for materials or goods to be supplied by "
             "nominated or selected suppliers. The contractor shall allow in their rates for "
             "all costs of unloading, storing, handling, fixing, and waste in connection with "
             "PC Sum items. Profit and attendance on PC Sums shall be stated separately."),
-    ("8.",  "The following drawings and documents govern measurement and are listed in the "
+    ("9.",  "The following drawings and documents govern measurement and are listed in the "
             "Form of Tender. Where dimensions on drawings conflict with written dimensions, "
             "the written dimension shall take precedence. Where the specification conflicts "
             "with the drawings, the matter shall be referred to the Contract Administrator "
             "before work proceeds."),
-    ("9.",  "Where information was incomplete or absent at the time of preparation, "
+    ("10.", "Where information was incomplete or absent at the time of preparation, "
             "assumptions have been made on the basis of normal construction practice for "
             "the building type and location. All such assumptions are noted in the relevant "
             "item descriptions. The quantity surveyor accepts no liability for costs arising "
             "from assumptions that prove incorrect where the relevant information was not "
             "provided."),
-    ("10.", "Rounding: linear quantities are rounded to the nearest whole metre; area "
+    ("11.", "Rounding: linear quantities are rounded to the nearest whole metre; area "
             "quantities to the nearest whole square metre; volume quantities to the nearest "
             "whole cubic metre. Items fewer than one unit in quantity are given as one. "
             "Monetary amounts are rounded to the nearest penny."),
-    ("11.", "This document is an AI-generated draft prepared by Vulcan Quanta. All "
+    ("12.", "This document is an AI-generated draft prepared by Vulcan Quanta. All "
             "quantities, descriptions, and rates must be reviewed and verified by a "
             "chartered quantity surveyor before issue for tender or contract. The preparing "
             "party accepts no liability for errors or omissions in this draft."),
