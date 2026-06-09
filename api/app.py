@@ -343,6 +343,11 @@ BOQ_OUTPUT_SCHEMA = {
                                     "type": "string",
                                     "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
                                 },
+                                # This internal item_code is the future integration key for external QS software exporters.
+                                "item_code": {
+                                    "type": "string",
+                                    "description": "Internal codification key in {NRM2-section}/{sequence} format, e.g. '5.8/001'. Generated during enrichment.",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
@@ -446,12 +451,21 @@ def _enrich_boq(boq_data):
     else:
         return boq_data                            # unexpected shape — pass through untouched
 
+    # This internal item_code is the future integration key for external QS software exporters.
+    section_counters = {}  # separate sequence counter per NRM2 section, e.g. {"5.8": 3, "5.1": 1}
+
     for group in groups:                           # iterate each trade section
         if not isinstance(group, dict):            # skip strings or other non-dict entries Claude may have included
             continue
         items = group.get('items') or group.get('line_items') or []
         if not isinstance(items, list):            # guard against items being a scalar or dict
             continue
+
+        # Extract the NRM2 section prefix from the trade heading (e.g. "5.8 Masonry" → "5.8")
+        trade_str = group.get('trade', '')
+        _section_match = re.match(r'^[\d.]+', trade_str.strip())
+        _section = _section_match.group() if _section_match else (trade_str.strip() or 'X')
+
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
@@ -488,6 +502,12 @@ def _enrich_boq(boq_data):
                 item['rate']                = 0.00
                 item['line_total']          = 0.00
                 item['rate_source']         = None
+
+            # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
+            # This internal item_code is the future integration key for external QS software exporters.
+            if not item.get('item_code'):
+                section_counters[_section] = section_counters.get(_section, 0) + 1
+                item['item_code'] = f"{_section}/{section_counters[_section]:03d}"
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
