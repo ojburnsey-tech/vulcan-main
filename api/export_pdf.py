@@ -109,7 +109,7 @@ PROVISIONAL_SUMS = [
 ]
 
 PC_SUMS = [
-    ("Client’s fixtures and fittings; PC Sum for supply only; "
+    ("Client's fixtures and fittings; PC Sum for supply only; "
      "contractor to add fixing, profit and attendance separately", 3500.00),
 ]
 
@@ -159,7 +159,7 @@ NRM2_SUBSTITUTIONS = [
     (
         "Timber roof structure",
         "Pitched timber roof structure comprising C24 treated softwood rafters, ceiling "
-        "joists, purlins, ridge board and wall plates, all at centres to engineer’s details",
+        "joists, purlins, ridge board and wall plates, all at centres to engineer's details",
     ),
     (
         "UPVC fascia",
@@ -348,8 +348,8 @@ def _build_form_of_tender(boq_json, today_str: str) -> list:
             _field_row("Location:",
                        location),
             _field_row("Drawing Refs:",
-                       "Measured from Architect’s Drawings Ref: PL-01 through PL-10 and "
-                       "Structural Engineer’s Calculation Sheet Ref: SE-04"),
+                       "Measured from Architect's Drawings Ref: PL-01 through PL-10 and "
+                       "Structural Engineer's Calculation Sheet Ref: SE-04"),
             _field_row("Date:",        today_str),
             _field_row("Prepared by:", "Vulcan Quanta (AI-assisted draft)"),
         ],
@@ -685,7 +685,7 @@ def _build_dayworks() -> list:
     rows = [[
         Paragraph("Resource",               S_COL_HDR),
         Paragraph("Grade / Description",    S_COL_HDR),
-        Paragraph("Contractor’s Rate (£)", S_COL_HDR_R),
+        Paragraph("Contractor's Rate (£)", S_COL_HDR_R),
         Paragraph("Unit",                   S_COL_HDR_C),
     ]]
     cmds = list(_col_header_cmds())
@@ -743,28 +743,28 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
         ])
         if is_bold:
             cmds += [
-                (‘LINEABOVE’,     (0, ir), (-1, ir), 1.0, colors.black),
-                (‘TOPPADDING’,    (0, ir), (-1, ir), 6),
-                (‘BOTTOMPADDING’, (0, ir), (-1, ir), 6),
+                ('LINEABOVE',     (0, ir), (-1, ir), 1.0, colors.black),
+                ('TOPPADDING',    (0, ir), (-1, ir), 6),
+                ('BOTTOMPADDING', (0, ir), (-1, ir), 6),
             ]
         elif ir % 2 == 0:
-            cmds.append((‘BACKGROUND’, (0, ir), (-1, ir), _GREY_ALT))
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
     gr = len(rows) - 1
-    cmds.append((‘LINEBELOW’, (0, gr), (-1, gr), 1.5, colors.black))
+    cmds.append(('LINEBELOW', (0, gr), (-1, gr), 1.5, colors.black))
 
-    base = _base_table_cmds() + [(‘ALIGN’, (1, 0), (1, -1), ‘RIGHT’)]
-    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign=’LEFT’)
+    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
 
     story = _section_heading("GRAND SUMMARY")
     story.append(tbl)
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(
-        ‘Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\’s ‘
-        ‘Architects\’ & Builders\’ Price Book 2025. ‘
-        ‘Subject to market variation, location, and supplier pricing. ‘
-        ‘Professional quantity surveyor review recommended before tender or client issue.’,
+        'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\'s '
+        'Architects\' & Builders\' Price Book 2025. '
+        'Subject to market variation, location, and supplier pricing. '
+        'Professional quantity surveyor review recommended before tender or client issue.',
         S_DISCLAIMER,
     ))
     return story
