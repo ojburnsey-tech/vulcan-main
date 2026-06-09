@@ -171,6 +171,11 @@ SYSTEM_PROMPT = (
     "5.20 Painting and decorating; 5.21 Drainage below ground; "
     "5.23 Windows and external doors; "
     "5.28 Floor finishes (tiling, screed, timber flooring).\n"
+    "- External render, tyrolean render, monocouche render, sand and cement render, "
+    "polymer render, and all applied render finishes to external masonry walls belong "
+    "in section 5.8 Masonry — not 5.20 Painting and Decorating. Render is a structural "
+    "finish applied to the building fabric. Never classify render under painting or "
+    "decorating sections.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
