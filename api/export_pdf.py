@@ -852,6 +852,63 @@ def _build_dayworks() -> list:
     return story
 
 
+def _build_annexes(boq_json) -> list:
+    """Annexes — NRM2 supporting information. Returns [] if no annex content exists."""
+    if not isinstance(boq_json, dict):
+        return []
+
+    annexes = boq_json.get('annexes')
+    if not isinstance(annexes, dict):
+        return []
+
+    _ANNEX_DEFS = [
+        ('schedules',                        'Annex A — Schedules'),
+        ('performance_specifications',       'Annex B — Performance Specifications'),
+        ('quotations',                       'Annex C — Quotations'),
+        ('risk_notes',                       'Annex D — Risk Notes'),
+        ('contractor_designed_scope',        'Annex E — Contractor Designed Scope'),
+        ('statutory_undertaker_information', 'Annex F — Statutory Undertaker Information'),
+    ]
+
+    populated = [
+        (title, annexes[key])
+        for key, title in _ANNEX_DEFS
+        if isinstance(annexes.get(key), list) and annexes[key]
+    ]
+
+    if not populated:
+        return []
+
+    story = _section_heading('ANNEXES')
+
+    bul_w = 5 * mm
+    txt_w = CONTENT_W - bul_w
+
+    for title, entries in populated:
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph(title, S_BODY_BOLD))
+        story.append(Spacer(1, 2 * mm))
+
+        rows = [
+            [Paragraph('•', S_NORMAL), Paragraph(html.escape(str(entry)), S_NORMAL)]
+            for entry in entries
+            if entry
+        ]
+        if rows:
+            tbl = Table(rows, colWidths=[bul_w, txt_w], hAlign='LEFT')
+            tbl.setStyle(TableStyle([
+                ('TOPPADDING',    (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                ('LEFTPADDING',   (0, 0), (0,  -1), 10),
+                ('LEFTPADDING',   (1, 0), (1,  -1), 4),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+                ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(tbl)
+
+    return story
+
+
 def _build_grand_summary(prelim_total: float, measured_total: float, prov_total: float) -> list:
     """Grand Summary — tender BoQ version.
 
@@ -971,6 +1028,10 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     story += prov_flowables
     story.append(PageBreak())
     story += _build_dayworks()
+    annex_flowables = _build_annexes(boq_json)
+    if annex_flowables:
+        story.append(PageBreak())
+        story += annex_flowables
     story.append(PageBreak())
     story += _build_grand_summary(prelim_total, measured_total, prov_total)
 
