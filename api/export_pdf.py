@@ -628,17 +628,30 @@ def _build_provisional_sums() -> tuple:
     story = _section_heading("SECTION 03 — PROVISIONAL SUMS, PC SUMS AND FEES")
     prov_total = 0.0
 
-    def _sub_table(heading, items):
+    def _sub_table(heading, items, show_ps_type=False):
         nonlocal prov_total
         rows = [[Paragraph("Description", S_COL_HDR),
                  Paragraph("Allowance",   S_COL_HDR_R)]]
         cmds = list(_col_header_cmds())
         sub_total = 0.0
-        for desc, amt in items:
+        for item in items:
+            if isinstance(item, dict):
+                desc    = item.get('description', '')
+                amt     = float(item.get('amount', 0.0))
+                ps_type = item.get('ps_type')
+            else:
+                desc    = item[0]
+                amt     = item[1]
+                ps_type = item[2] if len(item) > 2 else None
+            if show_ps_type:
+                label     = ps_type if ps_type in ('Defined', 'Undefined') else 'Undefined'
+                desc_text = f"{desc}<br/><i>({label} Provisional Sum)</i>"
+            else:
+                desc_text = desc
             prov_total += amt
             sub_total  += amt
             ir = len(rows)
-            rows.append([Paragraph(desc, S_NORMAL),
+            rows.append([Paragraph(desc_text, S_NORMAL),
                          Paragraph(_fmt(amt), S_RIGHT)])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
@@ -658,7 +671,7 @@ def _build_provisional_sums() -> tuple:
         return tbl
 
     story.append(Paragraph("Provisional Sums", S_TRADE))
-    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS))
+    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS, show_ps_type=True))
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("Prime Cost Sums", S_TRADE))
     story.append(_sub_table("Prime Cost Sums", PC_SUMS))
@@ -814,7 +827,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
 
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(colors.Color(0.3, 0.3, 0.3))
-        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI Draft')
+        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI-Assisted Draft')
 
         rule_y = PAGE_H - TOP_M + 4 * mm
         canvas.setStrokeColor(colors.black)
@@ -825,18 +838,6 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         canvas.setFillColor(colors.black)
         canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
 
-        footer_rule_y = BOT_M - 4 * mm
-        canvas.setLineWidth(0.5)
-        canvas.setStrokeColor(colors.Color(0.5, 0.5, 0.5))
-        canvas.line(LEFT_M, footer_rule_y, PAGE_W - RIGHT_M, footer_rule_y)
-
-        canvas.setFont('Helvetica-Oblique', 7.5)
-        canvas.setFillColor(colors.Color(0.35, 0.35, 0.35))
-        canvas.drawCentredString(
-            PAGE_W / 2,
-            footer_rule_y - 9,
-            'AI-generated draft. Professional review required before issue.',
-        )
         canvas.restoreState()
 
     doc = SimpleDocTemplate(

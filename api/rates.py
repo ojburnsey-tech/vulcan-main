@@ -524,7 +524,7 @@ RATES_DB = {
         "unit": "m²",
     },
     "carpentry_chipboard_flooring_18mm": {
-        "material_rate":       9.75,
+        "material_rate":      14.00,
         "labour_rate":         9.50,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
@@ -1245,6 +1245,71 @@ RATES_DB = {
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "m²",
+    },
+
+    # 5.41 Builder's Work in Connection with Services
+    "bwic_service_penetration_masonry": {
+        "description": "Form opening in masonry wall for service penetration",
+        "unit": "nr",
+        "material_rate": 8.00,
+        "labour_rate": 22.00,
+        "rate": 30.00,
+    },
+    "bwic_service_penetration_concrete": {
+        "description": "Form opening in concrete floor/wall for service penetration",
+        "unit": "nr",
+        "material_rate": 12.00,
+        "labour_rate": 38.00,
+        "rate": 50.00,
+    },
+    "bwic_duct_sleeve_100mm": {
+        "description": "Supply and fix 100mm dia. duct sleeve through wall/floor",
+        "unit": "nr",
+        "material_rate": 18.00,
+        "labour_rate": 22.00,
+        "rate": 40.00,
+    },
+    "bwic_duct_sleeve_150mm": {
+        "description": "Supply and fix 150mm dia. duct sleeve through wall/floor",
+        "unit": "nr",
+        "material_rate": 24.00,
+        "labour_rate": 26.00,
+        "rate": 50.00,
+    },
+    "bwic_fire_stopping_penetration": {
+        "description": "Fire stopping to service penetration through compartment wall/floor",
+        "unit": "nr",
+        "material_rate": 28.00,
+        "labour_rate": 22.00,
+        "rate": 50.00,
+    },
+    "bwic_boxing_in_pipework_timber": {
+        "description": "Box in pipework in timber framing and plasterboard",
+        "unit": "m",
+        "material_rate": 18.00,
+        "labour_rate": 22.00,
+        "rate": 40.00,
+    },
+    "bwic_making_good_plaster": {
+        "description": "Make good plaster/plasterboard around service installation",
+        "unit": "nr",
+        "material_rate": 8.00,
+        "labour_rate": 17.00,
+        "rate": 25.00,
+    },
+    "bwic_making_good_masonry": {
+        "description": "Make good masonry around service installation",
+        "unit": "nr",
+        "material_rate": 12.00,
+        "labour_rate": 23.00,
+        "rate": 35.00,
+    },
+    "bwic_chase_masonry_small": {
+        "description": "Cut and form chase in masonry for conduit/pipework, make good",
+        "unit": "m",
+        "material_rate": 4.00,
+        "labour_rate": 16.00,
+        "rate": 20.00,
     },
 }
 
