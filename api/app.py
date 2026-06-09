@@ -183,7 +183,14 @@ SYSTEM_PROMPT = (
     "wall ties type 4 at 2.5/m²; 100mm dense blockwork inner leaf; Ref Drawing PL-03' "
     "— "
     "'Provisional Sum: Electrical installation first and second fix — electrical drawings "
-    "not issued at tender stage; contractor to include own allowance'.\n"
+    "not issued at tender stage; contractor to include own allowance'. "
+    "Where proprietary product names are referenced in "
+    "descriptions (for example Catnic, Hyload, Velux, Rockwool, "
+    "Kingspan, Celotex, or any other manufacturer or brand name), "
+    "always append 'or equal approved' immediately after the brand "
+    "name. Example: 'Hyload or equal approved; 150mm wide DPC'. "
+    "Never omit this qualifier when a brand name appears in a "
+    "bill description.\n"
 
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
