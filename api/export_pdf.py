@@ -1,6 +1,7 @@
 # api/export_pdf.py
 # Generates a professional NRM2-compliant A4 Bill of Quantities PDF using ReportLab Platypus.
 
+import html
 import io
 import unicodedata
 from datetime import date
@@ -542,13 +543,21 @@ def _build_measured_works(trade_groups) -> tuple:
             line_tot = round(qty * (mat + lab + plant + waste), 2)
             trade_total += line_tot
 
+            dim_str  = item.get('dimension_string', '')
+            draw_ref = item.get('drawing_ref', '')
+            desc_markup = html.escape(desc)
+            if dim_str:
+                desc_markup += f'<br/><font size="8"><i>{html.escape(dim_str)}</i></font>'
+            if draw_ref:
+                desc_markup += f'<br/><font size="8"><i>Ref: {html.escape(draw_ref)}</i></font>'
+
             ir = len(rows)
             rows.append([
-                Paragraph(desc,                              S_NORMAL),
-                Paragraph(f'{qty:g}',                       S_RIGHT),
-                Paragraph(unit,                             S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
-                Paragraph(_fmt(line_tot),                   S_RIGHT),
+                Paragraph(desc_markup,                       S_NORMAL),
+                Paragraph(f'{qty:g}',                        S_RIGHT),
+                Paragraph(unit,                              S_CENTER),
+                Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
+                Paragraph(_fmt(line_tot),                    S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
