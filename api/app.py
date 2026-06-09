@@ -333,6 +333,22 @@ SYSTEM_PROMPT = (
     "Always include this field. If a quantity is a single dimension with no "
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
+
+    # ── Risk schedule ─────────────────────────────────────────────────────────
+    "- RISK SCHEDULE RULE: Generate a risk_schedule whenever the project contains "
+    "significant uncertainty. Risks must be construction-related only — do not "
+    "provide contractual or legal advice. Classify each risk as either Defined or "
+    "Undefined using the same NRM2 definitions as provisional sums. "
+    "For each risk include: description (what the risk is), risk_type (Defined or "
+    "Undefined), impact (consequence if the risk materialises, e.g. cost overrun, "
+    "programme delay), likelihood (Low / Medium / High), and mitigation (recommended "
+    "action to reduce or manage the risk). "
+    "Typical risks warranting inclusion: unknown ground conditions; unverified "
+    "drainage routes; existing services not confirmed on drawings; restricted "
+    "site access; partial or incomplete design information at tender stage; "
+    "unconfirmed structural elements. "
+    "Omit risk_schedule entirely if the specification is complete and no material "
+    "uncertainties are present.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
@@ -372,6 +388,22 @@ BOQ_OUTPUT_SCHEMA = {
                 },
                 "required": ["trade", "items"],
                 "additionalProperties": False,
+            },
+        },
+        "risk_schedule": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "risk_type": {
+                        "type": "string",
+                        "enum": ["Defined", "Undefined"],
+                    },
+                    "impact": {"type": "string"},
+                    "likelihood": {"type": "string"},
+                    "mitigation": {"type": "string"},
+                },
             },
         },
     },
