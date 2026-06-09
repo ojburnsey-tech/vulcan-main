@@ -124,12 +124,33 @@ SYSTEM_PROMPT = (
     "disposal quantities. Example: 45m² plan area → 45 × 0.15 = 6.75m³ excavation → "
     "6.75 × 1.30 = 8.78m³ disposal off site.\n"
 
+    # ── Wetroom tanking ───────────────────────────────────────────────────────
+    "- Wetroom tanking (rate_key: wetroom_tanking_system) is measured in m². "
+    "Measure the floor area plus wall area up to 1800mm height for all wetroom/shower "
+    "enclosure areas. Do not use qty: 1 for this item.\n"
+    "- WETROOM TANKING RULE: Wetroom tanking (rate_key: wetroom_tanking_system) is "
+    "measured in m². Measure the floor area plus wall area up to 1800mm height for "
+    "all wetroom and shower enclosure areas. Never set quantity to 1 for this item.\n"
+
     # ── Double-counting prevention ────────────────────────────────────────────
     "- DOUBLE-COUNTING RULE: Never measure the same physical work in both a composite item "
     "and a constituent item. For cavity walls: choose either a single composite item covering "
     "the full wall build-up (both leaves, insulation, ties) OR separate items for each "
     "component — never both. If you use a composite cavity wall item, do not add separate "
     "items for the outer leaf, inner leaf, or wall ties.\n"
+
+    # ── Plasterboard double-counting prevention ───────────────────────────────
+    "- Plasterboard double-counting prevention:\n"
+    "  * Stud partitions: the composite stud partition rate already includes "
+    "plasterboard to both faces. Never add separate plasterboard line items "
+    "for the faces of stud partitions. If a stud partition item exists, "
+    "plasterboard to that partition is already priced.\n"
+    "  * Dot-and-dab plasterboard to masonry: measure to one face only — the "
+    "masonry face receiving the board. Do not measure the reverse face.\n"
+    "  * Internal partitions of any construction type: never measure plasterboard "
+    "to both faces. One face only, always.\n"
+    "  * Ceiling plasterboard and plasterboard to external walls or soffits are "
+    "measured independently and are not affected by this rule.\n"
 
     # ── Missing trades checklist ──────────────────────────────────────────────
     "- MANDATORY TRADES CHECKLIST: For any residential extension or new build, you MUST "
@@ -143,6 +164,20 @@ SYSTEM_PROMPT = (
     "(5) structural steelwork — if the input references any SE or structural drawing; "
     "(6) internal door leaves — supply and hang, separate from door linings; "
     "(7) floor finishes — screed, tiling, or timber flooring.\n"
+    "- Always include a 5.41 Builder's Work in Connection with Services section. "
+    "This section covers all building work carried out solely to accommodate M&E "
+    "installations. It must contain sub-items covering at minimum:\n"
+    "  * Service penetrations through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
+    "  * Service penetrations through concrete (nr) — rate_key: bwic_service_penetration_concrete\n"
+    "  * Duct sleeves 100mm dia. (nr) — rate_key: bwic_duct_sleeve_100mm\n"
+    "  * Duct sleeves 150mm dia. (nr) — rate_key: bwic_duct_sleeve_150mm\n"
+    "  * Fire stopping to penetrations through compartment walls/floors (nr) — rate_key: bwic_fire_stopping_penetration\n"
+    "  * Boxing in of pipework in timber and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
+    "  * Making good plaster/plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
+    "  * Making good masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
+    "  * Chases in masonry for conduit/pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "Scale quantities to the size of the project and complexity of M&E installations "
+    "described in the drawings. Never omit this section.\n"
 
     # ── UPVC surfaces ─────────────────────────────────────────────────────────
     # ── MEP measurement rule ──────────────────────────────────────────────────
@@ -173,6 +208,42 @@ SYSTEM_PROMPT = (
     "If the input describes contractor overhead or site running cost items, do not measure "
     "them — the Preliminaries section is a fixed structure in the PDF and is handled "
     "separately from the measured works you are generating.\n"
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.41 Builder's Work in Connection with Services.\n"
+    "- External render, tyrolean render, monocouche render, sand and cement render, "
+    "polymer render, and all applied render finishes to external masonry walls belong "
+    "in section 5.8 Masonry — not 5.20 Painting and Decorating. Render is a structural "
+    "finish applied to the building fabric. Never classify render under painting or "
+    "decorating sections.\n"
+    "5.23 Windows, screens and lights; 5.24 Doors, shutters and hatches; "
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.31 Insulation; "
+    "5.41 Builder's work in connection with services.\n"
+
+    # ── Windows and doors rule ────────────────────────────────────────────────
+    "- WINDOWS AND DOORS RULE: Always create separate trade sections for windows and doors. "
+    "Never combine them in a single section. "
+    "Window items include: window frames, glazing units, glazing beads, window boards, "
+    "ironmongery to windows, manifestation film. "
+    "Door items include: door sets, door leaves, door frames and linings, ironmongery to doors, "
+    "door closers, access control to doors. "
+    "If glazing is separately described as a standalone element (structural glazing, frameless glass, "
+    "glass balustrades), measure it under 5.23.\n"
+
+    # ── Insulation rule ───────────────────────────────────────────────────────
+    "- INSULATION RULE: All insulation items must be grouped together in a dedicated "
+    "5.31 Insulation section. Do not attach insulation items to the trade they serve. "
+    "The following all belong in 5.31, not in other sections: "
+    "cavity wall insulation (partial fill or full fill) — not in 5.8 Masonry; "
+    "roof insulation (between/over rafters, flat roof insulation board) — not in 5.12 Roofing; "
+    "floor insulation (rigid insulation board below screed or slab) — not in 5.1 Groundworks; "
+    "acoustic insulation (between floors, party walls) — not in 5.8 or 5.11; "
+    "pipe and duct insulation lagging — not in 5.14 Mechanical services; "
+    "fire-rated insulation to structural elements — not in 5.9. "
+    "Always create a 5.31 Insulation section. If the specification does not describe insulation "
+    "types or thicknesses, insert a Provisional Sum under 5.31 labelled "
+    "'Thermal and acoustic insulation — specification not issued at tender stage; "
+    "contractor to include own allowance'.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
@@ -204,6 +275,24 @@ SYSTEM_PROMPT = (
     "name. Example: 'Hyload or equal approved; 150mm wide DPC'. "
     "Never omit this qualifier when a brand name appears in a "
     "bill description.\n"
+
+    # ── Provisional sum classification ────────────────────────────────────────
+    "- PROVISIONAL SUM CLASSIFICATION: Every provisional sum you generate must be "
+    "classified as either Defined or Undefined in accordance with NRM2:\n"
+    "DEFINED provisional sum: Use when the scope, location, and timing of the work "
+    "is known but the precise cost cannot be determined at tender. The contractor "
+    "is expected to include allowances in their programme and method statement. "
+    "Examples: specialist supplier installations, known future fit-out works, "
+    "named subcontractor packages where scope is described. "
+    "Output format: include a field 'ps_type': 'Defined'\n"
+    "UNDEFINED provisional sum: Use when the nature and extent of the work cannot "
+    "be foreseen at tender stage. The contractor makes no programme or preliminary "
+    "allowance. "
+    "Examples: archaeological investigations, unknown service diversions, "
+    "contingency allowances, unforeseen ground conditions. "
+    "Output format: include a field 'ps_type': 'Undefined'\n"
+    "Never output a provisional sum without a ps_type classification. If uncertain, "
+    "classify as Undefined.\n"
 
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
