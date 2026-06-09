@@ -312,11 +312,28 @@ SYSTEM_PROMPT = (
     "Always include this field. If a quantity is a single dimension with no "
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
+
+    # ── Document control ──────────────────────────────────────────────────────
+    "- DOCUMENT CONTROL RULE: When document-control information is known, populate "
+    "the following top-level fields in your output (all optional — omit only if "
+    "genuinely unknown):\n"
+    "  * revision: document revision letter, e.g. 'A'\n"
+    "  * issue_status: e.g. 'Tender Issue'\n"
+    "  * prepared_by: e.g. 'Vulcan Quanta'\n"
+    "  * checked_by: e.g. 'Professional Review Required'\n"
+    "  * intended_use: e.g. 'Tender Pricing'\n"
+    "Use the typical values above unless the input document states otherwise. "
+    "Do not invent project-specific revision information that is not in the input.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "revision":      {"type": "string", "description": "Document revision letter, e.g. 'A'."},
+        "issue_status":  {"type": "string", "description": "Issue status, e.g. 'Tender Issue'."},
+        "prepared_by":   {"type": "string", "description": "Name of the party that prepared this BoQ."},
+        "checked_by":    {"type": "string", "description": "Name of the party that checked this BoQ."},
+        "intended_use":  {"type": "string", "description": "Intended use of this document, e.g. 'Tender Pricing'."},
         "bill_of_quantities": {
             "type": "array",
             "items": {
