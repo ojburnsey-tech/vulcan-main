@@ -42,19 +42,52 @@ _I_DESC, _I_QTY, _I_UNIT, _I_RATE, _I_TOTAL = range(5)
 # ── Static section content (module-level constants — edit these to update documents) ──
 
 PREAMBLE_ITEMS = [
-    ("1.", "This Bill of Quantities has been prepared in accordance with the RICS New Rules "
-           "of Measurement: Detailed Measurement for Building Works (NRM2)."),
-    ("2.", "All quantities are net as fixed in place. No allowance has been made for waste, "
-           "bulking, or shrinkage. Contractors must apply their own waste factors when "
-           "pricing materials."),
-    ("3.", "Rates inserted by the contractor are deemed to include all labour, materials, "
-           "plant, equipment, fixings, fastenings, and all other costs necessary to complete "
-           "each item in accordance with the specification."),
-    ("4.", "Unless stated otherwise, all work is measured in accordance with NRM2 and the "
-           "descriptions are abbreviated. Full details are contained in the project "
-           "specification and drawings listed in the Form of Tender."),
-    ("5.", "This document is an AI-generated draft. All quantities and rates must be verified "
-           "by a chartered quantity surveyor before issue for tender or contract."),
+    ("1.",  "This Bill of Quantities has been prepared in accordance with the RICS "
+            "New Rules of Measurement: Detailed Measurement for Building Works (NRM2), "
+            "Second Edition. Work sections are numbered and ordered in accordance with "
+            "NRM2 Section 5."),
+    ("2.",  "All quantities are net as fixed and measured in accordance with NRM2 "
+            "measurement rules. No allowance has been made for waste, bulking, shrinkage, "
+            "or settlement. Contractors must apply their own waste factors when pricing "
+            "materials."),
+    ("3.",  "Rates inserted by the contractor are deemed to include all labour, materials, "
+            "plant, equipment, tools, fixings, fastenings, consumables, and all other costs "
+            "necessary to complete each item fully in accordance with the contract drawings "
+            "and specification."),
+    ("4.",  "Unless stated otherwise, all work is measured in accordance with NRM2 and "
+            "descriptions are abbreviated for brevity. Full details of materials, standards, "
+            "and workmanship are contained in the project specification and drawings listed "
+            "in the Form of Tender, which take precedence over these descriptions in all "
+            "cases."),
+    ("5.",  "Provisional Sums are included where insufficient information was available at "
+            "the time of preparation to enable accurate measurement. Defined Provisional "
+            "Sums are those where the nature and construction of the work is known but the "
+            "exact quantity is not. Undefined Provisional Sums are those where the work "
+            "cannot be fully described. Both are subject to remeasurement and adjustment "
+            "by the Contract Administrator."),
+    ("6.",  "Prime Cost (PC) Sums are included for materials or goods to be supplied by "
+            "nominated or selected suppliers. The contractor shall allow in their rates for "
+            "all costs of unloading, storing, handling, fixing, and waste in connection with "
+            "PC Sum items. Profit and attendance on PC Sums shall be stated separately."),
+    ("7.",  "The following drawings and documents govern measurement and are listed in the "
+            "Form of Tender. Where dimensions on drawings conflict with written dimensions, "
+            "the written dimension shall take precedence. Where the specification conflicts "
+            "with the drawings, the matter shall be referred to the Contract Administrator "
+            "before work proceeds."),
+    ("8.",  "Where information was incomplete or absent at the time of preparation, "
+            "assumptions have been made on the basis of normal construction practice for "
+            "the building type and location. All such assumptions are noted in the relevant "
+            "item descriptions. The quantity surveyor accepts no liability for costs arising "
+            "from assumptions that prove incorrect where the relevant information was not "
+            "provided."),
+    ("9.",  "Rounding: linear quantities are rounded to the nearest whole metre; area "
+            "quantities to the nearest whole square metre; volume quantities to the nearest "
+            "whole cubic metre. Items fewer than one unit in quantity are given as one. "
+            "Monetary amounts are rounded to the nearest penny."),
+    ("10.", "This document is an AI-generated draft prepared by Vulcan Quanta. All "
+            "quantities, descriptions, and rates must be reviewed and verified by a "
+            "chartered quantity surveyor before issue for tender or contract. The preparing "
+            "party accepts no liability for errors or omissions in this draft."),
 ]
 
 # (description, qty, unit, rate_per_unit)
@@ -68,14 +101,24 @@ PRELIM_ITEMS = [
 ]
 
 # (description, allowance_amount)
-PROVISIONAL_ITEMS = [
-    ("Connection to existing sewer — Provisional Sum "
-     "(subject to NI Water (Article 163 application fee: £229.20 incl. VAT) survey)", 1500.00),
-    ("External landscaping and reinstatement — Provisional Sum",  2000.00),
-    ("Client’s fixture and fitting allowance — Prime Cost Sum", 3500.00),
+PROVISIONAL_SUMS = [
+    ("Connection to existing sewer; nature and extent subject "
+     "to NI Water survey; remeasurable on instruction", 1500.00),
+    ("External landscaping and reinstatement; extent and "
+     "specification to be confirmed", 2000.00),
+]
+
+PC_SUMS = [
+    ("Client’s fixtures and fittings; PC Sum for supply only; "
+     "contractor to add fixing, profit and attendance separately", 3500.00),
+]
+
+STATUTORY_FEES = [
     ("Planning application fee — Belfast City Council", 327.00),
-    ("Building Control Full Plans fee — Belfast City Council (40–60m² bracket)", 291.60),
-    ("NI Water sewer connection application and inspection fee (Article 163)", 229.20),
+    ("Building Control Full Plans fee — Belfast City Council "
+     "(40–60m² bracket)", 291.60),
+    ("NI Water sewer connection application and inspection fee "
+     "(Article 163)", 229.20),
 ]
 
 # (resource, grade_description, unit_string)
@@ -92,7 +135,12 @@ DAYWORKS_ROWS = [
 
 DAYWORKS_NOTE = (
     "Dayworks rates to be used only for variations and unforeseen works instructed "
-    "in writing by the Contract Administrator."
+    "in writing by the Contract Administrator. The contractor shall insert their "
+    "all-in rates inclusive of overhead and profit. Labour rates shall be "
+    "all-in gang rates including NI contributions, holiday pay, and tool allowance. "
+    "Plant rates shall include fuel, operator, and all consumables. "
+    "The materials percentage addition shall cover handling, storage, and profit "
+    "on net invoiced cost of materials."
 )
 
 # Substring replacements applied to item descriptions before rendering
@@ -563,36 +611,67 @@ def _build_measured_works(trade_groups) -> tuple:
 
 
 def _build_provisional_sums() -> tuple:
-    """Section 03 — Provisional & PC Sums. Returns (flowables, prov_total)."""
+    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees."""
     col_w = [CONTENT_W - 100, 100]
-    rows  = [[Paragraph("Description", S_COL_HDR), Paragraph("Allowance", S_COL_HDR_R)]]
-    cmds  = list(_col_header_cmds())
+    story = _section_heading("SECTION 03 — PROVISIONAL SUMS, PC SUMS AND FEES")
     prov_total = 0.0
 
-    for desc, amt in PROVISIONAL_ITEMS:
-        prov_total += amt
-        ir = len(rows)
-        rows.append([Paragraph(desc, S_NORMAL), Paragraph(_fmt(amt), S_RIGHT)])
-        if ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+    def _sub_table(heading, items):
+        nonlocal prov_total
+        rows = [[Paragraph("Description", S_COL_HDR),
+                 Paragraph("Allowance",   S_COL_HDR_R)]]
+        cmds = list(_col_header_cmds())
+        sub_total = 0.0
+        for desc, amt in items:
+            prov_total += amt
+            sub_total  += amt
+            ir = len(rows)
+            rows.append([Paragraph(desc, S_NORMAL),
+                         Paragraph(_fmt(amt), S_RIGHT)])
+            if ir % 2 == 0:
+                cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+        tr = len(rows)
+        rows.append([
+            Paragraph(f"{heading} Total", S_RIGHT_BOLD),
+            Paragraph(_fmt(sub_total), S_RIGHT_BOLD),
+        ])
+        cmds += [
+            ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
+            ('TOPPADDING',    (0, tr), (-1, tr), 6),
+            ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+        ]
+        base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+        tbl = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+        tbl.setStyle(TableStyle(base + cmds))
+        return tbl
 
-    tr = len(rows)
-    rows.append([
-        Paragraph("Provisional & PC Sums Total", S_RIGHT_BOLD),
+    story.append(Paragraph("Provisional Sums", S_TRADE))
+    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Prime Cost Sums", S_TRADE))
+    story.append(_sub_table("Prime Cost Sums", PC_SUMS))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
+    story.append(_sub_table("Statutory Fees and Charges", STATUTORY_FEES))
+    story.append(Spacer(1, 4 * mm))
+
+    # Section total row
+    col_w2 = [CONTENT_W - 100, 100]
+    total_rows = [[
+        Paragraph("Section 03 Total", S_RIGHT_BOLD),
         Paragraph(_fmt(prov_total), S_RIGHT_BOLD),
-    ])
-    cmds += [
-        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
-        ('TOPPADDING',    (0, tr), (-1, tr), 6),
-        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+    ]]
+    total_cmds = [
+        ('LINEABOVE',     (0, 0), (-1, 0), 1.5, colors.black),
+        ('TOPPADDING',    (0, 0), (-1, 0), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('ALIGN',         (1, 0), (1, 0),  'RIGHT'),
     ]
+    base = _base_table_cmds()
+    total_tbl = Table(total_rows, colWidths=col_w2, hAlign='LEFT')
+    total_tbl.setStyle(TableStyle(base + total_cmds))
+    story.append(total_tbl)
 
-    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
-    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
-    tbl.setStyle(TableStyle(base + cmds))
-
-    story = _section_heading("SECTION 03 — PROVISIONAL & PC SUMS")
-    story.append(tbl)
     return story, prov_total
 
 
@@ -637,57 +716,55 @@ def _build_dayworks() -> list:
 
 
 def _build_grand_summary(prelim_total: float, measured_total: float, prov_total: float) -> list:
-    """Grand Summary — all figures calculated from section totals."""
-    works_total = prelim_total + measured_total + prov_total
-    contingency = round(works_total * 0.10,  2)
-    overhead    = round(works_total * 0.125, 2)
-    grand_total = round(works_total + contingency + overhead, 2)
+    """Grand Summary — tender BoQ version.
+
+    Contingency and OHP are excluded from the issued tender BoQ.
+    These are internal cost plan items and should not appear in
+    the document issued to contractors for pricing.
+    """
+    works_total = round(prelim_total + measured_total + prov_total, 2)
 
     col_w = [CONTENT_W - 100, 100]
     rows  = [[Paragraph("Section", S_COL_HDR), Paragraph("Total", S_COL_HDR_R)]]
     cmds  = list(_col_header_cmds())
 
     summary_lines = [
-        ("Section 01 — Preliminaries",               prelim_total,   False),
-        ("Section 02 — Measured Works",               measured_total, False),
-        ("Section 03 — Provisional & PC Sums",        prov_total,     False),
-        ("Works Total",                                    works_total,    True),
-        ("Contingency / Risk Allowance (10%)",             contingency,    False),
-        ("Main Contractor Overhead & Profit (12.5%)",      overhead,       False),
-        ("GRAND TOTAL (excluding VAT)",                    grand_total,    True),
+        ("Section 01 — Preliminaries",          prelim_total,   False),
+        ("Section 02 — Measured Works",          measured_total, False),
+        ("Section 03 — Provisional & PC Sums",   prov_total,     False),
+        ("WORKS TOTAL (excluding VAT)",          works_total,    True),
     ]
 
     for label, amount, is_bold in summary_lines:
         ir = len(rows)
         rows.append([
-            Paragraph(label,         S_BOLD  if is_bold else S_NORMAL),
-            Paragraph(_fmt(amount),  S_RIGHT_BOLD if is_bold else S_RIGHT),
+            Paragraph(label,        S_BOLD  if is_bold else S_NORMAL),
+            Paragraph(_fmt(amount), S_RIGHT_BOLD if is_bold else S_RIGHT),
         ])
         if is_bold:
             cmds += [
-                ('LINEABOVE',     (0, ir), (-1, ir), 1.0, colors.black),
-                ('TOPPADDING',    (0, ir), (-1, ir), 6),
-                ('BOTTOMPADDING', (0, ir), (-1, ir), 6),
+                (‘LINEABOVE’,     (0, ir), (-1, ir), 1.0, colors.black),
+                (‘TOPPADDING’,    (0, ir), (-1, ir), 6),
+                (‘BOTTOMPADDING’, (0, ir), (-1, ir), 6),
             ]
         elif ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+            cmds.append((‘BACKGROUND’, (0, ir), (-1, ir), _GREY_ALT))
 
-    # Double rule under the grand total (last row)
     gr = len(rows) - 1
-    cmds.append(('LINEBELOW', (0, gr), (-1, gr), 1.5, colors.black))
+    cmds.append((‘LINEBELOW’, (0, gr), (-1, gr), 1.5, colors.black))
 
-    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
-    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+    base = _base_table_cmds() + [(‘ALIGN’, (1, 0), (1, -1), ‘RIGHT’)]
+    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign=’LEFT’)
     tbl.setStyle(TableStyle(base + cmds))
 
     story = _section_heading("GRAND SUMMARY")
     story.append(tbl)
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(
-        'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon’s '
-        'Architects’ & Builders’ Price Book 2025. '
-        'Subject to market variation, location, and supplier pricing. '
-        'Professional quantity surveyor review recommended before tender or client issue.',
+        ‘Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\’s ‘
+        ‘Architects\’ & Builders\’ Price Book 2025. ‘
+        ‘Subject to market variation, location, and supplier pricing. ‘
+        ‘Professional quantity surveyor review recommended before tender or client issue.’,
         S_DISCLAIMER,
     ))
     return story

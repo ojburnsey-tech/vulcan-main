@@ -157,18 +157,25 @@ SYSTEM_PROMPT = (
 
     # ── NRM2 section numbering ────────────────────────────────────────────────
     "- NRM2 SECTION NUMBERING: Prefix every trade heading with its NRM2 work section "
-    "number. Use these mappings: 5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
+    "number. Every section must have a unique number — never reuse the same number for "
+    "two different trade headings. Use these exact mappings and no others: "
+    "5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
     "5.9 Structural metalwork; 5.11 Carpentry and joinery; 5.12 Roofing; "
     "5.14 Mechanical services; 5.15 Electrical services; "
-    "5.17 Finishes (plastering, floor finishes, ceiling finishes); "
-    "5.20 Painting and decorating; 5.21 Drainage below ground.\n"
+    "5.17 Plastering and internal finishes; "
+    "5.20 Painting and decorating; 5.21 Drainage below ground; "
+    "5.23 Windows and external doors; "
+    "5.28 Floor finishes (tiling, screed, timber flooring).\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
     "or calculation sheet (any reference beginning SE-, S-, or described as structural), "
     "you MUST include a structural steelwork section or a Provisional Sum labelled "
     "'Structural steelwork — refer to SE drawings Ref: [X] — measure on receipt of "
-    "fabrication drawings'. Never silently omit structural elements.\n"
+    "fabrication drawings'. Never silently omit structural elements. "
+    "Structural steel beams must be measured in linear metres (m) "
+    "with the quantity being the beam span plus 300mm minimum "
+    "end bearing each side. Never measure a beam as 1 nr.\n"
 
     # ── Description format ────────────────────────────────────────────────────
     "- DESCRIPTION FORMAT: Write every item description in this pattern: "
@@ -182,7 +189,14 @@ SYSTEM_PROMPT = (
     "wall ties type 4 at 2.5/m²; 100mm dense blockwork inner leaf; Ref Drawing PL-03' "
     "— "
     "'Provisional Sum: Electrical installation first and second fix — electrical drawings "
-    "not issued at tender stage; contractor to include own allowance'.\n"
+    "not issued at tender stage; contractor to include own allowance'. "
+    "Where proprietary product names are referenced in "
+    "descriptions (for example Catnic, Hyload, Velux, Rockwool, "
+    "Kingspan, Celotex, or any other manufacturer or brand name), "
+    "always append 'or equal approved' immediately after the brand "
+    "name. Example: 'Hyload or equal approved; 150mm wide DPC'. "
+    "Never omit this qualifier when a brand name appears in a "
+    "bill description.\n"
 
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"

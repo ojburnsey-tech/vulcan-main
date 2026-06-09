@@ -849,19 +849,25 @@ RATES_DB = {
     # NRM2 Section 15 (Structural metalwork): framed members in tonnes.
 
     "structural_steel_rsj_beam_supply_fix": {
-        "material_rate":     180.00,
-        "labour_rate":        85.00,
-        "plant_rate":         35.00,
+        "material_rate":     650.00,
+        "labour_rate":       280.00,
+        "plant_rate":         70.00,
         "waste_disposal_rate": 0.00,
         "unit": "m",
     },
+    # Updated Jun 2026 — per linear metre supply, fabricate and
+    # fix including temporary propping allowance. UB 203x102x23
+    # at ~23kg/m; rates reflect NI contractor pricing for small
+    # residential beams. 3m beam = approx £3,000 supply and fix.
     "steel_padstone_engineering_brick": {
-        "material_rate":      45.00,
-        "labour_rate":        35.00,
+        "material_rate":      55.00,
+        "labour_rate":        42.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "nr",
     },
+    # Updated Jun 2026 — engineering brick padstone supply
+    # and bed including mortar and making good.
 
     # ── TRADE 11: ELECTRICAL ─────────────────────────────────────────────────
     # NRM2 Section 39 (Electrical services): item/nr/m; point counts must define
