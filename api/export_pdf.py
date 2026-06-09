@@ -861,6 +861,42 @@ def _build_provisional_sums() -> tuple:
     return story, prov_total
 
 
+def _build_risk_schedule(risks: list) -> list:
+    """Risk Schedule section. Returns an empty list when no risks are present."""
+    if not risks:
+        return []
+
+    _type_w  = 55
+    _like_w  = 48
+    _imp_w   = 85
+    _mit_w   = 85
+    _desc_w  = CONTENT_W - _type_w - _like_w - _imp_w - _mit_w
+
+    rows = [[
+        Paragraph("Description", S_COL_HDR),
+        Paragraph("Risk Type",   S_COL_HDR_C),
+        Paragraph("Impact",      S_COL_HDR),
+        Paragraph("Likelihood",  S_COL_HDR_C),
+        Paragraph("Mitigation",  S_COL_HDR),
+    ]]
+    cmds = list(_col_header_cmds())
+
+    for risk in risks:
+        if not isinstance(risk, dict):
+            continue
+        desc       = html.escape(risk.get('description', ''))
+        risk_type  = html.escape(risk.get('risk_type', ''))
+        impact     = html.escape(risk.get('impact', ''))
+        likelihood = html.escape(risk.get('likelihood', ''))
+        mitigation = html.escape(risk.get('mitigation', ''))
+
+        ir = len(rows)
+        rows.append([
+            Paragraph(desc,       S_NORMAL),
+            Paragraph(risk_type,  S_CENTER),
+            Paragraph(impact,     S_NORMAL),
+            Paragraph(likelihood, S_CENTER),
+            Paragraph(mitigation, S_NORMAL),
 def _build_assumptions_register(entries: list) -> list:
     """Tender Queries & Assumptions Register — three-column table (Category | Status | Description).
 
@@ -898,6 +934,19 @@ def _build_assumptions_register(entries: list) -> list:
         if ir % 2 == 0:
             cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
+    base = _base_table_cmds() + [
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+    ]
+    tbl = Table(
+        rows,
+        colWidths=[_desc_w, _type_w, _imp_w, _like_w, _mit_w],
+        repeatRows=1,
+        hAlign='LEFT',
+    )
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("RISK SCHEDULE")
     base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'CENTER')]
     tbl  = Table(rows, colWidths=[cat_w, status_w, desc_w], repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
@@ -1137,6 +1186,11 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         story += assumptions_flowables
 
     story.append(PageBreak())
+    risks = boq_json.get('risk_schedule', []) if isinstance(boq_json, dict) else []
+    risk_flowables = _build_risk_schedule(risks)
+    if risk_flowables:
+        story += risk_flowables
+        story.append(PageBreak())
     story += _build_dayworks()
     annex_flowables = _build_annexes(boq_json)
     if annex_flowables:

@@ -212,8 +212,10 @@ SYSTEM_PROMPT = (
     "5.9 Structural metalwork; 5.11 Carpentry and joinery; 5.12 Roofing; "
     "5.14 Mechanical services; 5.15 Electrical services; "
     "5.17 Plastering and internal finishes; "
-    "5.20 Painting and decorating; 5.21 Drainage below ground; "
+    "5.18 Roof Coverings; 5.19 Waterproof Coverings; 5.20 Proprietary Linings; "
+    "5.21 Drainage below ground; "
     "5.23 Windows and external doors; "
+    "5.28 Floor, Wall and Ceiling Finishes; 5.29 Decoration.\n"
     "5.28 Floor finishes (tiling, screed, timber flooring); "
     "5.31 Insulation; "
     "5.35 External works — hard landscaping and site paving; "
@@ -226,17 +228,37 @@ SYSTEM_PROMPT = (
     "If the input describes contractor overhead or site running cost items, do not measure "
     "them — the Preliminaries section is a fixed structure in the PDF and is handled "
     "separately from the measured works you are generating.\n"
-    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.28 Floor, Wall and Ceiling Finishes; "
     "5.41 Builder's Work in Connection with Services.\n"
     "- External render, tyrolean render, monocouche render, sand and cement render, "
     "polymer render, and all applied render finishes to external masonry walls belong "
-    "in section 5.8 Masonry — not 5.20 Painting and Decorating. Render is a structural "
+    "in section 5.8 Masonry — not 5.29 Decoration. Render is a structural "
     "finish applied to the building fabric. Never classify render under painting or "
     "decorating sections.\n"
     "5.23 Windows, screens and lights; 5.24 Doors, shutters and hatches; "
-    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.28 Floor, Wall and Ceiling Finishes; 5.29 Decoration; "
     "5.31 Insulation; "
     "5.41 Builder's work in connection with services.\n"
+
+    # ── NRM2 section detail mappings ─────────────────────────────────────────
+    "- NRM2 SECTION DETAIL MAPPINGS: Use the following guidance to distinguish between "
+    "sections with overlapping scope:\n"
+    "5.18 Roof Coverings: roof tiles, slates, ridge tiles, hip tiles, roof sheets, "
+    "profiled metal roof systems. Use for all pitched and flat roof coverings made of "
+    "discrete units or sheet materials.\n"
+    "5.19 Waterproof Coverings: single-ply membrane, felt roofing, liquid waterproofing, "
+    "flat roof membranes, roof waterproofing systems. Use for continuous membrane and "
+    "liquid-applied waterproofing systems. "
+    "Do not place roof waterproofing in 5.18.\n"
+    "5.20 Proprietary Linings: dry lining systems, proprietary wall systems, proprietary "
+    "ceiling systems, specialist lining systems. "
+    "Do not place proprietary lining systems in 5.28.\n"
+    "5.28 Floor, Wall and Ceiling Finishes: screeds, floor finishes, wall finishes, "
+    "ceiling finishes, tiling. "
+    "Do not place decorative coatings in 5.28. "
+    "Do not place proprietary lining systems in 5.28.\n"
+    "5.29 Decoration: painting, decorating, stains, varnishes, coatings.\n"
+    "Do not place insulation in the serving trade section — all insulation belongs in 5.31.\n"
 
     # ── Windows and doors rule ────────────────────────────────────────────────
     "- WINDOWS AND DOORS RULE: Always create separate trade sections for windows and doors. "
@@ -253,7 +275,7 @@ SYSTEM_PROMPT = (
     "5.31 Insulation section. Do not attach insulation items to the trade they serve. "
     "The following all belong in 5.31, not in other sections: "
     "cavity wall insulation (partial fill or full fill) — not in 5.8 Masonry; "
-    "roof insulation (between/over rafters, flat roof insulation board) — not in 5.12 Roofing; "
+    "roof insulation (between/over rafters, flat roof insulation board) — not in 5.12 Roofing, 5.18 Roof Coverings, or 5.19 Waterproof Coverings; "
     "floor insulation (rigid insulation board below screed or slab) — not in 5.1 Groundworks; "
     "acoustic insulation (between floors, party walls) — not in 5.8 or 5.11; "
     "pipe and duct insulation lagging — not in 5.14 Mechanical services; "
@@ -392,6 +414,21 @@ SYSTEM_PROMPT = (
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
 
+    # ── Risk schedule ─────────────────────────────────────────────────────────
+    "- RISK SCHEDULE RULE: Generate a risk_schedule whenever the project contains "
+    "significant uncertainty. Risks must be construction-related only — do not "
+    "provide contractual or legal advice. Classify each risk as either Defined or "
+    "Undefined using the same NRM2 definitions as provisional sums. "
+    "For each risk include: description (what the risk is), risk_type (Defined or "
+    "Undefined), impact (consequence if the risk materialises, e.g. cost overrun, "
+    "programme delay), likelihood (Low / Medium / High), and mitigation (recommended "
+    "action to reduce or manage the risk). "
+    "Typical risks warranting inclusion: unknown ground conditions; unverified "
+    "drainage routes; existing services not confirmed on drawings; restricted "
+    "site access; partial or incomplete design information at tender stage; "
+    "unconfirmed structural elements. "
+    "Omit risk_schedule entirely if the specification is complete and no material "
+    "uncertainties are present.\n"
     # ── NRM2 annexes ─────────────────────────────────────────────────────────
     "- NRM2 ANNEXES RULE: Only populate the annexes object where supporting "
     "information exists in the input. Do not invent quotations, utility "
@@ -481,6 +518,7 @@ BOQ_OUTPUT_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "risk_schedule": {
         "annexes": {
             "type": "object",
             "properties": {
@@ -515,6 +553,14 @@ BOQ_OUTPUT_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
+                    "description": {"type": "string"},
+                    "risk_type": {
+                        "type": "string",
+                        "enum": ["Defined", "Undefined"],
+                    },
+                    "impact": {"type": "string"},
+                    "likelihood": {"type": "string"},
+                    "mitigation": {"type": "string"},
                     "category":    {"type": "string"},
                     "description": {"type": "string"},
                     "status": {
