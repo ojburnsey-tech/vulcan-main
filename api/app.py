@@ -145,6 +145,12 @@ SYSTEM_PROMPT = (
     "(7) floor finishes — screed, tiling, or timber flooring.\n"
 
     # ── UPVC surfaces ─────────────────────────────────────────────────────────
+    # ── MEP measurement rule ──────────────────────────────────────────────────
+    "- MEP MEASUREMENT RULE: Electrical and mechanical services items with "
+    "unit 'item' must always have quantity 1. These are per-installation "
+    "rates for one complete installation, not per-square-metre rates. "
+    "Never use the floor area as the quantity for an 'item' rate key. "
+    "If the rate_key unit is 'item', set quantity to 1.\n"
     "- UPVC RULE: Never include a paint or decoration line item for UPVC surfaces. UPVC "
     "windows, fascias, soffits, gutters, and downpipes are factory-finished and do not "
     "receive paint. Delete any such item before producing output.\n"
