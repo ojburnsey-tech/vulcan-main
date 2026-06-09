@@ -223,6 +223,24 @@ SYSTEM_PROMPT = (
     "Never omit this qualifier when a brand name appears in a "
     "bill description.\n"
 
+    # ── Provisional sum classification ────────────────────────────────────────
+    "- PROVISIONAL SUM CLASSIFICATION: Every provisional sum you generate must be "
+    "classified as either Defined or Undefined in accordance with NRM2:\n"
+    "DEFINED provisional sum: Use when the scope, location, and timing of the work "
+    "is known but the precise cost cannot be determined at tender. The contractor "
+    "is expected to include allowances in their programme and method statement. "
+    "Examples: specialist supplier installations, known future fit-out works, "
+    "named subcontractor packages where scope is described. "
+    "Output format: include a field 'ps_type': 'Defined'\n"
+    "UNDEFINED provisional sum: Use when the nature and extent of the work cannot "
+    "be foreseen at tender stage. The contractor makes no programme or preliminary "
+    "allowance. "
+    "Examples: archaeological investigations, unknown service diversions, "
+    "contingency allowances, unforeseen ground conditions. "
+    "Output format: include a field 'ps_type': 'Undefined'\n"
+    "Never output a provisional sum without a ps_type classification. If uncertain, "
+    "classify as Undefined.\n"
+
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
