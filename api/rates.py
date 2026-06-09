@@ -862,6 +862,9 @@ RATES_DB = {
         "waste_disposal_rate": 0.00,
         "unit": "item",
     },
+    # Updated Jun 2026 — residential extension first fix,
+    # two-storey, includes consumer unit upgrade allowance.
+    # Per-item rate for one complete installation, not per m².
     "electrical_second_fix_sockets_switches": {
         "material_rate":     850.00,
         "labour_rate":       950.00,
@@ -869,19 +872,14 @@ RATES_DB = {
         "waste_disposal_rate": 0.00,
         "unit": "item",
     },
+    # Updated Jun 2026 — residential extension second fix.
+    # Per-item rate for one complete installation.
     "consumer_unit_upgrade_18way": {
         "material_rate":     320.00,
         "labour_rate":       280.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "nr",
-    },
-    "electrical_first_fix_wiring_per_sqm": {
-        "material_rate":       9.80,
-        "labour_rate":        18.20,
-        "plant_rate":          0.00,
-        "waste_disposal_rate": 0.00,
-        "unit": "m²",
     },
     "consumer_unit_10way_dual_rcd": {
         "material_rate":     116.00,
@@ -950,6 +948,8 @@ RATES_DB = {
         "waste_disposal_rate": 0.00,
         "unit": "item",
     },
+    # Updated Jun 2026 — residential extension plumbing first fix.
+    # Per-item rate for one complete installation.
     "central_heating_extension_pipework_rads": {
         "material_rate":     950.00,
         "labour_rate":      1100.00,
@@ -957,19 +957,14 @@ RATES_DB = {
         "waste_disposal_rate": 0.00,
         "unit": "item",
     },
+    # Updated Jun 2026 — CH extension to existing system.
+    # Per-item rate for one complete extension.
     "thermostatic_radiator_valve_trv": {
         "material_rate":      35.00,
         "labour_rate":        25.00,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
         "unit": "nr",
-    },
-    "plumbing_first_fix_pipework_per_sqm": {
-        "material_rate":      16.00,
-        "labour_rate":        24.00,
-        "plant_rate":          0.00,
-        "waste_disposal_rate": 0.00,
-        "unit": "m²",
     },
     "bathroom_suite_standard_white": {
         "material_rate":     675.00,
