@@ -225,6 +225,14 @@ BOQ_OUTPUT_SCHEMA = {
                                 },
                                 "quantity": {"type": "number"},
                                 "unit": {"type": "string"},
+                                "drawing_ref": {
+                                    "type": "string",
+                                    "description": "Drawing and specification references this item was measured from, e.g. 'A02 Rev P03 / SP Rev 04'",
+                                },
+                                "dimension_string": {
+                                    "type": "string",
+                                    "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
