@@ -392,6 +392,26 @@ SYSTEM_PROMPT = (
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
 
+    # ── NRM2 annexes ─────────────────────────────────────────────────────────
+    "- NRM2 ANNEXES RULE: Only populate the annexes object where supporting "
+    "information exists in the input. Do not invent quotations, utility "
+    "information, statutory undertaker requirements, or specialist "
+    "specifications. If none of the annex categories can be populated from "
+    "the available information, omit the annexes field entirely — do not "
+    "output an empty annexes object. Where applicable:\n"
+    "  * risk_notes may reference risks identified during measurement "
+    "(e.g. unknown ground conditions, existing service routes, structural "
+    "elements requiring specialist input).\n"
+    "  * contractor_designed_scope may reference any CDP (Contractor Designed "
+    "Portion) items identified in the drawings or specification.\n"
+    "  * schedules should list any supporting schedules or measurement "
+    "appendices derived from the input (e.g. door schedule, window schedule, "
+    "finishes schedule) only where the input contains that information.\n"
+    "  * performance_specifications should list performance-based requirements "
+    "only where the input explicitly states them.\n"
+    "  * quotations and statutory_undertaker_information must never be "
+    "invented; include only if the input contains actual quotation references "
+    "or named statutory undertaker requirements.\n"
     # ── Document control ──────────────────────────────────────────────────────
     "- DOCUMENT CONTROL RULE: When document-control information is known, populate "
     "the following top-level fields in your output (all optional — omit only if "
@@ -461,6 +481,35 @@ BOQ_OUTPUT_SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "annexes": {
+            "type": "object",
+            "properties": {
+                "schedules": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "performance_specifications": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "quotations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "risk_notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "contractor_designed_scope": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "statutory_undertaker_information": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "additionalProperties": False,
         "assumptions_register": {
             "type": "array",
             "items": {
