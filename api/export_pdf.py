@@ -338,6 +338,42 @@ def _section_heading(title: str) -> list:
 
 # ── Section builders ──────────────────────────────────────────────────────────
 
+def _build_doc_control_panel(boq_json, today_str: str) -> list:
+    """Compact 2-column document-control panel for the title page."""
+    if isinstance(boq_json, dict):
+        revision     = boq_json.get('revision',     'A')                              or 'A'
+        issue_status = boq_json.get('issue_status', 'Draft')                          or 'Draft'
+        prepared_by  = boq_json.get('prepared_by',  'Vulcan Quanta')                  or 'Vulcan Quanta'
+        checked_by   = boq_json.get('checked_by',   'Professional Review Required')   or 'Professional Review Required'
+        intended_use = boq_json.get('intended_use', 'Tender Pricing')                 or 'Tender Pricing'
+    else:
+        revision     = 'A'
+        issue_status = 'Draft'
+        prepared_by  = 'Vulcan Quanta'
+        checked_by   = 'Professional Review Required'
+        intended_use = 'Tender Pricing'
+
+    lbl_w = 48 * mm
+    val_w = CONTENT_W - lbl_w
+
+    rows = [
+        [Paragraph("Revision",     S_BOLD), Paragraph(revision,     S_NORMAL)],
+        [Paragraph("Issue Status", S_BOLD), Paragraph(issue_status, S_NORMAL)],
+        [Paragraph("Prepared By",  S_BOLD), Paragraph(prepared_by,  S_NORMAL)],
+        [Paragraph("Checked By",   S_BOLD), Paragraph(checked_by,   S_NORMAL)],
+        [Paragraph("Intended Use", S_BOLD), Paragraph(intended_use, S_NORMAL)],
+        [Paragraph("Issue Date",   S_BOLD), Paragraph(today_str,    S_NORMAL)],
+    ]
+
+    cmds = _base_table_cmds()
+    for i in range(len(rows)):
+        cmds.append(('BACKGROUND', (0, i), (0, i), _GREY_TRADE))
+
+    tbl = Table(rows, colWidths=[lbl_w, val_w], hAlign='LEFT')
+    tbl.setStyle(TableStyle(cmds))
+    return [tbl]
+
+
 def _build_form_of_tender(boq_json, today_str: str) -> list:
     """Page 1 — Form of Tender."""
     if isinstance(boq_json, dict):
@@ -384,7 +420,9 @@ def _build_form_of_tender(boq_json, today_str: str) -> list:
     story.append(fields)
     story.append(Spacer(1, 8 * mm))
     story.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=colors.black))
-    story.append(Spacer(1, 7 * mm))
+    story.append(Spacer(1, 5 * mm))
+    story += _build_doc_control_panel(boq_json, today_str)
+    story.append(Spacer(1, 6 * mm))
 
     story.append(Paragraph(
         "We the undersigned offer to carry out and complete the works described herein "
@@ -646,27 +684,37 @@ def _build_measured_works(trade_groups) -> tuple:
 
             dim_str  = item.get('dimension_string', '')
             draw_ref = item.get('drawing_ref', '')
-            desc_markup = html.escape(desc)
+            cdp      = item.get('cdp', False)
+            perf_req = item.get('performance_requirement', '')
+
+            item_code   = f"{section_prefix}/{item_counter:03d}"
+            desc_markup = f"<b>{html.escape(item_code)}</b>  {html.escape(desc)}"
+
+            # item_code is the canonical code; PDF fallback exists for backwards compatibility.
+            item_code = item.get('item_code') or f"{section_prefix}/{item_counter:03d}"
+
+            desc_markup = f"<b>{item_code}</b>  {html.escape(desc)}"
             if dim_str:
                 desc_markup += f'<br/><font size="8"><i>{html.escape(dim_str)}</i></font>'
             if draw_ref:
                 desc_markup += f'<br/><font size="8"><i>Ref: {html.escape(draw_ref)}</i></font>'
+            if cdp:
+                desc_markup += '<br/><b>Contractor Designed Portion (CDP)</b>'
+            if cdp and perf_req:
+                desc_markup += f'<br/><i>Performance Requirement: {html.escape(perf_req)}</i>'
 
             ir = len(rows)
             rows.append([
+                Paragraph(desc_markup,                      S_NORMAL),
+                Paragraph(f'{qty:g}',                       S_RIGHT),
+                Paragraph(unit,                             S_CENTER),
+                Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
+                Paragraph(_fmt(line_tot),                   S_RIGHT),
                 Paragraph(desc_markup,                       S_NORMAL),
                 Paragraph(f'{qty:g}',                        S_RIGHT),
                 Paragraph(unit,                              S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
                 Paragraph(_fmt(line_tot),                    S_RIGHT),
-            item_code = f"{section_prefix}/{item_counter:03d}"
-            ir = len(rows)
-            rows.append([
-                Paragraph(f"<b>{item_code}</b>  {desc}",   S_NORMAL),
-                Paragraph(f'{qty:g}',                       S_RIGHT),
-                Paragraph(unit,                             S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
-                Paragraph(_fmt(line_tot),                   S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
@@ -811,6 +859,53 @@ def _build_provisional_sums() -> tuple:
     story.append(total_tbl)
 
     return story, prov_total
+
+
+def _build_assumptions_register(entries: list) -> list:
+    """Tender Queries & Assumptions Register — three-column table (Category | Status | Description).
+
+    Returns [] when entries is empty so the caller can skip the section entirely.
+    All user-supplied text is passed through html.escape() before rendering.
+    Column widths sum to CONTENT_W.
+    """
+    if not entries:
+        return []
+
+    cat_w    = 28 * mm
+    status_w = 45 * mm
+    desc_w   = CONTENT_W - cat_w - status_w
+
+    rows = [[
+        Paragraph("Category",    S_COL_HDR),
+        Paragraph("Status",      S_COL_HDR),
+        Paragraph("Description", S_COL_HDR),
+    ]]
+    cmds = list(_col_header_cmds())
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        category    = html.escape(str(entry.get('category',    '') or ''))
+        status      = html.escape(str(entry.get('status',      '') or ''))
+        description = html.escape(str(entry.get('description', '') or ''))
+
+        ir = len(rows)
+        rows.append([
+            Paragraph(category,    S_NORMAL),
+            Paragraph(status,      S_CENTER),
+            Paragraph(description, S_NORMAL),
+        ])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'CENTER')]
+    tbl  = Table(rows, colWidths=[cat_w, status_w, desc_w], repeatRows=1, hAlign='LEFT')
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("Tender Queries & Assumptions Register")
+    story.append(tbl)
+    story.append(Spacer(1, 4 * mm))
+    return story
 
 
 def _build_dayworks() -> list:
@@ -974,6 +1069,16 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     story += measured_flowables
     story.append(PageBreak())
     story += prov_flowables
+
+    assumptions_entries = (
+        boq_json.get('assumptions_register', [])
+        if isinstance(boq_json, dict) else []
+    )
+    assumptions_flowables = _build_assumptions_register(assumptions_entries or [])
+    if assumptions_flowables:
+        story.append(PageBreak())
+        story += assumptions_flowables
+
     story.append(PageBreak())
     story += _build_dayworks()
     story.append(PageBreak())

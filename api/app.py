@@ -339,6 +339,40 @@ SYSTEM_PROMPT = (
     "Never output a provisional sum without a ps_type classification. If uncertain, "
     "classify as Undefined.\n"
 
+    # ── Contractor Designed Portions ─────────────────────────────────────────
+    "- CONTRACTOR DESIGNED PORTION (CDP) RULE: Flag cdp=true where the contractor "
+    "is likely to carry design responsibility for the element. Typical examples include: "
+    "boilers, heating systems, underfloor heating, MVHR, ventilation systems, "
+    "fire alarm systems, electrical design packages, specialist glazing, solar PV systems, "
+    "and specialist building systems. "
+    "Where cdp=true, include a concise performance_requirement. "
+    "Examples: "
+    "'Provide system to achieve design flow rates.' — "
+    "'Provide system to manufacturer's performance criteria.' — "
+    "'Provide installation to achieve specified thermal performance.' "
+    "Do not mark ordinary measured building elements as CDP. "
+    "Omit cdp and performance_requirement entirely from items that are not CDP.\n"
+    # ── Tender Query and Assumptions Register ────────────────────────────────
+    "- TENDER QUERY AND ASSUMPTIONS RULE: Whenever information is incomplete, "
+    "inferred, or excluded, you MUST populate the top-level assumptions_register "
+    "array. Each entry must contain three fields: category (a short trade or topic "
+    "label, e.g. 'Roofing', 'Drainage', 'Structural'), description (a clear "
+    "statement of the assumption, query, or exclusion), and status (one of the "
+    "three values below).\n"
+    "  * Assumption — use when you have inferred information not explicitly stated "
+    "in the input. Example: category 'Roofing', description 'Roof structure assumed "
+    "timber trussed rafter construction', status 'Assumption'.\n"
+    "  * Clarification Required — use when information is missing and a decision "
+    "is needed before the BoQ can be finalised. Example: category 'Drainage', "
+    "description 'Drainage route not shown on drawings — confirm connection point "
+    "to existing sewer', status 'Clarification Required'.\n"
+    "  * Exclusion — use when an item is deliberately omitted from the priced works. "
+    "Example: category 'Specialist Surveys', description 'Specialist surveys "
+    "excluded from this tender — client to procure direct', status 'Exclusion'.\n"
+    "Do not generate entries where all information is fully confirmed by the input. "
+    "If no assumptions, clarifications, or exclusions apply, output an empty array "
+    "for assumptions_register.\n"
+
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
@@ -357,11 +391,28 @@ SYSTEM_PROMPT = (
     "Always include this field. If a quantity is a single dimension with no "
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
+
+    # ── Document control ──────────────────────────────────────────────────────
+    "- DOCUMENT CONTROL RULE: When document-control information is known, populate "
+    "the following top-level fields in your output (all optional — omit only if "
+    "genuinely unknown):\n"
+    "  * revision: document revision letter, e.g. 'A'\n"
+    "  * issue_status: e.g. 'Tender Issue'\n"
+    "  * prepared_by: e.g. 'Vulcan Quanta'\n"
+    "  * checked_by: e.g. 'Professional Review Required'\n"
+    "  * intended_use: e.g. 'Tender Pricing'\n"
+    "Use the typical values above unless the input document states otherwise. "
+    "Do not invent project-specific revision information that is not in the input.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "revision":      {"type": "string", "description": "Document revision letter, e.g. 'A'."},
+        "issue_status":  {"type": "string", "description": "Issue status, e.g. 'Tender Issue'."},
+        "prepared_by":   {"type": "string", "description": "Name of the party that prepared this BoQ."},
+        "checked_by":    {"type": "string", "description": "Name of the party that checked this BoQ."},
+        "intended_use":  {"type": "string", "description": "Intended use of this document, e.g. 'Tender Pricing'."},
         "bill_of_quantities": {
             "type": "array",
             "items": {
@@ -388,6 +439,18 @@ BOQ_OUTPUT_SCHEMA = {
                                     "type": "string",
                                     "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
                                 },
+                                "cdp": {
+                                    "type": "boolean",
+                                    "description": "True where the contractor carries design responsibility for this element.",
+                                },
+                                "performance_requirement": {
+                                    "type": "string",
+                                    "description": "Concise performance specification for CDP items, e.g. 'Provide system to achieve design flow rates.'",
+                                # This internal item_code is the future integration key for external QS software exporters.
+                                "item_code": {
+                                    "type": "string",
+                                    "description": "Internal codification key in {NRM2-section}/{sequence} format, e.g. '5.8/001'. Generated during enrichment.",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
@@ -396,6 +459,20 @@ BOQ_OUTPUT_SCHEMA = {
                 },
                 "required": ["trade", "items"],
                 "additionalProperties": False,
+            },
+        },
+        "assumptions_register": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category":    {"type": "string"},
+                    "description": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["Assumption", "Clarification Required", "Exclusion"],
+                    },
+                },
             },
         },
     },
@@ -512,12 +589,21 @@ def _enrich_boq(boq_data):
     else:
         return boq_data                            # unexpected shape — pass through untouched
 
+    # This internal item_code is the future integration key for external QS software exporters.
+    section_counters = {}  # separate sequence counter per NRM2 section, e.g. {"5.8": 3, "5.1": 1}
+
     for group in groups:                           # iterate each trade section
         if not isinstance(group, dict):            # skip strings or other non-dict entries Claude may have included
             continue
         items = group.get('items') or group.get('line_items') or []
         if not isinstance(items, list):            # guard against items being a scalar or dict
             continue
+
+        # Extract the NRM2 section prefix from the trade heading (e.g. "5.8 Masonry" → "5.8")
+        trade_str = group.get('trade', '')
+        _section_match = re.match(r'^[\d.]+', trade_str.strip())
+        _section = _section_match.group() if _section_match else (trade_str.strip() or 'X')
+
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
@@ -557,6 +643,11 @@ def _enrich_boq(boq_data):
 
     # Sort trade groups into canonical NRM2 section order.
     groups.sort(key=_nrm2_sort_key)
+            # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
+            # This internal item_code is the future integration key for external QS software exporters.
+            if not item.get('item_code'):
+                section_counters[_section] = section_counters.get(_section, 0) + 1
+                item['item_code'] = f"{_section}/{section_counters[_section]:03d}"
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
