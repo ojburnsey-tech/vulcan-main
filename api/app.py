@@ -468,6 +468,27 @@ def _match_rate(description):
     return None, None
 
 
+# Canonical NRM2 ordering improves consistency across projects and export formats.
+_NRM2_SECTION_ORDER: dict[str, int] = {
+    "5.1":  10,  "5.2":  20,  "5.4":  30,  "5.8":  40,
+    "5.9":  50,  "5.11": 60,  "5.12": 70,  "5.14": 80,
+    "5.15": 90,  "5.18": 100, "5.19": 110, "5.20": 120,
+    "5.21": 130, "5.23": 140, "5.24": 150, "5.28": 160,
+    "5.29": 170, "5.31": 180, "5.35": 190, "5.36": 200,
+    "5.37": 210, "5.41": 220,
+}
+
+_RE_NRM2_PREFIX = re.compile(r'^\s*(\d+(?:\.\d+)*)')
+
+
+def _nrm2_sort_key(group: dict) -> int:
+    """Return the canonical NRM2 sort position for a trade group; unknowns sort last."""
+    if not isinstance(group, dict):
+        return 9999
+    m = _RE_NRM2_PREFIX.match(group.get('trade') or '')
+    return _NRM2_SECTION_ORDER.get(m.group(1), 9999) if m else 9999
+
+
 def _enrich_boq(boq_data):
     """
     Walk the Claude JSON (regardless of its outer shape) and apply RATES_DB rates to
@@ -533,6 +554,9 @@ def _enrich_boq(boq_data):
                 item['rate']                = 0.00
                 item['line_total']          = 0.00
                 item['rate_source']         = None
+
+    # Sort trade groups into canonical NRM2 section order.
+    groups.sort(key=_nrm2_sort_key)
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
