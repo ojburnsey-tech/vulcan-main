@@ -802,7 +802,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
 
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(colors.Color(0.3, 0.3, 0.3))
-        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI Draft')
+        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities')
 
         rule_y = PAGE_H - TOP_M + 4 * mm
         canvas.setStrokeColor(colors.black)
@@ -813,18 +813,6 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         canvas.setFillColor(colors.black)
         canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
 
-        footer_rule_y = BOT_M - 4 * mm
-        canvas.setLineWidth(0.5)
-        canvas.setStrokeColor(colors.Color(0.5, 0.5, 0.5))
-        canvas.line(LEFT_M, footer_rule_y, PAGE_W - RIGHT_M, footer_rule_y)
-
-        canvas.setFont('Helvetica-Oblique', 7.5)
-        canvas.setFillColor(colors.Color(0.35, 0.35, 0.35))
-        canvas.drawCentredString(
-            PAGE_W / 2,
-            footer_rule_y - 9,
-            'AI-generated draft. Professional review required before issue.',
-        )
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
