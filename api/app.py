@@ -460,6 +460,9 @@ SYSTEM_PROMPT = (
     "  * intended_use: e.g. 'Tender Pricing'\n"
     "Use the typical values above unless the input document states otherwise. "
     "Do not invent project-specific revision information that is not in the input.\n"
+    "Respond with a single raw JSON object only — no markdown, no code fences, "
+    "no preamble, no trailing text. The root key must be bill_of_quantities "
+    "containing an array of trade groups, each with a trade string and an items array."
 )
 
 BOQ_OUTPUT_SCHEMA = {
@@ -894,7 +897,7 @@ def process_pdf():                         # Flask calls this function when a ma
         )
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
-            max_tokens=12000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
+            max_tokens=16000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
             system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in Anthropic SDK (NOT a {"role":"system"} entry — that is the OpenAI convention)
             messages=[                             # messages is a list of conversation turns; here just one user turn with no prior history
                 {
@@ -902,12 +905,6 @@ def process_pdf():                         # Flask calls this function when a ma
                     "content": full_text,          # the extracted PDF text is the entire user message for Claude to analyse
                 }
             ],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": BOQ_OUTPUT_SCHEMA,
-                }
-            },
         )
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
         return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
