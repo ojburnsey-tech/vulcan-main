@@ -34,9 +34,10 @@ _C_MAT   = 58
 _C_LAB   = 58
 _C_TOTAL = 64
 _C_DESC  = CONTENT_W - _C_QTY - _C_UNIT - _C_MAT - _C_LAB - _C_TOTAL
-COL_WIDTHS = [_C_DESC, _C_QTY, _C_UNIT, _C_MAT, _C_LAB, _C_TOTAL]
+_C_RATE = _C_MAT + _C_LAB
+COL_WIDTHS = [_C_DESC, _C_QTY, _C_UNIT, _C_RATE, _C_TOTAL]
 
-_I_DESC, _I_QTY, _I_UNIT, _I_MAT, _I_LAB, _I_TOTAL = range(6)
+_I_DESC, _I_QTY, _I_UNIT, _I_RATE, _I_TOTAL = range(5)
 
 # ── Static section content (module-level constants — edit these to update documents) ──
 
@@ -444,7 +445,7 @@ def _build_preliminaries() -> tuple:
 def _build_measured_works(trade_groups) -> tuple:
     """Section 02 — Measured Works. Returns (flowables, measured_works_total).
 
-    Column order is fixed throughout: Description | Qty | Unit | Mat Rate | Lab Rate | Total.
+    Column order is fixed throughout: Description | Qty | Unit | Rate | Total.
     One Table per trade so column headers repeat correctly on page splits.
     """
     story = _section_heading("SECTION 02 — MEASURED WORKS")
@@ -455,15 +456,14 @@ def _build_measured_works(trade_groups) -> tuple:
             Paragraph('Description', S_COL_HDR),
             Paragraph('Qty',         S_COL_HDR_R),
             Paragraph('Unit',        S_COL_HDR_C),
-            Paragraph('Mat Rate',    S_COL_HDR_R),
-            Paragraph('Lab Rate',    S_COL_HDR_R),
+            Paragraph('Rate',        S_COL_HDR_R),
             Paragraph('Total',       S_COL_HDR_R),
         ]]
         cmds = list(_col_header_cmds())
 
         # Trade name spanning all columns
         tr = len(rows)
-        rows.append([Paragraph(trade_name.upper(), S_TRADE), '', '', '', '', ''])
+        rows.append([Paragraph(trade_name.upper(), S_TRADE), '', '', '', ''])
         cmds += [
             ('SPAN',          (0, tr), (-1, tr)),
             ('BACKGROUND',    (0, tr), (-1, tr), _GREY_TRADE),
@@ -489,25 +489,24 @@ def _build_measured_works(trade_groups) -> tuple:
 
             ir = len(rows)
             rows.append([
-                Paragraph(desc,            S_NORMAL),
-                Paragraph(f'{qty:g}',      S_RIGHT),
-                Paragraph(unit,            S_CENTER),
-                Paragraph(_fmt(mat),       S_RIGHT),
-                Paragraph(_fmt(lab),       S_RIGHT),
-                Paragraph(_fmt(line_tot),  S_RIGHT),
+                Paragraph(desc,                              S_NORMAL),
+                Paragraph(f'{qty:g}',                       S_RIGHT),
+                Paragraph(unit,                             S_CENTER),
+                Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
+                Paragraph(_fmt(line_tot),                   S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-        # Trade subtotal — description spans cols 0–4, total in col 5
+        # Trade subtotal — description spans cols 0–3, total in col 4
         sr = len(rows)
         rows.append([
             Paragraph(f'Subtotal — {trade_name}', S_RIGHT_BOLD),
-            '', '', '', '',
+            '', '', '',
             Paragraph(_fmt(trade_total), S_RIGHT_BOLD),
         ])
         cmds += [
-            ('SPAN',          (0, sr), (_I_LAB, sr)),
+            ('SPAN',          (0, sr), (_I_RATE, sr)),
             ('LINEABOVE',     (0, sr), (-1, sr), 0.5, colors.black),
             ('TOPPADDING',    (0, sr), (-1, sr), 4),
             ('BOTTOMPADDING', (0, sr), (-1, sr), 6),
