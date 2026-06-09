@@ -897,6 +897,28 @@ def _build_risk_schedule(risks: list) -> list:
             Paragraph(impact,     S_NORMAL),
             Paragraph(likelihood, S_CENTER),
             Paragraph(mitigation, S_NORMAL),
+        ])
+        if ir % 2 == 0:
+            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+
+    base = _base_table_cmds() + [
+        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
+        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+    ]
+    tbl = Table(
+        rows,
+        colWidths=[_desc_w, _type_w, _imp_w, _like_w, _mit_w],
+        repeatRows=1,
+        hAlign='LEFT',
+    )
+    tbl.setStyle(TableStyle(base + cmds))
+
+    story = _section_heading("RISK SCHEDULE")
+    story.append(tbl)
+    story.append(Spacer(1, 4 * mm))
+    return story
+
+
 def _build_assumptions_register(entries: list) -> list:
     """Tender Queries & Assumptions Register — three-column table (Category | Status | Description).
 
