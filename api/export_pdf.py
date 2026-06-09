@@ -770,14 +770,6 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
 
     story = _section_heading("GRAND SUMMARY")
     story.append(tbl)
-    story.append(Spacer(1, 6 * mm))
-    story.append(Paragraph(
-        'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\'s '
-        'Architects\' & Builders\' Price Book 2025. '
-        'Subject to market variation, location, and supplier pricing. '
-        'Professional quantity surveyor review recommended before tender or client issue.',
-        S_DISCLAIMER,
-    ))
     return story
 
 
