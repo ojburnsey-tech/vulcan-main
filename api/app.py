@@ -124,12 +124,30 @@ SYSTEM_PROMPT = (
     "disposal quantities. Example: 45m² plan area → 45 × 0.15 = 6.75m³ excavation → "
     "6.75 × 1.30 = 8.78m³ disposal off site.\n"
 
+    # ── Wetroom tanking ───────────────────────────────────────────────────────
+    "- WETROOM TANKING RULE: Wetroom tanking (rate_key: wetroom_tanking_system) is "
+    "measured in m². Measure the floor area plus wall area up to 1800mm height for "
+    "all wetroom and shower enclosure areas. Never set quantity to 1 for this item.\n"
+
     # ── Double-counting prevention ────────────────────────────────────────────
     "- DOUBLE-COUNTING RULE: Never measure the same physical work in both a composite item "
     "and a constituent item. For cavity walls: choose either a single composite item covering "
     "the full wall build-up (both leaves, insulation, ties) OR separate items for each "
     "component — never both. If you use a composite cavity wall item, do not add separate "
     "items for the outer leaf, inner leaf, or wall ties.\n"
+
+    # ── Plasterboard double-counting prevention ───────────────────────────────
+    "- Plasterboard double-counting prevention:\n"
+    "  * Stud partitions: the composite stud partition rate already includes "
+    "plasterboard to both faces. Never add separate plasterboard line items "
+    "for the faces of stud partitions. If a stud partition item exists, "
+    "plasterboard to that partition is already priced.\n"
+    "  * Dot-and-dab plasterboard to masonry: measure to one face only — the "
+    "masonry face receiving the board. Do not measure the reverse face.\n"
+    "  * Internal partitions of any construction type: never measure plasterboard "
+    "to both faces. One face only, always.\n"
+    "  * Ceiling plasterboard and plasterboard to external walls or soffits are "
+    "measured independently and are not affected by this rule.\n"
 
     # ── Missing trades checklist ──────────────────────────────────────────────
     "- MANDATORY TRADES CHECKLIST: For any residential extension or new build, you MUST "
