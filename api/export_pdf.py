@@ -444,57 +444,142 @@ def _build_preambles() -> list:
 
 def _build_preliminaries() -> tuple:
     """Section 01 — Preliminaries. Returns (flowables, prelim_total)."""
-    # Five-column table: Description | Qty | Unit | Rate | Total
-    # The two Measured Works rate columns are merged into a single "Rate" column here.
-    rate_w = _C_MAT + _C_LAB
-    col_w  = [_C_DESC, _C_QTY, _C_UNIT, rate_w, _C_TOTAL]
+    story = _section_heading("SECTION 01 — PRELIMINARIES")
 
-    rows = [[
-        Paragraph("Description", S_COL_HDR),
-        Paragraph("Qty",         S_COL_HDR_R),
-        Paragraph("Unit",        S_COL_HDR_C),
-        Paragraph("Rate",        S_COL_HDR_R),
-        Paragraph("Total",       S_COL_HDR_R),
+    lbl_w = 80 * mm
+    val_w = CONTENT_W - lbl_w
+
+    _plain_style = TableStyle([
+        ('TOPPADDING',    (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+    ])
+
+    def _info_block(pairs):
+        rows = [[Paragraph(lbl, S_NORMAL), Paragraph(val, S_NORMAL)] for lbl, val in pairs]
+        tbl = Table(rows, colWidths=[lbl_w, val_w], hAlign='LEFT')
+        tbl.setStyle(_plain_style)
+        return tbl
+
+    def _sub_heading(letter, title):
+        return [Spacer(1, 5 * mm), Paragraph(f'{letter}.  {title}', S_BODY_BOLD), Spacer(1, 2 * mm)]
+
+    # ── A. PROJECT PARTICULARS ──────────────────────────────────────────────────
+    story += _sub_heading('A', 'PROJECT PARTICULARS')
+    story.append(_info_block([
+        ("Project title:",                      "[To be inserted]"),
+        ("Project address:",                    "[To be inserted]"),
+        ("Employer:",                           "[To be inserted]"),
+        ("Architect / Contract Administrator:", "[To be inserted]"),
+        ("Quantity Surveyor:",                  "[To be inserted]"),
+        ("Structural Engineer:",                "[To be inserted]"),
+    ]))
+
+    # ── B. CONTRACT PARTICULARS ────────────────────────────────────────────────
+    story += _sub_heading('B', 'CONTRACT PARTICULARS')
+    story.append(_info_block([
+        ("Form of contract:",         "JCT Minor Works Building Contract 2016 (or as stated)"),
+        ("Contract administrator:",   "[To be inserted]"),
+        ("Liquidated damages:",        "[To be inserted] per week"),
+        ("Defects liability period:",  "[To be inserted] weeks from practical completion"),
+        ("Retention percentage:",     "[To be inserted]%"),
+        ("Interim valuations:",        "Monthly"),
+    ]))
+
+    # ── C. SITE INFORMATION AND CONSTRAINTS ───────────────────────────────────
+    story += _sub_heading('C', 'SITE INFORMATION AND CONSTRAINTS')
+    story.append(_info_block([
+        ("Site access:",           "[To be inserted]"),
+        ("Working hours:",
+         "Monday to Friday 08:00–17:30; Saturday 08:00–13:00 by agreement"),
+        ("Existing services:",
+         "Contractor to locate and protect all existing services"),
+        ("Welfare facilities:",
+         "Contractor to provide and maintain adequate welfare facilities throughout"),
+        ("Hoarding and security:", "Contractor to provide as necessary"),
+    ]))
+
+    # ── D. QUALITY AND HANDOVER REQUIREMENTS ──────────────────────────────────
+    story += _sub_heading('D', 'QUALITY AND HANDOVER REQUIREMENTS')
+    bul_w  = 5 * mm
+    txt_w  = CONTENT_W - bul_w
+    d_rows = [
+        [Paragraph('•', S_NORMAL),
+         Paragraph("All work to be carried out in accordance with the specification "
+                   "and drawings issued with these documents", S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("Operation and maintenance manuals to be provided at practical completion",
+                   S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("As-built drawings to be provided at practical completion", S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("All warranties and guarantees to be assigned to the Employer", S_NORMAL)],
+    ]
+    d_tbl = Table(d_rows, colWidths=[bul_w, txt_w], hAlign='LEFT')
+    d_tbl.setStyle(TableStyle([
+        ('TOPPADDING',    (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING',   (0, 0), (0, -1), 10),
+        ('LEFTPADDING',   (1, 0), (1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+    ]))
+    story.append(d_tbl)
+
+    # ── E. PRICING SCHEDULE — PRELIMINARY ITEMS ───────────────────────────────
+    story += _sub_heading('E', 'PRICING SCHEDULE — PRELIMINARY ITEMS')
+
+    itm_w    = 20
+    fixed_w  = 70
+    time_w   = 90
+    tot_w    = _C_TOTAL
+    p_desc_w = CONTENT_W - itm_w - fixed_w - time_w - tot_w
+
+    p_rows = [[
+        Paragraph("Item",                         S_COL_HDR),
+        Paragraph("Description",                  S_COL_HDR),
+        Paragraph("Fixed Charge (£)",             S_COL_HDR_R),
+        Paragraph("Time-Related Charge (£/week)", S_COL_HDR_R),
+        Paragraph("Total (£)",                    S_COL_HDR_R),
     ]]
-    cmds = list(_col_header_cmds())
-    prelim_total = 0.0
+    p_cmds = list(_col_header_cmds())
 
-    for desc, qty, unit, rate in PRELIM_ITEMS:
-        line_tot = round(qty * rate, 2)
-        prelim_total += line_tot
-        ir = len(rows)
-        rows.append([
-            Paragraph(desc,            S_NORMAL),
-            Paragraph(str(qty),        S_RIGHT),
-            Paragraph(unit,            S_CENTER),
-            Paragraph(_fmt(rate),      S_RIGHT),
-            Paragraph(_fmt(line_tot),  S_RIGHT),
+    prelim_schedule = [
+        "Site establishment and mobilisation",
+        "Site management and supervision",
+        "Temporary site offices and welfare",
+        "Temporary power supply",
+        "Temporary water supply",
+        "Site security and hoarding",
+        "Cleaning and rubbish disposal during works",
+        "Final clean on completion",
+        "Insurance — works, employer's liability, public liability",
+        "Health and safety — CDM compliance, method statements, risk assessments",
+    ]
+    for i, desc in enumerate(prelim_schedule, 1):
+        ir = len(p_rows)
+        p_rows.append([
+            Paragraph(f'{i}.', S_CENTER),
+            Paragraph(desc,    S_NORMAL),
+            Paragraph("",      S_RIGHT),
+            Paragraph("",      S_RIGHT),
+            Paragraph("",      S_RIGHT),
         ])
         if ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+            p_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-    tr = len(rows)
-    rows.append([
-        Paragraph("Preliminaries Total", S_RIGHT_BOLD),
-        "", "", "",
-        Paragraph(_fmt(prelim_total), S_RIGHT_BOLD),
-    ])
-    cmds += [
-        ('SPAN',          (0, tr), (3, tr)),
-        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
-        ('TOPPADDING',    (0, tr), (-1, tr), 6),
-        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
-    ]
+    p_base = _base_table_cmds() + [('ALIGN', (2, 0), (-1, -1), 'RIGHT')]
+    p_tbl  = Table(p_rows, colWidths=[itm_w, p_desc_w, fixed_w, time_w, tot_w],
+                   repeatRows=1, hAlign='LEFT')
+    p_tbl.setStyle(TableStyle(p_base + p_cmds))
+    story.append(p_tbl)
+    story.append(Spacer(1, 4 * mm))
 
-    base = _base_table_cmds() + [
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
-    ]
-    tbl = Table(rows, colWidths=col_w, repeatRows=1, splitByRow=True, hAlign='LEFT')
-    tbl.setStyle(TableStyle(base + cmds))
+    # Prelim total for Grand Summary — QS estimate carried from PRELIM_ITEMS
+    prelim_total = sum(round(qty * rate, 2) for _, qty, _, rate in PRELIM_ITEMS)
 
-    story = _section_heading("SECTION 01 — PRELIMINARIES")
-    story.append(tbl)
     return story, prelim_total
 
 
