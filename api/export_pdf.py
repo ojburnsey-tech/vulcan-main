@@ -641,7 +641,11 @@ def _build_measured_works(trade_groups) -> tuple:
 
             dim_str  = item.get('dimension_string', '')
             draw_ref = item.get('drawing_ref', '')
-            desc_markup = html.escape(desc)
+
+            # item_code is the canonical code; PDF fallback exists for backwards compatibility.
+            item_code = item.get('item_code') or f"{section_prefix}/{item_counter:03d}"
+
+            desc_markup = f"<b>{item_code}</b>  {html.escape(desc)}"
             if dim_str:
                 desc_markup += f'<br/><font size="8"><i>{html.escape(dim_str)}</i></font>'
             if draw_ref:
@@ -649,15 +653,7 @@ def _build_measured_works(trade_groups) -> tuple:
 
             ir = len(rows)
             rows.append([
-                Paragraph(desc_markup,                       S_NORMAL),
-                Paragraph(f'{qty:g}',                        S_RIGHT),
-                Paragraph(unit,                              S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
-                Paragraph(_fmt(line_tot),                    S_RIGHT),
-            item_code = f"{section_prefix}/{item_counter:03d}"
-            ir = len(rows)
-            rows.append([
-                Paragraph(f"<b>{item_code}</b>  {desc}",   S_NORMAL),
+                Paragraph(desc_markup,                      S_NORMAL),
                 Paragraph(f'{qty:g}',                       S_RIGHT),
                 Paragraph(unit,                             S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
