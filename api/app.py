@@ -294,6 +294,27 @@ SYSTEM_PROMPT = (
     "Never output a provisional sum without a ps_type classification. If uncertain, "
     "classify as Undefined.\n"
 
+    # ── Tender Query and Assumptions Register ────────────────────────────────
+    "- TENDER QUERY AND ASSUMPTIONS RULE: Whenever information is incomplete, "
+    "inferred, or excluded, you MUST populate the top-level assumptions_register "
+    "array. Each entry must contain three fields: category (a short trade or topic "
+    "label, e.g. 'Roofing', 'Drainage', 'Structural'), description (a clear "
+    "statement of the assumption, query, or exclusion), and status (one of the "
+    "three values below).\n"
+    "  * Assumption — use when you have inferred information not explicitly stated "
+    "in the input. Example: category 'Roofing', description 'Roof structure assumed "
+    "timber trussed rafter construction', status 'Assumption'.\n"
+    "  * Clarification Required — use when information is missing and a decision "
+    "is needed before the BoQ can be finalised. Example: category 'Drainage', "
+    "description 'Drainage route not shown on drawings — confirm connection point "
+    "to existing sewer', status 'Clarification Required'.\n"
+    "  * Exclusion — use when an item is deliberately omitted from the priced works. "
+    "Example: category 'Specialist Surveys', description 'Specialist surveys "
+    "excluded from this tender — client to procure direct', status 'Exclusion'.\n"
+    "Do not generate entries where all information is fully confirmed by the input. "
+    "If no assumptions, clarifications, or exclusions apply, output an empty array "
+    "for assumptions_register.\n"
+
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
@@ -351,6 +372,20 @@ BOQ_OUTPUT_SCHEMA = {
                 },
                 "required": ["trade", "items"],
                 "additionalProperties": False,
+            },
+        },
+        "assumptions_register": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "category":    {"type": "string"},
+                    "description": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["Assumption", "Clarification Required", "Exclusion"],
+                    },
+                },
             },
         },
     },
