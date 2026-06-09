@@ -202,6 +202,20 @@ SYSTEM_PROMPT = (
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
     "- unit must match the unit for that rate_key as listed.\n"
+    "- drawing_ref: If the input PDF contains drawing numbers, specification "
+    "references, or document revision codes, record the reference(s) this "
+    "item was measured from. Format as: 'Drawing [ref] Rev [rev]' or "
+    "'[ref1] / [ref2]' for multiple sources. If no drawing references are "
+    "visible in the input, omit this field entirely — do not invent references.\n"
+    "- dimension_string: Show the arithmetic used to derive the quantity. "
+    "Format as a readable calculation string. Examples: "
+    "'4.200m × 3.600m = 15.12m²' — "
+    "'(12.400m + 8.600m) × 2 = 42.000m perimeter' — "
+    "'45.0m² plan × 0.150m depth = 6.75m³ × 1.30 bulking = 8.78m³ disposal' — "
+    "'27.0m perimeter × 5.400m height = 145.8m² gross − 10.8m² openings = 135.0m² net'. "
+    "Always include this field. If a quantity is a single dimension with no "
+    "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
+    "item'. This field is mandatory for every line item.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
