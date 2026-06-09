@@ -524,7 +524,7 @@ RATES_DB = {
         "unit": "m²",
     },
     "carpentry_chipboard_flooring_18mm": {
-        "material_rate":       9.75,
+        "material_rate":      14.00,
         "labour_rate":         9.50,
         "plant_rate":          0.00,
         "waste_disposal_rate": 0.00,
