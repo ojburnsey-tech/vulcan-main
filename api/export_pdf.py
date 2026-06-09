@@ -2,6 +2,7 @@
 # Generates a professional NRM2-compliant A4 Bill of Quantities PDF using ReportLab Platypus.
 
 import io
+import re
 import unicodedata
 from datetime import date
 
@@ -499,7 +500,10 @@ def _build_measured_works(trade_groups) -> tuple:
     story = _section_heading("SECTION 02 — MEASURED WORKS")
     trade_summaries = []
 
-    for trade_name, items in trade_groups:
+    for trade_idx, (trade_name, items) in enumerate(trade_groups, start=1):
+        _m = re.match(r'^(\d+(?:\.\d+)*)', trade_name.strip())
+        section_prefix = _m.group(1) if _m else str(trade_idx)
+
         rows = [[
             Paragraph('Description', S_COL_HDR),
             Paragraph('Qty',         S_COL_HDR_R),
@@ -521,9 +525,11 @@ def _build_measured_works(trade_groups) -> tuple:
         ]
 
         trade_total = 0.0
+        item_counter = 0
         for item in items:
             if not isinstance(item, dict):
                 continue
+            item_counter += 1
             desc  = _apply_nrm2_desc(item.get('description') or item.get('desc') or '')
             qty   = float(item.get('quantity') or item.get('qty') or 0)
             unit  = _sanitise_unit(item.get('unit') or '')
@@ -535,9 +541,10 @@ def _build_measured_works(trade_groups) -> tuple:
             line_tot = round(qty * (mat + lab + plant + waste), 2)
             trade_total += line_tot
 
+            item_code = f"{section_prefix}/{item_counter:03d}"
             ir = len(rows)
             rows.append([
-                Paragraph(desc,                              S_NORMAL),
+                Paragraph(f"<b>{item_code}</b>  {desc}",   S_NORMAL),
                 Paragraph(f'{qty:g}',                       S_RIGHT),
                 Paragraph(unit,                             S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
