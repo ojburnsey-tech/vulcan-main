@@ -121,26 +121,31 @@ STATUTORY_FEES = [
      "(Article 163)", 229.20),
 ]
 
-# (resource, grade_description, unit_string)
+# (resource, grade_description, unit_string, guidance_range)
 DAYWORKS_ROWS = [
-    ("Labour",    "Ganger / Foreman",                                                           "/hr"),
-    ("Labour",    "Skilled tradesperson (bricklayer, carpenter, electrician, plumber)",         "/hr"),
-    ("Labour",    "Semi-skilled operative",                                                     "/hr"),
-    ("Labour",    "General labourer",                                                           "/hr"),
-    ("Plant",     "Excavator / 360° machine (up to 5t)",                                  "/hr"),
-    ("Plant",     "Skip lorry / grab lorry",                                                    "/load"),
-    ("Plant",     "Scaffold tower (weekly hire)",                                               "/wk"),
-    ("Materials", "Percentage addition on net invoiced cost of materials for emergency procurement", "%"),
+    ("Labour",          "Ganger / working foreman",                                              "/hr", "£26–£32/hr"),
+    ("Labour",          "Skilled tradesperson (bricklayer, carpenter, plumber, electrician)",    "/hr", "£22–£28/hr"),
+    ("Labour",          "Semi-skilled operative",                                                "/hr", "£18–£22/hr"),
+    ("Labour",          "General labourer",                                                      "/hr", "£18–£22/hr"),
+    ("Plant",           "Small plant (mixer, compactor, generator)",                             "/hr", "£8–£15/hr"),
+    ("Plant",           "Medium plant (mini-excavator, tracked dumper)",                         "/hr", "£25–£45/hr"),
+    ("Plant",           "Large plant (excavator, crane — if applicable)",                   "/hr", "£55–£120/hr"),
+    ("Materials",       "Percentage addition on net invoiced cost of materials",                 "%",   "Net cost + 15%"),
+    ("Sub-contractors", "Percentage addition on net sub-contract price",                         "%",   "Net cost + 15%"),
 ]
 
 DAYWORKS_NOTE = (
-    "Dayworks rates to be used only for variations and unforeseen works instructed "
-    "in writing by the Contract Administrator. The contractor shall insert their "
-    "all-in rates inclusive of overhead and profit. Labour rates shall be "
-    "all-in gang rates including NI contributions, holiday pay, and tool allowance. "
-    "Plant rates shall include fuel, operator, and all consumables. "
-    "The materials percentage addition shall cover handling, storage, and profit "
-    "on net invoiced cost of materials."
+    "Notes on Dayworks Rates:<br/>"
+    "(a) Labour rates are all-in rates inclusive of PAYE, employer's National Insurance "
+    "contributions, holiday pay, and tool allowance. Rates are based on CIJC Working Rule "
+    "Agreement Northern Ireland 2026.<br/>"
+    "(b) Plant rates are exclusive of fuel and operator unless otherwise stated.<br/>"
+    "(c) Materials are to be charged at net cost (invoiced price) plus the percentage addition "
+    "stated above to cover handling, storage, and waste.<br/>"
+    "(d) Sub-contractor work is to be charged at the net sub-contract price plus the percentage "
+    "addition stated above.<br/>"
+    "(e) Dayworks are only to be used where expressly instructed by the Contract Administrator. "
+    "All daywork sheets must be submitted for signature within 24 hours of the work being carried out."
 )
 
 # Substring replacements applied to item descriptions before rendering
@@ -267,6 +272,8 @@ S_COL_HDR_C     = _style('BoqColHdrC',    bold=True, color=colors.white, align=T
 S_TRADE         = _style('BoqTrade',      bold=True, size=9.5, leading=14)
 S_DISCLAIMER    = _style('BoqDisc',       font='Helvetica-Oblique', size=7,
                           color=colors.Color(0.4, 0.4, 0.4))
+S_GUIDANCE_C    = _style('BoqGuidanceC', font='Helvetica-Oblique', size=8,
+                          color=colors.Color(0.4, 0.4, 0.4), align=TA_CENTER)
 S_TITLE         = _style('BoqTitle',      bold=True, size=14, leading=18)
 S_SECTION       = _style('BoqSection',    bold=True, size=11, leading=14)
 S_BODY          = _style('BoqBody',       size=9, leading=13)
@@ -678,23 +685,26 @@ def _build_provisional_sums() -> tuple:
 def _build_dayworks() -> list:
     """Section 04 — Dayworks Schedule (blank rate template)."""
     res_w   = 28 * mm
+    guide_w = 70
     rate_w  = 50
     unit_w  = 30
-    grade_w = CONTENT_W - res_w - rate_w - unit_w
+    grade_w = CONTENT_W - res_w - guide_w - rate_w - unit_w
 
     rows = [[
         Paragraph("Resource",               S_COL_HDR),
         Paragraph("Grade / Description",    S_COL_HDR),
+        Paragraph("Guidance Range",         S_COL_HDR_C),
         Paragraph("Contractor's Rate (£)", S_COL_HDR_R),
         Paragraph("Unit",                   S_COL_HDR_C),
     ]]
     cmds = list(_col_header_cmds())
 
-    for resource, grade, unit in DAYWORKS_ROWS:
+    for resource, grade, unit, guidance in DAYWORKS_ROWS:
         ir = len(rows)
         rows.append([
             Paragraph(resource, S_NORMAL),
             Paragraph(grade,    S_NORMAL),
+            Paragraph(guidance, S_GUIDANCE_C),
             Paragraph("",       S_NORMAL),
             Paragraph(unit,     S_CENTER),
         ])
@@ -702,10 +712,11 @@ def _build_dayworks() -> list:
             cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
     base = _base_table_cmds() + [
-        ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+        ('ALIGN', (4, 0), (4, -1), 'CENTER'),
     ]
-    tbl = Table(rows, colWidths=[res_w, grade_w, rate_w, unit_w], repeatRows=1, hAlign='LEFT')
+    tbl = Table(rows, colWidths=[res_w, grade_w, guide_w, rate_w, unit_w], repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
 
     story = _section_heading("SECTION 04 — DAYWORKS SCHEDULE")
