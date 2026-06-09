@@ -503,6 +503,7 @@ BOQ_OUTPUT_SCHEMA = {
                                 "performance_requirement": {
                                     "type": "string",
                                     "description": "Concise performance specification for CDP items, e.g. 'Provide system to achieve design flow rates.'",
+                                },
                                 # This internal item_code is the future integration key for external QS software exporters.
                                 "item_code": {
                                     "type": "string",
@@ -519,6 +520,21 @@ BOQ_OUTPUT_SCHEMA = {
             },
         },
         "risk_schedule": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "risk_type": {
+                        "type": "string",
+                        "enum": ["Defined", "Undefined"],
+                    },
+                    "impact": {"type": "string"},
+                    "likelihood": {"type": "string"},
+                    "mitigation": {"type": "string"},
+                },
+            },
+        },
         "annexes": {
             "type": "object",
             "properties": {
@@ -548,6 +564,7 @@ BOQ_OUTPUT_SCHEMA = {
                 },
             },
             "additionalProperties": False,
+        },
         "assumptions_register": {
             "type": "array",
             "items": {
@@ -736,13 +753,14 @@ def _enrich_boq(boq_data):
                 item['line_total']          = 0.00
                 item['rate_source']         = None
 
-    # Sort trade groups into canonical NRM2 section order.
-    groups.sort(key=_nrm2_sort_key)
             # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
             # This internal item_code is the future integration key for external QS software exporters.
             if not item.get('item_code'):
                 section_counters[_section] = section_counters.get(_section, 0) + 1
                 item['item_code'] = f"{_section}/{section_counters[_section]:03d}"
+
+    # Sort trade groups into canonical NRM2 section order.
+    groups.sort(key=_nrm2_sort_key)
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
