@@ -359,6 +359,8 @@ def _enrich_boq(boq_data):
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
+            item.setdefault('drawing_ref', '')
+            item.setdefault('dimension_string', '')
 
             # Prefer the rate_key Claude was instructed to output — direct O(1) lookup
             rate_key_direct = item.get('rate_key', '').strip()
