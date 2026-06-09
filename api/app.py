@@ -124,6 +124,11 @@ SYSTEM_PROMPT = (
     "disposal quantities. Example: 45m² plan area → 45 × 0.15 = 6.75m³ excavation → "
     "6.75 × 1.30 = 8.78m³ disposal off site.\n"
 
+    # ── Wetroom tanking ───────────────────────────────────────────────────────
+    "- WETROOM TANKING RULE: Wetroom tanking (rate_key: wetroom_tanking_system) is "
+    "measured in m². Measure the floor area plus wall area up to 1800mm height for "
+    "all wetroom and shower enclosure areas. Never set quantity to 1 for this item.\n"
+
     # ── Double-counting prevention ────────────────────────────────────────────
     "- DOUBLE-COUNTING RULE: Never measure the same physical work in both a composite item "
     "and a constituent item. For cavity walls: choose either a single composite item covering "
