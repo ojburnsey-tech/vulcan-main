@@ -101,14 +101,24 @@ PRELIM_ITEMS = [
 ]
 
 # (description, allowance_amount)
-PROVISIONAL_ITEMS = [
-    ("Connection to existing sewer — Provisional Sum "
-     "(subject to NI Water (Article 163 application fee: £229.20 incl. VAT) survey)", 1500.00),
-    ("External landscaping and reinstatement — Provisional Sum",  2000.00),
-    ("Client’s fixture and fitting allowance — Prime Cost Sum", 3500.00),
+PROVISIONAL_SUMS = [
+    ("Connection to existing sewer; nature and extent subject "
+     "to NI Water survey; remeasurable on instruction", 1500.00),
+    ("External landscaping and reinstatement; extent and "
+     "specification to be confirmed", 2000.00),
+]
+
+PC_SUMS = [
+    ("Client’s fixtures and fittings; PC Sum for supply only; "
+     "contractor to add fixing, profit and attendance separately", 3500.00),
+]
+
+STATUTORY_FEES = [
     ("Planning application fee — Belfast City Council", 327.00),
-    ("Building Control Full Plans fee — Belfast City Council (40–60m² bracket)", 291.60),
-    ("NI Water sewer connection application and inspection fee (Article 163)", 229.20),
+    ("Building Control Full Plans fee — Belfast City Council "
+     "(40–60m² bracket)", 291.60),
+    ("NI Water sewer connection application and inspection fee "
+     "(Article 163)", 229.20),
 ]
 
 # (resource, grade_description, unit_string)
@@ -601,36 +611,67 @@ def _build_measured_works(trade_groups) -> tuple:
 
 
 def _build_provisional_sums() -> tuple:
-    """Section 03 — Provisional & PC Sums. Returns (flowables, prov_total)."""
+    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees."""
     col_w = [CONTENT_W - 100, 100]
-    rows  = [[Paragraph("Description", S_COL_HDR), Paragraph("Allowance", S_COL_HDR_R)]]
-    cmds  = list(_col_header_cmds())
+    story = _section_heading("SECTION 03 — PROVISIONAL SUMS, PC SUMS AND FEES")
     prov_total = 0.0
 
-    for desc, amt in PROVISIONAL_ITEMS:
-        prov_total += amt
-        ir = len(rows)
-        rows.append([Paragraph(desc, S_NORMAL), Paragraph(_fmt(amt), S_RIGHT)])
-        if ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+    def _sub_table(heading, items):
+        nonlocal prov_total
+        rows = [[Paragraph("Description", S_COL_HDR),
+                 Paragraph("Allowance",   S_COL_HDR_R)]]
+        cmds = list(_col_header_cmds())
+        sub_total = 0.0
+        for desc, amt in items:
+            prov_total += amt
+            sub_total  += amt
+            ir = len(rows)
+            rows.append([Paragraph(desc, S_NORMAL),
+                         Paragraph(_fmt(amt), S_RIGHT)])
+            if ir % 2 == 0:
+                cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+        tr = len(rows)
+        rows.append([
+            Paragraph(f"{heading} Total", S_RIGHT_BOLD),
+            Paragraph(_fmt(sub_total), S_RIGHT_BOLD),
+        ])
+        cmds += [
+            ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
+            ('TOPPADDING',    (0, tr), (-1, tr), 6),
+            ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+        ]
+        base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
+        tbl = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+        tbl.setStyle(TableStyle(base + cmds))
+        return tbl
 
-    tr = len(rows)
-    rows.append([
-        Paragraph("Provisional & PC Sums Total", S_RIGHT_BOLD),
+    story.append(Paragraph("Provisional Sums", S_TRADE))
+    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Prime Cost Sums", S_TRADE))
+    story.append(_sub_table("Prime Cost Sums", PC_SUMS))
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
+    story.append(_sub_table("Statutory Fees and Charges", STATUTORY_FEES))
+    story.append(Spacer(1, 4 * mm))
+
+    # Section total row
+    col_w2 = [CONTENT_W - 100, 100]
+    total_rows = [[
+        Paragraph("Section 03 Total", S_RIGHT_BOLD),
         Paragraph(_fmt(prov_total), S_RIGHT_BOLD),
-    ])
-    cmds += [
-        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
-        ('TOPPADDING',    (0, tr), (-1, tr), 6),
-        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+    ]]
+    total_cmds = [
+        ('LINEABOVE',     (0, 0), (-1, 0), 1.5, colors.black),
+        ('TOPPADDING',    (0, 0), (-1, 0), 6),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 6),
+        ('ALIGN',         (1, 0), (1, 0),  'RIGHT'),
     ]
+    base = _base_table_cmds()
+    total_tbl = Table(total_rows, colWidths=col_w2, hAlign='LEFT')
+    total_tbl.setStyle(TableStyle(base + total_cmds))
+    story.append(total_tbl)
 
-    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
-    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
-    tbl.setStyle(TableStyle(base + cmds))
-
-    story = _section_heading("SECTION 03 — PROVISIONAL & PC SUMS")
-    story.append(tbl)
     return story, prov_total
 
 
