@@ -884,7 +884,7 @@ def process_pdf():                         # Flask calls this function when a ma
     if not api_key:                                 # fail fast with a clear message if the variable is missing
         return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
 
-    client = anthropic.Anthropic(api_key=api_key)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
+    client = anthropic.Anthropic(api_key=api_key, timeout=180.0)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
 
     try:
         app.logger.info(
