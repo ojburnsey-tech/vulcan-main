@@ -125,7 +125,12 @@ DAYWORKS_ROWS = [
 
 DAYWORKS_NOTE = (
     "Dayworks rates to be used only for variations and unforeseen works instructed "
-    "in writing by the Contract Administrator."
+    "in writing by the Contract Administrator. The contractor shall insert their "
+    "all-in rates inclusive of overhead and profit. Labour rates shall be "
+    "all-in gang rates including NI contributions, holiday pay, and tool allowance. "
+    "Plant rates shall include fuel, operator, and all consumables. "
+    "The materials percentage addition shall cover handling, storage, and profit "
+    "on net invoiced cost of materials."
 )
 
 # Substring replacements applied to item descriptions before rendering
