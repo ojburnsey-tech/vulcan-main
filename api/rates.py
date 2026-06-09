@@ -2585,7 +2585,7 @@ class BoQGenerator:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 10 — FULL BoQ VALIDATION
+# SECTION 10 — FULL BoQ VALIDATIOn
 # Runs NRM2Validator across every item and returns a structured report.
 # ═══════════════════════════════════════════════════════════════════════════════
 
