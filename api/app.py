@@ -182,8 +182,35 @@ SYSTEM_PROMPT = (
     "5.14 Mechanical services; 5.15 Electrical services; "
     "5.17 Plastering and internal finishes; "
     "5.20 Painting and decorating; 5.21 Drainage below ground; "
-    "5.23 Windows and external doors; "
-    "5.28 Floor finishes (tiling, screed, timber flooring).\n"
+    "5.23 Windows, screens and lights; 5.24 Doors, shutters and hatches; "
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.31 Insulation; "
+    "5.41 Builder's work in connection with services.\n"
+
+    # ── Windows and doors rule ────────────────────────────────────────────────
+    "- WINDOWS AND DOORS RULE: Always create separate trade sections for windows and doors. "
+    "Never combine them in a single section. "
+    "Window items include: window frames, glazing units, glazing beads, window boards, "
+    "ironmongery to windows, manifestation film. "
+    "Door items include: door sets, door leaves, door frames and linings, ironmongery to doors, "
+    "door closers, access control to doors. "
+    "If glazing is separately described as a standalone element (structural glazing, frameless glass, "
+    "glass balustrades), measure it under 5.23.\n"
+
+    # ── Insulation rule ───────────────────────────────────────────────────────
+    "- INSULATION RULE: All insulation items must be grouped together in a dedicated "
+    "5.31 Insulation section. Do not attach insulation items to the trade they serve. "
+    "The following all belong in 5.31, not in other sections: "
+    "cavity wall insulation (partial fill or full fill) — not in 5.8 Masonry; "
+    "roof insulation (between/over rafters, flat roof insulation board) — not in 5.12 Roofing; "
+    "floor insulation (rigid insulation board below screed or slab) — not in 5.1 Groundworks; "
+    "acoustic insulation (between floors, party walls) — not in 5.8 or 5.11; "
+    "pipe and duct insulation lagging — not in 5.14 Mechanical services; "
+    "fire-rated insulation to structural elements — not in 5.9. "
+    "Always create a 5.31 Insulation section. If the specification does not describe insulation "
+    "types or thicknesses, insert a Provisional Sum under 5.31 labelled "
+    "'Thermal and acoustic insulation — specification not issued at tender stage; "
+    "contractor to include own allowance'.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
