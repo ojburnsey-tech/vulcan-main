@@ -802,7 +802,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
 
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(colors.Color(0.3, 0.3, 0.3))
-        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities')
+        canvas.drawString(LEFT_M, y_title - 12, 'Bill of Quantities — AI-Assisted Draft')
 
         rule_y = PAGE_H - TOP_M + 4 * mm
         canvas.setStrokeColor(colors.black)
