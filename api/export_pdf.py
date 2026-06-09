@@ -641,11 +641,19 @@ def _build_measured_works(trade_groups) -> tuple:
 
             dim_str  = item.get('dimension_string', '')
             draw_ref = item.get('drawing_ref', '')
-            desc_markup = html.escape(desc)
+            cdp      = item.get('cdp', False)
+            perf_req = item.get('performance_requirement', '')
+
+            item_code   = f"{section_prefix}/{item_counter:03d}"
+            desc_markup = f"<b>{html.escape(item_code)}</b>  {html.escape(desc)}"
             if dim_str:
                 desc_markup += f'<br/><font size="8"><i>{html.escape(dim_str)}</i></font>'
             if draw_ref:
                 desc_markup += f'<br/><font size="8"><i>Ref: {html.escape(draw_ref)}</i></font>'
+            if cdp:
+                desc_markup += '<br/><b>Contractor Designed Portion (CDP)</b>'
+            if cdp and perf_req:
+                desc_markup += f'<br/><i>Performance Requirement: {html.escape(perf_req)}</i>'
 
             ir = len(rows)
             rows.append([
@@ -654,14 +662,6 @@ def _build_measured_works(trade_groups) -> tuple:
                 Paragraph(unit,                              S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
                 Paragraph(_fmt(line_tot),                    S_RIGHT),
-            item_code = f"{section_prefix}/{item_counter:03d}"
-            ir = len(rows)
-            rows.append([
-                Paragraph(f"<b>{item_code}</b>  {desc}",   S_NORMAL),
-                Paragraph(f'{qty:g}',                       S_RIGHT),
-                Paragraph(unit,                             S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
-                Paragraph(_fmt(line_tot),                   S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
