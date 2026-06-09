@@ -194,12 +194,20 @@ SYSTEM_PROMPT = (
     "- NRM2 SECTION NUMBERING: Prefix every trade heading with its NRM2 work section "
     "number. Every section must have a unique number — never reuse the same number for "
     "two different trade headings. Use these exact mappings and no others: "
+    "1 Preliminaries and general conditions; "
     "5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
     "5.9 Structural metalwork; 5.11 Carpentry and joinery; 5.12 Roofing; "
     "5.14 Mechanical services; 5.15 Electrical services; "
     "5.17 Plastering and internal finishes; "
     "5.20 Painting and decorating; 5.21 Drainage below ground; "
     "5.23 Windows and external doors; "
+    "5.28 Floor finishes (tiling, screed, timber flooring).\n"
+    "- PRELIMINARIES RULE: Preliminaries items (site establishment, supervision, welfare, "
+    "temporary services, insurance, health and safety, cleaning) belong in Section 1 "
+    "Preliminaries. Never include these items in the Measured Works sections (5.x). "
+    "If the input describes contractor overhead or site running cost items, do not measure "
+    "them — the Preliminaries section is a fixed structure in the PDF and is handled "
+    "separately from the measured works you are generating.\n"
     "5.28 Floor finishes (tiling, screed, timber flooring); "
     "5.41 Builder's Work in Connection with Services.\n"
     "- External render, tyrolean render, monocouche render, sand and cement render, "
@@ -290,6 +298,20 @@ SYSTEM_PROMPT = (
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
     "- unit must match the unit for that rate_key as listed.\n"
+    "- drawing_ref: If the input PDF contains drawing numbers, specification "
+    "references, or document revision codes, record the reference(s) this "
+    "item was measured from. Format as: 'Drawing [ref] Rev [rev]' or "
+    "'[ref1] / [ref2]' for multiple sources. If no drawing references are "
+    "visible in the input, omit this field entirely — do not invent references.\n"
+    "- dimension_string: Show the arithmetic used to derive the quantity. "
+    "Format as a readable calculation string. Examples: "
+    "'4.200m × 3.600m = 15.12m²' — "
+    "'(12.400m + 8.600m) × 2 = 42.000m perimeter' — "
+    "'45.0m² plan × 0.150m depth = 6.75m³ × 1.30 bulking = 8.78m³ disposal' — "
+    "'27.0m perimeter × 5.400m height = 145.8m² gross − 10.8m² openings = 135.0m² net'. "
+    "Always include this field. If a quantity is a single dimension with no "
+    "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
+    "item'. This field is mandatory for every line item.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
@@ -313,6 +335,14 @@ BOQ_OUTPUT_SCHEMA = {
                                 },
                                 "quantity": {"type": "number"},
                                 "unit": {"type": "string"},
+                                "drawing_ref": {
+                                    "type": "string",
+                                    "description": "Drawing and specification references this item was measured from, e.g. 'A02 Rev P03 / SP Rev 04'",
+                                },
+                                "dimension_string": {
+                                    "type": "string",
+                                    "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
@@ -425,6 +455,8 @@ def _enrich_boq(boq_data):
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
+            item.setdefault('drawing_ref', '')
+            item.setdefault('dimension_string', '')
 
             # Prefer the rate_key Claude was instructed to output — direct O(1) lookup
             rate_key_direct = item.get('rate_key', '').strip()

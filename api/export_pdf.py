@@ -1,6 +1,7 @@
 # api/export_pdf.py
 # Generates a professional NRM2-compliant A4 Bill of Quantities PDF using ReportLab Platypus.
 
+import html
 import io
 import re
 import unicodedata
@@ -127,26 +128,31 @@ STATUTORY_FEES = [
      "(Article 163)", 229.20),
 ]
 
-# (resource, grade_description, unit_string)
+# (resource, grade_description, unit_string, guidance_range)
 DAYWORKS_ROWS = [
-    ("Labour",    "Ganger / Foreman",                                                           "/hr"),
-    ("Labour",    "Skilled tradesperson (bricklayer, carpenter, electrician, plumber)",         "/hr"),
-    ("Labour",    "Semi-skilled operative",                                                     "/hr"),
-    ("Labour",    "General labourer",                                                           "/hr"),
-    ("Plant",     "Excavator / 360° machine (up to 5t)",                                  "/hr"),
-    ("Plant",     "Skip lorry / grab lorry",                                                    "/load"),
-    ("Plant",     "Scaffold tower (weekly hire)",                                               "/wk"),
-    ("Materials", "Percentage addition on net invoiced cost of materials for emergency procurement", "%"),
+    ("Labour",          "Ganger / working foreman",                                              "/hr", "£26–£32/hr"),
+    ("Labour",          "Skilled tradesperson (bricklayer, carpenter, plumber, electrician)",    "/hr", "£22–£28/hr"),
+    ("Labour",          "Semi-skilled operative",                                                "/hr", "£18–£22/hr"),
+    ("Labour",          "General labourer",                                                      "/hr", "£18–£22/hr"),
+    ("Plant",           "Small plant (mixer, compactor, generator)",                             "/hr", "£8–£15/hr"),
+    ("Plant",           "Medium plant (mini-excavator, tracked dumper)",                         "/hr", "£25–£45/hr"),
+    ("Plant",           "Large plant (excavator, crane — if applicable)",                   "/hr", "£55–£120/hr"),
+    ("Materials",       "Percentage addition on net invoiced cost of materials",                 "%",   "Net cost + 15%"),
+    ("Sub-contractors", "Percentage addition on net sub-contract price",                         "%",   "Net cost + 15%"),
 ]
 
 DAYWORKS_NOTE = (
-    "Dayworks rates to be used only for variations and unforeseen works instructed "
-    "in writing by the Contract Administrator. The contractor shall insert their "
-    "all-in rates inclusive of overhead and profit. Labour rates shall be "
-    "all-in gang rates including NI contributions, holiday pay, and tool allowance. "
-    "Plant rates shall include fuel, operator, and all consumables. "
-    "The materials percentage addition shall cover handling, storage, and profit "
-    "on net invoiced cost of materials."
+    "Notes on Dayworks Rates:<br/>"
+    "(a) Labour rates are all-in rates inclusive of PAYE, employer's National Insurance "
+    "contributions, holiday pay, and tool allowance. Rates are based on CIJC Working Rule "
+    "Agreement Northern Ireland 2026.<br/>"
+    "(b) Plant rates are exclusive of fuel and operator unless otherwise stated.<br/>"
+    "(c) Materials are to be charged at net cost (invoiced price) plus the percentage addition "
+    "stated above to cover handling, storage, and waste.<br/>"
+    "(d) Sub-contractor work is to be charged at the net sub-contract price plus the percentage "
+    "addition stated above.<br/>"
+    "(e) Dayworks are only to be used where expressly instructed by the Contract Administrator. "
+    "All daywork sheets must be submitted for signature within 24 hours of the work being carried out."
 )
 
 # Substring replacements applied to item descriptions before rendering
@@ -273,6 +279,8 @@ S_COL_HDR_C     = _style('BoqColHdrC',    bold=True, color=colors.white, align=T
 S_TRADE         = _style('BoqTrade',      bold=True, size=9.5, leading=14)
 S_DISCLAIMER    = _style('BoqDisc',       font='Helvetica-Oblique', size=7,
                           color=colors.Color(0.4, 0.4, 0.4))
+S_GUIDANCE_C    = _style('BoqGuidanceC', font='Helvetica-Oblique', size=8,
+                          color=colors.Color(0.4, 0.4, 0.4), align=TA_CENTER)
 S_TITLE         = _style('BoqTitle',      bold=True, size=14, leading=18)
 S_SECTION       = _style('BoqSection',    bold=True, size=11, leading=14)
 S_BODY          = _style('BoqBody',       size=9, leading=13)
@@ -442,57 +450,142 @@ def _build_preambles() -> list:
 
 def _build_preliminaries() -> tuple:
     """Section 01 — Preliminaries. Returns (flowables, prelim_total)."""
-    # Five-column table: Description | Qty | Unit | Rate | Total
-    # The two Measured Works rate columns are merged into a single "Rate" column here.
-    rate_w = _C_MAT + _C_LAB
-    col_w  = [_C_DESC, _C_QTY, _C_UNIT, rate_w, _C_TOTAL]
+    story = _section_heading("SECTION 01 — PRELIMINARIES")
 
-    rows = [[
-        Paragraph("Description", S_COL_HDR),
-        Paragraph("Qty",         S_COL_HDR_R),
-        Paragraph("Unit",        S_COL_HDR_C),
-        Paragraph("Rate",        S_COL_HDR_R),
-        Paragraph("Total",       S_COL_HDR_R),
+    lbl_w = 80 * mm
+    val_w = CONTENT_W - lbl_w
+
+    _plain_style = TableStyle([
+        ('TOPPADDING',    (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING',   (0, 0), (-1, -1), 10),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+    ])
+
+    def _info_block(pairs):
+        rows = [[Paragraph(lbl, S_NORMAL), Paragraph(val, S_NORMAL)] for lbl, val in pairs]
+        tbl = Table(rows, colWidths=[lbl_w, val_w], hAlign='LEFT')
+        tbl.setStyle(_plain_style)
+        return tbl
+
+    def _sub_heading(letter, title):
+        return [Spacer(1, 5 * mm), Paragraph(f'{letter}.  {title}', S_BODY_BOLD), Spacer(1, 2 * mm)]
+
+    # ── A. PROJECT PARTICULARS ──────────────────────────────────────────────────
+    story += _sub_heading('A', 'PROJECT PARTICULARS')
+    story.append(_info_block([
+        ("Project title:",                      "[To be inserted]"),
+        ("Project address:",                    "[To be inserted]"),
+        ("Employer:",                           "[To be inserted]"),
+        ("Architect / Contract Administrator:", "[To be inserted]"),
+        ("Quantity Surveyor:",                  "[To be inserted]"),
+        ("Structural Engineer:",                "[To be inserted]"),
+    ]))
+
+    # ── B. CONTRACT PARTICULARS ────────────────────────────────────────────────
+    story += _sub_heading('B', 'CONTRACT PARTICULARS')
+    story.append(_info_block([
+        ("Form of contract:",         "JCT Minor Works Building Contract 2016 (or as stated)"),
+        ("Contract administrator:",   "[To be inserted]"),
+        ("Liquidated damages:",        "[To be inserted] per week"),
+        ("Defects liability period:",  "[To be inserted] weeks from practical completion"),
+        ("Retention percentage:",     "[To be inserted]%"),
+        ("Interim valuations:",        "Monthly"),
+    ]))
+
+    # ── C. SITE INFORMATION AND CONSTRAINTS ───────────────────────────────────
+    story += _sub_heading('C', 'SITE INFORMATION AND CONSTRAINTS')
+    story.append(_info_block([
+        ("Site access:",           "[To be inserted]"),
+        ("Working hours:",
+         "Monday to Friday 08:00–17:30; Saturday 08:00–13:00 by agreement"),
+        ("Existing services:",
+         "Contractor to locate and protect all existing services"),
+        ("Welfare facilities:",
+         "Contractor to provide and maintain adequate welfare facilities throughout"),
+        ("Hoarding and security:", "Contractor to provide as necessary"),
+    ]))
+
+    # ── D. QUALITY AND HANDOVER REQUIREMENTS ──────────────────────────────────
+    story += _sub_heading('D', 'QUALITY AND HANDOVER REQUIREMENTS')
+    bul_w  = 5 * mm
+    txt_w  = CONTENT_W - bul_w
+    d_rows = [
+        [Paragraph('•', S_NORMAL),
+         Paragraph("All work to be carried out in accordance with the specification "
+                   "and drawings issued with these documents", S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("Operation and maintenance manuals to be provided at practical completion",
+                   S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("As-built drawings to be provided at practical completion", S_NORMAL)],
+        [Paragraph('•', S_NORMAL),
+         Paragraph("All warranties and guarantees to be assigned to the Employer", S_NORMAL)],
+    ]
+    d_tbl = Table(d_rows, colWidths=[bul_w, txt_w], hAlign='LEFT')
+    d_tbl.setStyle(TableStyle([
+        ('TOPPADDING',    (0, 0), (-1, -1), 2),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+        ('LEFTPADDING',   (0, 0), (0, -1), 10),
+        ('LEFTPADDING',   (1, 0), (1, -1), 4),
+        ('RIGHTPADDING',  (0, 0), (-1, -1), 4),
+        ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+    ]))
+    story.append(d_tbl)
+
+    # ── E. PRICING SCHEDULE — PRELIMINARY ITEMS ───────────────────────────────
+    story += _sub_heading('E', 'PRICING SCHEDULE — PRELIMINARY ITEMS')
+
+    itm_w    = 20
+    fixed_w  = 70
+    time_w   = 90
+    tot_w    = _C_TOTAL
+    p_desc_w = CONTENT_W - itm_w - fixed_w - time_w - tot_w
+
+    p_rows = [[
+        Paragraph("Item",                         S_COL_HDR),
+        Paragraph("Description",                  S_COL_HDR),
+        Paragraph("Fixed Charge (£)",             S_COL_HDR_R),
+        Paragraph("Time-Related Charge (£/week)", S_COL_HDR_R),
+        Paragraph("Total (£)",                    S_COL_HDR_R),
     ]]
-    cmds = list(_col_header_cmds())
-    prelim_total = 0.0
+    p_cmds = list(_col_header_cmds())
 
-    for desc, qty, unit, rate in PRELIM_ITEMS:
-        line_tot = round(qty * rate, 2)
-        prelim_total += line_tot
-        ir = len(rows)
-        rows.append([
-            Paragraph(desc,            S_NORMAL),
-            Paragraph(str(qty),        S_RIGHT),
-            Paragraph(unit,            S_CENTER),
-            Paragraph(_fmt(rate),      S_RIGHT),
-            Paragraph(_fmt(line_tot),  S_RIGHT),
+    prelim_schedule = [
+        "Site establishment and mobilisation",
+        "Site management and supervision",
+        "Temporary site offices and welfare",
+        "Temporary power supply",
+        "Temporary water supply",
+        "Site security and hoarding",
+        "Cleaning and rubbish disposal during works",
+        "Final clean on completion",
+        "Insurance — works, employer's liability, public liability",
+        "Health and safety — CDM compliance, method statements, risk assessments",
+    ]
+    for i, desc in enumerate(prelim_schedule, 1):
+        ir = len(p_rows)
+        p_rows.append([
+            Paragraph(f'{i}.', S_CENTER),
+            Paragraph(desc,    S_NORMAL),
+            Paragraph("",      S_RIGHT),
+            Paragraph("",      S_RIGHT),
+            Paragraph("",      S_RIGHT),
         ])
         if ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+            p_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-    tr = len(rows)
-    rows.append([
-        Paragraph("Preliminaries Total", S_RIGHT_BOLD),
-        "", "", "",
-        Paragraph(_fmt(prelim_total), S_RIGHT_BOLD),
-    ])
-    cmds += [
-        ('SPAN',          (0, tr), (3, tr)),
-        ('LINEABOVE',     (0, tr), (-1, tr), 1.0, colors.black),
-        ('TOPPADDING',    (0, tr), (-1, tr), 6),
-        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
-    ]
+    p_base = _base_table_cmds() + [('ALIGN', (2, 0), (-1, -1), 'RIGHT')]
+    p_tbl  = Table(p_rows, colWidths=[itm_w, p_desc_w, fixed_w, time_w, tot_w],
+                   repeatRows=1, hAlign='LEFT')
+    p_tbl.setStyle(TableStyle(p_base + p_cmds))
+    story.append(p_tbl)
+    story.append(Spacer(1, 4 * mm))
 
-    base = _base_table_cmds() + [
-        ('ALIGN', (1, 0), (-1, -1), 'RIGHT'),
-        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
-    ]
-    tbl = Table(rows, colWidths=col_w, repeatRows=1, splitByRow=True, hAlign='LEFT')
-    tbl.setStyle(TableStyle(base + cmds))
+    # Prelim total for Grand Summary — QS estimate carried from PRELIM_ITEMS
+    prelim_total = sum(round(qty * rate, 2) for _, qty, _, rate in PRELIM_ITEMS)
 
-    story = _section_heading("SECTION 01 — PRELIMINARIES")
-    story.append(tbl)
     return story, prelim_total
 
 
@@ -546,6 +639,21 @@ def _build_measured_works(trade_groups) -> tuple:
             line_tot = round(qty * (mat + lab + plant + waste), 2)
             trade_total += line_tot
 
+            dim_str  = item.get('dimension_string', '')
+            draw_ref = item.get('drawing_ref', '')
+            desc_markup = html.escape(desc)
+            if dim_str:
+                desc_markup += f'<br/><font size="8"><i>{html.escape(dim_str)}</i></font>'
+            if draw_ref:
+                desc_markup += f'<br/><font size="8"><i>Ref: {html.escape(draw_ref)}</i></font>'
+
+            ir = len(rows)
+            rows.append([
+                Paragraph(desc_markup,                       S_NORMAL),
+                Paragraph(f'{qty:g}',                        S_RIGHT),
+                Paragraph(unit,                              S_CENTER),
+                Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
+                Paragraph(_fmt(line_tot),                    S_RIGHT),
             item_code = f"{section_prefix}/{item_counter:03d}"
             ir = len(rows)
             rows.append([
@@ -703,23 +811,26 @@ def _build_provisional_sums() -> tuple:
 def _build_dayworks() -> list:
     """Section 04 — Dayworks Schedule (blank rate template)."""
     res_w   = 28 * mm
+    guide_w = 70
     rate_w  = 50
     unit_w  = 30
-    grade_w = CONTENT_W - res_w - rate_w - unit_w
+    grade_w = CONTENT_W - res_w - guide_w - rate_w - unit_w
 
     rows = [[
         Paragraph("Resource",               S_COL_HDR),
         Paragraph("Grade / Description",    S_COL_HDR),
+        Paragraph("Guidance Range",         S_COL_HDR_C),
         Paragraph("Contractor's Rate (£)", S_COL_HDR_R),
         Paragraph("Unit",                   S_COL_HDR_C),
     ]]
     cmds = list(_col_header_cmds())
 
-    for resource, grade, unit in DAYWORKS_ROWS:
+    for resource, grade, unit, guidance in DAYWORKS_ROWS:
         ir = len(rows)
         rows.append([
             Paragraph(resource, S_NORMAL),
             Paragraph(grade,    S_NORMAL),
+            Paragraph(guidance, S_GUIDANCE_C),
             Paragraph("",       S_NORMAL),
             Paragraph(unit,     S_CENTER),
         ])
@@ -727,10 +838,11 @@ def _build_dayworks() -> list:
             cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
     base = _base_table_cmds() + [
-        ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
-        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
+        ('ALIGN', (2, 0), (2, -1), 'CENTER'),
+        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),
+        ('ALIGN', (4, 0), (4, -1), 'CENTER'),
     ]
-    tbl = Table(rows, colWidths=[res_w, grade_w, rate_w, unit_w], repeatRows=1, hAlign='LEFT')
+    tbl = Table(rows, colWidths=[res_w, grade_w, guide_w, rate_w, unit_w], repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
 
     story = _section_heading("SECTION 04 — DAYWORKS SCHEDULE")
@@ -784,14 +896,6 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
 
     story = _section_heading("GRAND SUMMARY")
     story.append(tbl)
-    story.append(Spacer(1, 6 * mm))
-    story.append(Paragraph(
-        'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\'s '
-        'Architects\' & Builders\' Price Book 2025. '
-        'Subject to market variation, location, and supplier pricing. '
-        'Professional quantity surveyor review recommended before tender or client issue.',
-        S_DISCLAIMER,
-    ))
     return story
 
 
