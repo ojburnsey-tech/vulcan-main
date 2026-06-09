@@ -166,16 +166,29 @@ SYSTEM_PROMPT = (
     "(7) floor finishes — screed, tiling, or timber flooring.\n"
     "- Always include a 5.41 Builder's Work in Connection with Services section. "
     "This section covers all building work carried out solely to accommodate M&E "
-    "installations. It must contain sub-items covering at minimum:\n"
-    "  * Service penetrations through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
-    "  * Service penetrations through concrete (nr) — rate_key: bwic_service_penetration_concrete\n"
-    "  * Duct sleeves 100mm dia. (nr) — rate_key: bwic_duct_sleeve_100mm\n"
-    "  * Duct sleeves 150mm dia. (nr) — rate_key: bwic_duct_sleeve_150mm\n"
-    "  * Fire stopping to penetrations through compartment walls/floors (nr) — rate_key: bwic_fire_stopping_penetration\n"
-    "  * Boxing in of pipework in timber and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
-    "  * Making good plaster/plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
-    "  * Making good masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
-    "  * Chases in masonry for conduit/pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "installations — not the M&E installation itself. "
+    "Classify items into 5.41 using the following categories:\n"
+    "  Penetrations — holes formed through walls, floors or ceilings for services to pass through:\n"
+    "    * Through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
+    "    * Through concrete floors or walls (nr) — rate_key: bwic_service_penetration_concrete\n"
+    "  Sleeves — cast-in or post-fixed service sleeves lining or protecting penetrations:\n"
+    "    * 100mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_100mm\n"
+    "    * 150mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_150mm\n"
+    "  Boxing-in — enclosing service risers, exposed ducts or pipe casings in timber and board:\n"
+    "    * Pipework boxed in timber framing and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
+    "  Fire stopping — sealing service penetrations through fire-rated compartment walls or floors:\n"
+    "    * Fire stopping to service penetration through compartment (nr) — rate_key: bwic_fire_stopping_penetration\n"
+    "  Making good — reinstating finishes around completed service installations:\n"
+    "    * Plaster or plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
+    "    * Masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
+    "  Chases — cutting service routes through masonry, including making good:\n"
+    "    * Chase in masonry for conduit or pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "BWIC NEGATIVE RULE: Do NOT classify MEP equipment installation itself as BWIC. "
+    "Boilers, radiators, pipework runs, ductwork, cable containment, luminaires, "
+    "distribution boards, consumer units, and all M&E equipment and wiring belong in "
+    "5.14 Mechanical services or 5.15 Electrical services. Only the associated building "
+    "work — the hole, sleeve, boxing-in, fire stop, or reinstatement around the service "
+    "— belongs in 5.41. Never duplicate a service item in both a services section and 5.41.\n"
     "Scale quantities to the size of the project and complexity of M&E installations "
     "described in the drawings. Never omit this section.\n"
 
@@ -203,6 +216,12 @@ SYSTEM_PROMPT = (
     "5.21 Drainage below ground; "
     "5.23 Windows and external doors; "
     "5.28 Floor, Wall and Ceiling Finishes; 5.29 Decoration.\n"
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.31 Insulation; "
+    "5.35 External works — hard landscaping and site paving; "
+    "5.36 Fencing and gates; "
+    "5.37 Soft landscaping and planting; "
+    "5.41 Builder's Work in Connection with Services.\n"
     "- PRELIMINARIES RULE: Preliminaries items (site establishment, supervision, welfare, "
     "temporary services, insurance, health and safety, cleaning) belong in Section 1 "
     "Preliminaries. Never include these items in the Measured Works sections (5.x). "
@@ -266,6 +285,33 @@ SYSTEM_PROMPT = (
     "'Thermal and acoustic insulation — specification not issued at tender stage; "
     "contractor to include own allowance'.\n"
 
+    # ── External works rule ───────────────────────────────────────────────────
+    "- EXTERNAL WORKS RULE: Where external works are present, group all external "
+    "works items together in their own dedicated sections rather than scattering "
+    "them across unrelated building trades. "
+    "External works include: paving (block paving, tarmac, concrete slabs), "
+    "kerbs, roadways, car parks, footpaths, fencing, gates, landscaping, "
+    "planting, external drainage runs (above-ground surface water routes and "
+    "connections), retaining structures, external steps, hard landscaping, "
+    "soft landscaping, and reinstatement works.\n"
+    "Use these NRM2 section allocations for external works:\n"
+    "  5.35 External works — hard landscaping and site paving: block paving, "
+    "tarmac, concrete paving slabs, kerbs, roadways, car parks, footpaths, "
+    "retaining structures, external steps, hard landscaping, reinstatement.\n"
+    "  5.36 Fencing and gates: all fencing types, gates and barriers.\n"
+    "  5.37 Soft landscaping and planting: turf, seeding, planting, topsoil, "
+    "mulching, tree and shrub planting, soft landscaping.\n"
+    "External works sections must appear after all building works sections "
+    "(5.1 to 5.41) and before any provisional sums.\n"
+    "EXTERNAL DRAINAGE NOTE: External below-ground drainage (foul and surface "
+    "water drain runs, inspection chambers, manholes, rodding eyes, connections "
+    "to sewer) remains in 5.21 Drainage below ground. Do not move below-ground "
+    "drainage to 5.35.\n"
+    "EXTERNAL WORKS NEGATIVE RULE: Do not classify internal building elements "
+    "as external works. Internal floor finishes, internal staircases, internal "
+    "drainage, and internal paving (e.g. tiled floors) belong in their correct "
+    "building trade sections — not in 5.35, 5.36, or 5.37.\n"
+
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
     "or calculation sheet (any reference beginning SE-, S-, or described as structural), "
@@ -315,6 +361,40 @@ SYSTEM_PROMPT = (
     "Never output a provisional sum without a ps_type classification. If uncertain, "
     "classify as Undefined.\n"
 
+    # ── Contractor Designed Portions ─────────────────────────────────────────
+    "- CONTRACTOR DESIGNED PORTION (CDP) RULE: Flag cdp=true where the contractor "
+    "is likely to carry design responsibility for the element. Typical examples include: "
+    "boilers, heating systems, underfloor heating, MVHR, ventilation systems, "
+    "fire alarm systems, electrical design packages, specialist glazing, solar PV systems, "
+    "and specialist building systems. "
+    "Where cdp=true, include a concise performance_requirement. "
+    "Examples: "
+    "'Provide system to achieve design flow rates.' — "
+    "'Provide system to manufacturer's performance criteria.' — "
+    "'Provide installation to achieve specified thermal performance.' "
+    "Do not mark ordinary measured building elements as CDP. "
+    "Omit cdp and performance_requirement entirely from items that are not CDP.\n"
+    # ── Tender Query and Assumptions Register ────────────────────────────────
+    "- TENDER QUERY AND ASSUMPTIONS RULE: Whenever information is incomplete, "
+    "inferred, or excluded, you MUST populate the top-level assumptions_register "
+    "array. Each entry must contain three fields: category (a short trade or topic "
+    "label, e.g. 'Roofing', 'Drainage', 'Structural'), description (a clear "
+    "statement of the assumption, query, or exclusion), and status (one of the "
+    "three values below).\n"
+    "  * Assumption — use when you have inferred information not explicitly stated "
+    "in the input. Example: category 'Roofing', description 'Roof structure assumed "
+    "timber trussed rafter construction', status 'Assumption'.\n"
+    "  * Clarification Required — use when information is missing and a decision "
+    "is needed before the BoQ can be finalised. Example: category 'Drainage', "
+    "description 'Drainage route not shown on drawings — confirm connection point "
+    "to existing sewer', status 'Clarification Required'.\n"
+    "  * Exclusion — use when an item is deliberately omitted from the priced works. "
+    "Example: category 'Specialist Surveys', description 'Specialist surveys "
+    "excluded from this tender — client to procure direct', status 'Exclusion'.\n"
+    "Do not generate entries where all information is fully confirmed by the input. "
+    "If no assumptions, clarifications, or exclusions apply, output an empty array "
+    "for assumptions_register.\n"
+
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
@@ -349,11 +429,47 @@ SYSTEM_PROMPT = (
     "unconfirmed structural elements. "
     "Omit risk_schedule entirely if the specification is complete and no material "
     "uncertainties are present.\n"
+    # ── NRM2 annexes ─────────────────────────────────────────────────────────
+    "- NRM2 ANNEXES RULE: Only populate the annexes object where supporting "
+    "information exists in the input. Do not invent quotations, utility "
+    "information, statutory undertaker requirements, or specialist "
+    "specifications. If none of the annex categories can be populated from "
+    "the available information, omit the annexes field entirely — do not "
+    "output an empty annexes object. Where applicable:\n"
+    "  * risk_notes may reference risks identified during measurement "
+    "(e.g. unknown ground conditions, existing service routes, structural "
+    "elements requiring specialist input).\n"
+    "  * contractor_designed_scope may reference any CDP (Contractor Designed "
+    "Portion) items identified in the drawings or specification.\n"
+    "  * schedules should list any supporting schedules or measurement "
+    "appendices derived from the input (e.g. door schedule, window schedule, "
+    "finishes schedule) only where the input contains that information.\n"
+    "  * performance_specifications should list performance-based requirements "
+    "only where the input explicitly states them.\n"
+    "  * quotations and statutory_undertaker_information must never be "
+    "invented; include only if the input contains actual quotation references "
+    "or named statutory undertaker requirements.\n"
+    # ── Document control ──────────────────────────────────────────────────────
+    "- DOCUMENT CONTROL RULE: When document-control information is known, populate "
+    "the following top-level fields in your output (all optional — omit only if "
+    "genuinely unknown):\n"
+    "  * revision: document revision letter, e.g. 'A'\n"
+    "  * issue_status: e.g. 'Tender Issue'\n"
+    "  * prepared_by: e.g. 'Vulcan Quanta'\n"
+    "  * checked_by: e.g. 'Professional Review Required'\n"
+    "  * intended_use: e.g. 'Tender Pricing'\n"
+    "Use the typical values above unless the input document states otherwise. "
+    "Do not invent project-specific revision information that is not in the input.\n"
 )
 
 BOQ_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "revision":      {"type": "string", "description": "Document revision letter, e.g. 'A'."},
+        "issue_status":  {"type": "string", "description": "Issue status, e.g. 'Tender Issue'."},
+        "prepared_by":   {"type": "string", "description": "Name of the party that prepared this BoQ."},
+        "checked_by":    {"type": "string", "description": "Name of the party that checked this BoQ."},
+        "intended_use":  {"type": "string", "description": "Intended use of this document, e.g. 'Tender Pricing'."},
         "bill_of_quantities": {
             "type": "array",
             "items": {
@@ -380,6 +496,18 @@ BOQ_OUTPUT_SCHEMA = {
                                     "type": "string",
                                     "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
                                 },
+                                "cdp": {
+                                    "type": "boolean",
+                                    "description": "True where the contractor carries design responsibility for this element.",
+                                },
+                                "performance_requirement": {
+                                    "type": "string",
+                                    "description": "Concise performance specification for CDP items, e.g. 'Provide system to achieve design flow rates.'",
+                                # This internal item_code is the future integration key for external QS software exporters.
+                                "item_code": {
+                                    "type": "string",
+                                    "description": "Internal codification key in {NRM2-section}/{sequence} format, e.g. '5.8/001'. Generated during enrichment.",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
@@ -391,6 +519,36 @@ BOQ_OUTPUT_SCHEMA = {
             },
         },
         "risk_schedule": {
+        "annexes": {
+            "type": "object",
+            "properties": {
+                "schedules": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "performance_specifications": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "quotations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "risk_notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "contractor_designed_scope": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "statutory_undertaker_information": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "additionalProperties": False,
+        "assumptions_register": {
             "type": "array",
             "items": {
                 "type": "object",
@@ -403,6 +561,12 @@ BOQ_OUTPUT_SCHEMA = {
                     "impact": {"type": "string"},
                     "likelihood": {"type": "string"},
                     "mitigation": {"type": "string"},
+                    "category":    {"type": "string"},
+                    "description": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["Assumption", "Clarification Required", "Exclusion"],
+                    },
                 },
             },
         },
@@ -476,6 +640,27 @@ def _match_rate(description):
     return None, None
 
 
+# Canonical NRM2 ordering improves consistency across projects and export formats.
+_NRM2_SECTION_ORDER: dict[str, int] = {
+    "5.1":  10,  "5.2":  20,  "5.4":  30,  "5.8":  40,
+    "5.9":  50,  "5.11": 60,  "5.12": 70,  "5.14": 80,
+    "5.15": 90,  "5.18": 100, "5.19": 110, "5.20": 120,
+    "5.21": 130, "5.23": 140, "5.24": 150, "5.28": 160,
+    "5.29": 170, "5.31": 180, "5.35": 190, "5.36": 200,
+    "5.37": 210, "5.41": 220,
+}
+
+_RE_NRM2_PREFIX = re.compile(r'^\s*(\d+(?:\.\d+)*)')
+
+
+def _nrm2_sort_key(group: dict) -> int:
+    """Return the canonical NRM2 sort position for a trade group; unknowns sort last."""
+    if not isinstance(group, dict):
+        return 9999
+    m = _RE_NRM2_PREFIX.match(group.get('trade') or '')
+    return _NRM2_SECTION_ORDER.get(m.group(1), 9999) if m else 9999
+
+
 def _enrich_boq(boq_data):
     """
     Walk the Claude JSON (regardless of its outer shape) and apply RATES_DB rates to
@@ -499,12 +684,21 @@ def _enrich_boq(boq_data):
     else:
         return boq_data                            # unexpected shape — pass through untouched
 
+    # This internal item_code is the future integration key for external QS software exporters.
+    section_counters = {}  # separate sequence counter per NRM2 section, e.g. {"5.8": 3, "5.1": 1}
+
     for group in groups:                           # iterate each trade section
         if not isinstance(group, dict):            # skip strings or other non-dict entries Claude may have included
             continue
         items = group.get('items') or group.get('line_items') or []
         if not isinstance(items, list):            # guard against items being a scalar or dict
             continue
+
+        # Extract the NRM2 section prefix from the trade heading (e.g. "5.8 Masonry" → "5.8")
+        trade_str = group.get('trade', '')
+        _section_match = re.match(r'^[\d.]+', trade_str.strip())
+        _section = _section_match.group() if _section_match else (trade_str.strip() or 'X')
+
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
@@ -541,6 +735,14 @@ def _enrich_boq(boq_data):
                 item['rate']                = 0.00
                 item['line_total']          = 0.00
                 item['rate_source']         = None
+
+    # Sort trade groups into canonical NRM2 section order.
+    groups.sort(key=_nrm2_sort_key)
+            # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
+            # This internal item_code is the future integration key for external QS software exporters.
+            if not item.get('item_code'):
+                section_counters[_section] = section_counters.get(_section, 0) + 1
+                item['item_code'] = f"{_section}/{section_counters[_section]:03d}"
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
