@@ -637,57 +637,55 @@ def _build_dayworks() -> list:
 
 
 def _build_grand_summary(prelim_total: float, measured_total: float, prov_total: float) -> list:
-    """Grand Summary — all figures calculated from section totals."""
-    works_total = prelim_total + measured_total + prov_total
-    contingency = round(works_total * 0.10,  2)
-    overhead    = round(works_total * 0.125, 2)
-    grand_total = round(works_total + contingency + overhead, 2)
+    """Grand Summary — tender BoQ version.
+
+    Contingency and OHP are excluded from the issued tender BoQ.
+    These are internal cost plan items and should not appear in
+    the document issued to contractors for pricing.
+    """
+    works_total = round(prelim_total + measured_total + prov_total, 2)
 
     col_w = [CONTENT_W - 100, 100]
     rows  = [[Paragraph("Section", S_COL_HDR), Paragraph("Total", S_COL_HDR_R)]]
     cmds  = list(_col_header_cmds())
 
     summary_lines = [
-        ("Section 01 — Preliminaries",               prelim_total,   False),
-        ("Section 02 — Measured Works",               measured_total, False),
-        ("Section 03 — Provisional & PC Sums",        prov_total,     False),
-        ("Works Total",                                    works_total,    True),
-        ("Contingency / Risk Allowance (10%)",             contingency,    False),
-        ("Main Contractor Overhead & Profit (12.5%)",      overhead,       False),
-        ("GRAND TOTAL (excluding VAT)",                    grand_total,    True),
+        ("Section 01 — Preliminaries",          prelim_total,   False),
+        ("Section 02 — Measured Works",          measured_total, False),
+        ("Section 03 — Provisional & PC Sums",   prov_total,     False),
+        ("WORKS TOTAL (excluding VAT)",          works_total,    True),
     ]
 
     for label, amount, is_bold in summary_lines:
         ir = len(rows)
         rows.append([
-            Paragraph(label,         S_BOLD  if is_bold else S_NORMAL),
-            Paragraph(_fmt(amount),  S_RIGHT_BOLD if is_bold else S_RIGHT),
+            Paragraph(label,        S_BOLD  if is_bold else S_NORMAL),
+            Paragraph(_fmt(amount), S_RIGHT_BOLD if is_bold else S_RIGHT),
         ])
         if is_bold:
             cmds += [
-                ('LINEABOVE',     (0, ir), (-1, ir), 1.0, colors.black),
-                ('TOPPADDING',    (0, ir), (-1, ir), 6),
-                ('BOTTOMPADDING', (0, ir), (-1, ir), 6),
+                (‘LINEABOVE’,     (0, ir), (-1, ir), 1.0, colors.black),
+                (‘TOPPADDING’,    (0, ir), (-1, ir), 6),
+                (‘BOTTOMPADDING’, (0, ir), (-1, ir), 6),
             ]
         elif ir % 2 == 0:
-            cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
+            cmds.append((‘BACKGROUND’, (0, ir), (-1, ir), _GREY_ALT))
 
-    # Double rule under the grand total (last row)
     gr = len(rows) - 1
-    cmds.append(('LINEBELOW', (0, gr), (-1, gr), 1.5, colors.black))
+    cmds.append((‘LINEBELOW’, (0, gr), (-1, gr), 1.5, colors.black))
 
-    base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'RIGHT')]
-    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign='LEFT')
+    base = _base_table_cmds() + [(‘ALIGN’, (1, 0), (1, -1), ‘RIGHT’)]
+    tbl  = Table(rows, colWidths=col_w, repeatRows=1, hAlign=’LEFT’)
     tbl.setStyle(TableStyle(base + cmds))
 
     story = _section_heading("GRAND SUMMARY")
     story.append(tbl)
     story.append(Spacer(1, 6 * mm))
     story.append(Paragraph(
-        'Rates sourced from BCIS Q2 2025–2026 regional averages and Spon’s '
-        'Architects’ & Builders’ Price Book 2025. '
-        'Subject to market variation, location, and supplier pricing. '
-        'Professional quantity surveyor review recommended before tender or client issue.',
+        ‘Rates sourced from BCIS Q2 2025–2026 regional averages and Spon\’s ‘
+        ‘Architects\’ & Builders\’ Price Book 2025. ‘
+        ‘Subject to market variation, location, and supplier pricing. ‘
+        ‘Professional quantity surveyor review recommended before tender or client issue.’,
         S_DISCLAIMER,
     ))
     return story
