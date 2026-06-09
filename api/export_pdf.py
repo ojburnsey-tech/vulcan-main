@@ -58,7 +58,7 @@ PREAMBLE_ITEMS = [
 
 # (description, qty, unit, rate_per_unit)
 PRELIM_ITEMS = [
-    ("Scaffold erection, hire (8 weeks), and strike to full perimeter",  1,  "item", 3200.00),
+    ("Scaffold erection, hire (8 weeks), and strike to full perimeter",  1,  "item", 4800.00),
     ("Skip hire for duration of works (10 skips estimated)",             10, "nr",    280.00),
     ("Temporary site hoarding and security fencing",                      1,  "item",  850.00),
     ("Temporary welfare facilities and site WC hire (8 weeks)",           8,  "wk",     95.00),
