@@ -164,8 +164,18 @@ SYSTEM_PROMPT = (
     "5.14 Mechanical services; 5.15 Electrical services; "
     "5.17 Plastering and internal finishes; "
     "5.20 Painting and decorating; 5.21 Drainage below ground; "
-    "5.23 Windows and external doors; "
+    "5.23 Windows, screens and lights; 5.24 Doors, shutters and hatches; "
     "5.28 Floor finishes (tiling, screed, timber flooring).\n"
+
+    # ── Windows and doors rule ────────────────────────────────────────────────
+    "- WINDOWS AND DOORS RULE: Always create separate trade sections for windows and doors. "
+    "Never combine them in a single section. "
+    "Window items include: window frames, glazing units, glazing beads, window boards, "
+    "ironmongery to windows, manifestation film. "
+    "Door items include: door sets, door leaves, door frames and linings, ironmongery to doors, "
+    "door closers, access control to doors. "
+    "If glazing is separately described as a standalone element (structural glazing, frameless glass, "
+    "glass balustrades), measure it under 5.23.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
