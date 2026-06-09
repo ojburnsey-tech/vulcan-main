@@ -166,7 +166,10 @@ SYSTEM_PROMPT = (
     "or calculation sheet (any reference beginning SE-, S-, or described as structural), "
     "you MUST include a structural steelwork section or a Provisional Sum labelled "
     "'Structural steelwork — refer to SE drawings Ref: [X] — measure on receipt of "
-    "fabrication drawings'. Never silently omit structural elements.\n"
+    "fabrication drawings'. Never silently omit structural elements. "
+    "Structural steel beams must be measured in linear metres (m) "
+    "with the quantity being the beam span plus 300mm minimum "
+    "end bearing each side. Never measure a beam as 1 nr.\n"
 
     # ── Description format ────────────────────────────────────────────────────
     "- DESCRIPTION FORMAT: Write every item description in this pattern: "
