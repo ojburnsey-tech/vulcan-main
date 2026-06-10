@@ -1162,7 +1162,11 @@ function SignInPage({ go, toast, user }) {
     // the browser's native autoplay from the attribute alone.
     const video = videoRef.current;
     if (video) {
-      video.play().catch(() => {});
+      if (video.readyState >= 3) {
+        video.play().catch(() => {});
+      } else {
+        video.addEventListener('canplaythrough', () => video.play().catch(() => {}), { once: true });
+      }
     }
     // Dock slides up automatically after 4 s, no interaction required.
     const df = setTimeout(() => setDockVisible(true), 4000);
@@ -1209,6 +1213,7 @@ function SignInPage({ go, toast, user }) {
         muted
         playsInline
         preload="auto"
+        poster="logo.png"
         style={{
           position: 'absolute', inset: 0, width: '100%', height: '100%',
           objectFit: 'cover', zIndex: 0,
