@@ -19,6 +19,7 @@
   <script type="text/babel" src="tweaks-panel.jsx"></script>
   <script type="text/babel" src="vq-shared.jsx"></script>
   <script type="text/babel" src="vq-pages.jsx"></script>
+  <link rel="preload" as="video" href="hero.mp4" type="video/mp4">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -42,8 +43,8 @@
       --c-100: #F1F5F9;
       --c-50:  #F8FAFC;
       --white: #FAFAFA;
-      --amber: #F97316;
-      --amber-d: #EA6C0A;
+      --amber: #d77555;
+      --amber-d: #b85e3e;
       --blue:  #2563EB;
       --blue-d: #1D4ED8;
       --green: #10B981;
@@ -93,7 +94,7 @@
     .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
 
     .btn-amber { background: var(--amber); color: white; padding: 14px 28px; border: none; }
-    .btn-amber:hover:not(:disabled) { background: var(--amber-d); box-shadow: 0 4px 16px rgba(249,115,22,0.4); transform: translateY(-1px); }
+    .btn-amber:hover:not(:disabled) { background: var(--amber-d); box-shadow: 0 4px 16px rgba(215,117,85,0.4); transform: translateY(-1px); }
 
     .btn-blue { background: var(--blue); color: white; padding: 12px 24px; border: none; }
     .btn-blue:hover:not(:disabled) { background: var(--blue-d); box-shadow: 0 4px 16px rgba(37,99,235,0.35); transform: translateY(-1px); }
@@ -177,7 +178,7 @@
     .boq-trade-hd td { padding: 8px 12px; font-size: 11px; font-weight: 700; color: white; letter-spacing: 0.04em; }
     .boq-row td { padding: 9px 12px; font-size: 12px; color: var(--c-600); border-bottom: 1px solid var(--c-100); }
     .boq-row.alt { background: var(--c-50); }
-    .boq-row.flagged { border-left: 3px solid var(--amber); background: rgba(249,115,22,0.04); }
+    .boq-row.flagged { border-left: 3px solid var(--amber); background: rgba(215,117,85,0.04); }
     .boq-row.flagged td { color: var(--c-700); }
     .boq-sub { background: var(--c-100); }
     .boq-sub td { padding: 10px 12px; font-size: 12px; font-weight: 600; color: var(--c-950); border-bottom: 2px solid var(--c-200); }
@@ -191,7 +192,7 @@
     /* ── FEATURES ─────────────────────────────────────────────────────────────── */
     .feat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 64px; }
     .feat-card { padding: 32px; border: 1px solid var(--c-200); border-radius: 12px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: box-shadow var(--t), transform var(--t), border-color var(--t); }
-    .feat-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); border-color: rgba(249,115,22,0.35); }
+    .feat-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.1); transform: translateY(-2px); border-color: rgba(215,117,85,0.35); }
     .feat-icon { width: 44px; height: 44px; border-radius: 10px; background: var(--c-100); display: flex; align-items: center; justify-content: center; font-size: 22px; margin-bottom: 16px; }
     .feat-name { font-family: var(--font-d); font-size: 16px; font-weight: 700; color: var(--c-950); margin-bottom: 8px; }
     .feat-desc { font-size: 14px; color: var(--c-600); line-height: 1.65; }
@@ -200,7 +201,7 @@
     .pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
     .pricing-card { border: 1px solid var(--c-200); border-radius: 12px; padding: 40px; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.06); transition: box-shadow var(--t); position: relative; }
     .pricing-card:hover { box-shadow: 0 8px 24px rgba(0,0,0,0.09); }
-    .pricing-card.rec { border-top: 3px solid var(--amber); box-shadow: 0 4px 24px rgba(249,115,22,0.15); }
+    .pricing-card.rec { border-top: 3px solid var(--amber); box-shadow: 0 4px 24px rgba(215,117,85,0.15); }
     .pricing-badge { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--amber); margin-bottom: 12px; }
     .pricing-name { font-family: var(--font-d); font-size: 18px; font-weight: 700; color: var(--c-950); margin-bottom: 4px; }
     .pricing-price { font-family: var(--font-d); font-size: 48px; font-weight: 800; color: var(--c-950); letter-spacing: -0.03em; line-height: 1; margin-bottom: 4px; }
@@ -269,7 +270,7 @@
     .rboq .rboq-item:hover td { background: var(--c-50) !important; }
     .rboq .rboq-item.alt { background: var(--c-50); }
     .rboq .rboq-item.flagged { border-left: 3px solid var(--amber); }
-    .rboq .rboq-item.flagged td { background: rgba(249,115,22,0.03); }
+    .rboq .rboq-item.flagged td { background: rgba(215,117,85,0.03); }
     .rboq .rboq-sub td { padding: 11px 16px; font-size: 13px; font-weight: 600; color: var(--c-950); background: var(--c-100); border-bottom: 2px solid var(--c-200); }
     .rboq .rboq-sub-main td { background: var(--c-200); font-size: 14px; }
     .rboq .rboq-total { position: sticky; bottom: 0; }
@@ -277,7 +278,7 @@
     .rboq .rboq-total .r { color: var(--amber); font-size: 18px; }
     .rboq td.r { text-align: right; font-variant-numeric: tabular-nums; }
     .rboq td.fw { font-weight: 600; }
-    .flag-chip { display: inline-block; background: rgba(249,115,22,0.1); color: #C2410C; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 8px; }
+    .flag-chip { display: inline-block; background: rgba(215,117,85,0.1); color: #C2410C; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; margin-left: 8px; }
     .edit-inp { background: transparent; border: none; text-align: right; font-size: 14px; color: var(--c-700); font-family: var(--font-b); padding: 2px 4px; border-radius: 3px; transition: background var(--t); width: 72px; }
     .edit-inp:focus { outline: none; background: var(--c-100); }
 
@@ -288,7 +289,7 @@
     .side-lbl { padding: 24px 24px 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--c-400); }
     .side-item { display: flex; align-items: center; gap: 10px; padding: 10px 24px; font-size: 14px; font-weight: 500; color: var(--c-600); cursor: pointer; transition: all var(--t); border-left: 3px solid transparent; }
     .side-item:hover { background: var(--c-50); color: var(--c-950); }
-    .side-item.active { background: rgba(249,115,22,0.05); color: var(--c-950); border-left-color: var(--amber); font-weight: 600; }
+    .side-item.active { background: rgba(215,117,85,0.05); color: var(--c-950); border-left-color: var(--amber); font-weight: 600; }
     .dash-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 32px; }
     .dash-h1 { font-family: var(--font-d); font-size: 36px; font-weight: 800; letter-spacing: -0.02em; color: var(--c-950); }
 
@@ -304,7 +305,8 @@
     .upload-page { background: var(--c-50); min-height: 100vh; padding-top: 64px; }
     .upload-wrap { max-width: 640px; margin: 0 auto; padding: 0 24px 64px; }
     .upload-zone { border: 2px dashed var(--c-200); border-radius: 12px; padding: 80px 40px; text-align: center; cursor: pointer; transition: border-color var(--t), background var(--t); background: white; }
-    .upload-zone:hover, .upload-zone.drag { border-color: var(--amber); background: rgba(249,115,22,0.03); }
+    .upload-zone:hover, .upload-zone.drag { border-color: var(--amber); background: rgba(215,117,85,0.03); }
+    .upload-icon { font-size: 40px; margin-bottom: 16px; display: flex; justify-content: center; align-items: center; }
     .upload-icon { font-size: 40px; margin-bottom: 16px; }
     .upload-h { font-family: var(--font-d); font-size: 22px; font-weight: 700; color: var(--c-950); margin-bottom: 8px; }
     .upload-sub { font-size: 14px; color: var(--c-400); margin-bottom: 24px; }
@@ -743,10 +745,10 @@
       box-shadow: 0 16px 48px rgba(0,0,0,0.55);
     }
     .cin-pricing .pricing-card.rec {
-      border: 1px solid rgba(249,115,22,0.30);
+      border: 1px solid rgba(215,117,85,0.30);
       border-top: 3px solid var(--amber);
-      background: rgba(249,115,22,0.07);
-      box-shadow: 0 8px 40px rgba(249,115,22,0.15);
+      background: rgba(215,117,85,0.07);
+      box-shadow: 0 8px 40px rgba(215,117,85,0.15);
     }
     .cin-pricing .pricing-name { color: #fff; }
     .cin-pricing .pricing-price { color: #fff; }
@@ -903,22 +905,48 @@
       to   { opacity: 1; }
     }
 
-    /* Login dock — slides up from below after 4 s */
+    /* Login dock — invisible until 4 s; fades in centred on screen */
     .signin-dock {
-      position: absolute;
-      bottom: 0;
+      position: fixed;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%) translateY(110%);
+      transform: translate(-50%, calc(-50% + 40px));
+      opacity: 0;
+      pointer-events: none;
       width: 100%;
       max-width: 460px;
-      padding: 0 24px 48px;
+      padding: 0 24px;
       z-index: 10;
-      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease;
     }
-    .signin-dock.dock-visible { transform: translateX(-50%) translateY(0); }
+    .signin-dock.dock-visible {
+      transform: translate(-50%, -50%);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Persistent freeze-frame backdrop — lives in the App root, z-index: -1 so
+       it sits behind every auth screen. Background-image is set by JS when the
+       intro video ends; falls back to solid dark until then. */
+    .video-bg-freeze {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: #080706;
+      pointer-events: none;
+      background-size: cover;
+      background-position: center;
+    }
 
     /* ── Auth card glassmorphism (signin, signup, forgot, reset) ─────────── */
-    .signin-pg { background: #131619 !important; }
+    /* Transparent so the .video-bg-freeze frame shows through on all auth screens. */
+    .signin-pg {
+      position: fixed !important;
+      inset: 0 !important;
+      min-height: unset !important;
+      background: transparent !important;
+      overflow-y: auto;
+    }
     .signin-card {
       background: rgba(29,33,39,0.65) !important;
       backdrop-filter: blur(20px) saturate(1.2);
@@ -936,8 +964,8 @@
     }
     .signin-card .finp::placeholder { color: rgba(255,255,255,0.28) !important; }
     .signin-card .finp:focus {
-      border-color: rgba(249,115,22,0.55) !important;
-      box-shadow: 0 0 0 3px rgba(249,115,22,0.12) !important;
+      border-color: rgba(215,117,85,0.55) !important;
+      box-shadow: 0 0 0 3px rgba(215,117,85,0.12) !important;
       background: rgba(255,255,255,0.09) !important;
     }
     /* Dropdown chevron stays visible on dark background */
@@ -979,11 +1007,12 @@
     }
     .app-side-lbl {
       padding: 18px 20px 6px;
-      font-size: 10px;
-      font-weight: 700;
-      letter-spacing: 0.12em;
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: rgba(255,255,255,0.22);
+      color: #5a6270;
     }
     .app-side-item {
       display: flex;
@@ -1000,7 +1029,7 @@
     }
     .app-side-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.88); }
     .app-side-item.active {
-      background: rgba(249,115,22,0.09);
+      background: rgba(215,117,85,0.09);
       color: white;
       border-left-color: var(--amber);
       font-weight: 600;
@@ -1041,8 +1070,8 @@
     }
     .scard .finp::placeholder { color: rgba(255,255,255,0.28) !important; }
     .scard .finp:focus {
-      border-color: rgba(249,115,22,0.5) !important;
-      box-shadow: 0 0 0 3px rgba(249,115,22,0.12) !important;
+      border-color: rgba(215,117,85,0.5) !important;
+      box-shadow: 0 0 0 3px rgba(215,117,85,0.12) !important;
       background: rgba(255,255,255,0.09) !important;
     }
     .scard .btn-outline {
@@ -1080,7 +1109,7 @@
     }
     .upload-zone:hover, .upload-zone.drag {
       border-color: var(--amber) !important;
-      background: rgba(249,115,22,0.06) !important;
+      background: rgba(215,117,85,0.06) !important;
     }
     .upload-h   { color: white !important; }
     .upload-sub { color: rgba(255,255,255,0.42) !important; }
@@ -1135,6 +1164,129 @@
     .edit-inp { color: rgba(255,255,255,0.62) !important; }
     .edit-inp:focus { background: rgba(255,255,255,0.08) !important; }
 
+    /* ── Sidebar profile (bottom) ────────────────────────────────────────── */
+    .vd-profile { display: flex; align-items: center; gap: 11px; padding: 14px 20px; }
+    .vd-avatar {
+      width: 38px; height: 38px; border-radius: 50%;
+      background: #e8621a; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0; font-family: var(--font-b);
+    }
+    .vd-avatar-img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+    .vd-profile-info { min-width: 0; }
+    .vd-profile-name { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-profile-plan { font-size: 12px; color: var(--amber); font-weight: 600; margin-top: 1px; }
+
+    /* ════════════════════════════════════════════════════════════════════
+       DASHBOARD REDESIGN — stat cards, project list, panels, charts
+    ════════════════════════════════════════════════════════════════════ */
+    .vd-root { display: flex; min-height: 100vh; background: var(--c-bg, #0f1117); }
+    .vd-main { padding: 32px 40px 56px; min-width: 0; }
+    .vd-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 28px; flex-wrap: wrap; }
+    .vd-h1 { font-family: 'Inter', system-ui, sans-serif; font-size: 24px; font-weight: 700; color: #fff; letter-spacing: -0.3px; line-height: 1.2; margin-bottom: 8px; }
+    .vd-welcome { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 2px; }
+    .vd-subtitle { font-size: 13px; color: #8b92a0; }
+
+    .vd-card {
+      background: rgba(29,33,39,0.7);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+    }
+
+    /* Stat cards */
+    .vd-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .vd-stat { padding: 20px; display: flex; gap: 14px; align-items: center; }
+    .vd-stat-ico { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #fff; }
+    .vd-stat-label { font-family: 'Inter', system-ui, sans-serif; font-size: 13px; font-weight: 500; color: #8b92a0; text-transform: none; margin-bottom: 6px; }
+    .vd-stat-value { font-family: 'Inter', system-ui, sans-serif; font-size: 32px; font-weight: 700; color: #ffffff; letter-spacing: -0.5px; line-height: 1; margin-bottom: 6px; }
+    .vd-stat-sub { font-size: 12px; color: #5a6270; }
+
+    /* Main two-column grid */
+    .vd-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 24px; align-items: start; }
+    .vd-col { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+    .vd-panel { padding: 22px 24px; }
+    .vd-section-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .vd-section-title { font-family: 'Inter', system-ui, sans-serif; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; color: #fff; }
+    .vd-link { font-size: 13px; color: var(--amber); font-weight: 600; cursor: pointer; user-select: none; }
+    .vd-link:hover { opacity: 0.82; }
+
+    /* Recent projects */
+    .vd-proj-row { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid rgba(255,255,255,0.06); position: relative; }
+    .vd-proj-row:first-of-type { border-top: none; }
+    .vd-thumb { width: 48px; height: 48px; border-radius: 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.05); flex-shrink: 0; }
+    .vd-proj-main { min-width: 0; flex: 1; }
+    .vd-proj-name { font-size: 14px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-proj-time { font-size: 12px; color: #8b92a0; margin-top: 3px; }
+    .vd-proj-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .vd-proj-meta { font-size: 12px; color: #8b92a0; white-space: nowrap; }
+    .vd-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+    .vd-badge-green { background: rgba(30,166,114,0.14); color: #2bd496; }
+    .vd-badge-amber { background: rgba(240,160,32,0.16); color: #f0b545; }
+    .vd-badge-grey  { background: rgba(255,255,255,0.07); color: #9aa3b2; }
+
+    .vd-dots { background: none; border: none; color: #8b92a0; font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+    .vd-dots:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .vd-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; background: #20242b; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.5); z-index: 30; min-width: 140px; overflow: hidden; }
+    .vd-menu-item { padding: 10px 14px; font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer; }
+    .vd-menu-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .vd-menu-item.danger { color: #ef6b6b; }
+    .vd-menu-item.danger:hover { background: rgba(239,68,68,0.1); }
+
+    /* Dashboard empty state */
+    .vd-empty { text-align: center; padding: 44px 24px; }
+    .vd-empty-p { font-size: 15px; color: #8b92a0; margin-bottom: 20px; }
+
+    /* Quick actions */
+    .vd-qa { display: flex; flex-direction: column; gap: 10px; }
+    .vd-qa-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all var(--t); text-align: left; font-family: var(--font-b); }
+    .vd-qa-primary { background: var(--amber); color: #fff; justify-content: center; }
+    .vd-qa-primary:hover { background: var(--amber-d); }
+    .vd-qa-dark { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.78); border-color: rgba(255,255,255,0.08); }
+    .vd-qa-dark:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+    /* Recent activity */
+    .vd-act { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    .vd-act:first-of-type { border-top: none; }
+    .vd-act-dot { width: 28px; height: 28px; border-radius: 50%; background: rgba(30,166,114,0.16); color: #2bd496; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+    .vd-act-body { min-width: 0; flex: 1; }
+    .vd-act-title { font-size: 13px; color: #fff; font-weight: 500; }
+    .vd-act-sub { font-size: 12px; color: #8b92a0; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-act-time { font-size: 11px; color: #6b7280; white-space: nowrap; flex-shrink: 0; }
+    .vd-muted { font-size: 13px; color: #8b92a0; padding: 8px 0; }
+
+    /* System status */
+    .vd-status-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+    .vd-status-row:first-of-type { border-top: none; }
+    .vd-status-label { color: #8b92a0; }
+    .vd-status-val { color: rgba(255,255,255,0.82); font-weight: 500; }
+    .vd-status-online  { color: #2bd496; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .vd-dot-green      { width: 7px; height: 7px; border-radius: 50%; background: #2bd496; display: inline-block; }
+    .vd-status-offline { color: #f0626a; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .vd-dot-red        { width: 7px; height: 7px; border-radius: 50%; background: #f0626a; display: inline-block; }
+
+    /* Charts row */
+    .vd-charts { display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px; margin-top: 24px; align-items: stretch; }
+    .vd-chart-pill { font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; padding: 5px 10px; }
+    .vd-donut-wrap { display: flex; flex-direction: column; align-items: center; }
+    .vd-donut { position: relative; width: 150px; height: 150px; }
+    .vd-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .vd-donut-total { font-family: 'Inter', system-ui, sans-serif; font-size: 28px; font-weight: 700; letter-spacing: -0.5px; color: #fff; line-height: 1; }
+    .vd-donut-lbl { font-size: 11px; color: #8b92a0; margin-top: 2px; }
+    .vd-legend { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; width: 100%; }
+    .vd-legend-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+    .vd-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .vd-legend-name { color: rgba(255,255,255,0.78); }
+    .vd-legend-val { margin-left: auto; color: #8b92a0; }
+
+    @media (max-width: 1100px) {
+      .vd-grid { grid-template-columns: 1fr; }
+      .vd-charts { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      .vd-main { padding: 24px 18px 40px; }
+      .vd-stats { grid-template-columns: 1fr 1fr; }
+    }
+
     /* ── Mobile: collapse sidebar ────────────────────────────────────────── */
     @media (max-width: 1024px) {
       .app-side { display: none; }
@@ -1148,6 +1300,7 @@ const { useState, useEffect, useCallback } = React;
 const { AnnouncementBar, Header, Footer, ToastContainer } = window;
 const {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
+  ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
 } = window;
@@ -1160,25 +1313,27 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 // Pages that have no Header/Footer chrome
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
-                         'forgotpassword','checkemail','resetpassword'];
+                         'forgotpassword','checkemail','resetpassword','landing',
+                         'projectsetup','workspace','projectsettings'];
 
 // Pages that require an authenticated session
 const PROTECTED = ['dashboard','settings','results','upload'];
 
 function App() {
-  const [page, setPage]               = useState('landing');
+  const [page, setPage]               = useState('signin');
   const [toasts, setToasts]           = useState([]);
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [pendingEmail, setPendingEmail] = useState('');
   const [boqData, setBoqData]         = useState(null);   // holds JSON returned by /process; passed down to ResultsPage
+  const [projectId, setProjectId]     = useState(null);
   const [t, setTweak]                 = useTweaks(TWEAK_DEFAULTS);
 
   // ── Accent CSS token sync ───────────────────────────────────────────────────────
   useEffect(() => {
-    const c = t.accent === 'blue' ? '#2563EB' : '#F97316';
+    const c = t.accent === 'blue' ? '#2563EB' : '#d77555';
     document.documentElement.style.setProperty('--amber', c);
-    document.documentElement.style.setProperty('--amber-d', t.accent === 'blue' ? '#1D4ED8' : '#EA6C0A');
+    document.documentElement.style.setProperty('--amber-d', t.accent === 'blue' ? '#1D4ED8' : '#b85e3e');
   }, [t.accent]);
 
   // ── Landing page body class + scrolled header ──────────────────────────────────
@@ -1217,7 +1372,7 @@ function App() {
         setPage('resetpassword');
         window.scrollTo({ top: 0, behavior: 'instant' });
       } else if (event === 'SIGNED_OUT') {
-        setPage('landing');
+        setPage('signin');
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
     });
@@ -1248,6 +1403,7 @@ function App() {
   //   to the next page without URL params.
   const go = useCallback((p, opts) => {
     if (opts && opts.pendingEmail !== undefined) setPendingEmail(opts.pendingEmail);
+    if (opts?.projectId) setProjectId(opts.projectId);
     setPage(p);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
@@ -1288,12 +1444,15 @@ function App() {
   const showChrome = !CHROME_EXCLUDED.includes(page);
 
   const pages = {
-    landing:        <LandingPage        go={go} tweaks={t} toast={toast} />,
+    // landing:     <LandingPage        go={go} tweaks={t} toast={toast} />,
     results:        <ResultsPage        go={go} toast={toast} boqData={boqData} />,
-    dashboard:      <DashboardPage      go={go} toast={toast} />,
+    dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} />,
-    signin:         <SignInPage         go={go} toast={toast} />,
+    projectsetup:    <ProjectSetupPage    go={go} toast={toast} />,
+    workspace:       <ProjectWorkspacePage go={go} toast={toast} projectId={projectId} onBoqReady={setBoqData} />,
+    projectsettings: <ProjectSettingsPage  go={go} toast={toast} projectId={projectId} />,
+    signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,
     forgotpassword: <ForgotPasswordPage go={go} toast={toast} />,
@@ -1303,9 +1462,13 @@ function App() {
 
   return (
     <>
+      {/* Persistent freeze-frame backdrop — always mounted, z-index: -1.
+          JS in SignInPage writes the captured last-frame data URL here when the
+          intro video ends, so all auth screens keep the cinematic background. */}
+      <div id="video-bg-freeze" className="video-bg-freeze" />
       {!CHROME_EXCLUDED.includes(page) && <AnnouncementBar go={go} />}
       {showChrome && <Header page={page} go={go} toast={toast} user={user} />}
-      <main>{pages[page] || pages.landing}</main>
+      <main>{pages[page] || pages.signin}</main>
       {showChrome && <Footer go={go} />}
       <ToastContainer toasts={toasts} />
       <TweaksPanel>

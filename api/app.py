@@ -13,6 +13,10 @@ from supabase import create_client # supabase-py v2 — wraps the Supabase REST 
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
+import time, statistics
+_processing_times = []
+_start_time = time.time()
+_ai_status = None
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -53,10 +57,27 @@ def add_cors_headers(response):
     if origin in _ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin']      = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age']           = '86400'
     return response
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    global _ai_status
+    if _ai_status != "online":
+        try:
+            _api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not _api_key:
+                raise RuntimeError("no key")
+            _hc_client = anthropic.Anthropic(api_key=_api_key, timeout=10.0)
+            _hc_client.messages.create(model="claude-sonnet-4-6", max_tokens=1, messages=[{"role": "user", "content": "ping"}])
+            _ai_status = "online"
+        except Exception:
+            _ai_status = "offline"
+    avg = round(statistics.mean(_processing_times[-50:]), 1) if _processing_times else None
+    return jsonify({"ai_engine": _ai_status, "uptime_seconds": int(time.time() - _start_time), "avg_processing_seconds": avg}), 200
+
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
 # The anon key is sufficient for client-side auth operations (sign up, sign in).
@@ -84,6 +105,69 @@ def _get_bearer_token() -> str:
     if auth.startswith('Bearer '):
         return auth[7:].strip()
     return ''
+
+
+def _authenticated_user():
+    """Resolve the Supabase user from the Bearer token.
+
+    Returns (user, None) on success, or (None, (response, status)) on failure so
+    callers can `return error` immediately — like a TryGetUser out-pattern in C#.
+    """
+    if not _supabase:
+        return None, (jsonify({"error": "Auth not configured — set SUPABASE_URL and SUPABASE_ANON_KEY."}), 503)
+    token = _get_bearer_token()
+    if not token:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    try:
+        # get_user validates the JWT against Supabase and returns the owning user
+        res  = _supabase.auth.get_user(token)
+        user = getattr(res, "user", None)
+    except Exception as exc:
+        return None, (jsonify({"error": _auth_error_msg(exc)}), 401)
+    if not user:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    return user, None
+
+
+def _insert_project(user_id, name, page_count, estimated_value, boq_data, status):
+    """Insert a single project row owned by user_id and return the created row dict.
+
+    Shared by POST /projects and the auto-save step in /process so both write the
+    same shape. Raises on failure — callers decide whether that is fatal.
+    """
+    res = _supabase.table("projects").insert({
+        "user_id":         user_id,
+        "name":            name,
+        "page_count":      page_count,
+        "estimated_value": estimated_value,
+        "boq_data":        boq_data,
+        "status":          status,
+    }).execute()
+    # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
+    return res.data[0] if getattr(res, "data", None) else None
+
+
+def _sum_line_totals(boq_data) -> float:
+    """Sum every item's line_total across all trade groups in an enriched BoQ.
+
+    Mirrors the outer-shape normalisation in _enrich_boq so it works whether the
+    BoQ is a list of groups, a {bill_of_quantities: [...]} wrapper, or {trades: [...]}.
+    """
+    if isinstance(boq_data, dict):
+        groups = boq_data.get('bill_of_quantities') or boq_data.get('trades') or []
+    elif isinstance(boq_data, list):
+        groups = boq_data
+    else:
+        return 0.0
+
+    total = 0.0
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get('items') or group.get('line_items') or []):
+            if isinstance(item, dict):
+                total += float(item.get('line_total') or 0)
+    return round(total, 2)
 
 
 def _extract_claude_text(response) -> str:
@@ -852,6 +936,234 @@ def me():
     return jsonify({"email": session.get('user_email'), "user_id": session.get('user_id')}), 200
 
 
+# ── Project CRUD routes ───────────────────────────────────────────────────────────────
+
+@app.route("/projects", methods=["GET"])   # GET /projects lists the signed-in user's saved BoQs
+def get_projects():
+    user, err = _authenticated_user()       # verify the Bearer token and resolve the owning user
+    if err:
+        return err
+
+    # Auto-delete expired projects
+    try:
+        _supabase.rpc("delete_expired_projects", {"uid": user.id}).execute()
+    except Exception:
+        pass  # non-fatal — list still returns normally
+
+    try:
+        # Select every column except boq_data — the BoQ JSON is too large for a list view.
+        # order(..., desc=True) gives newest-first, like .OrderByDescending(p => p.CreatedAt) in C#.
+        res = (
+            _supabase.table("projects")
+            .select("id, user_id, name, page_count, estimated_value, status, created_at")
+            .eq("user_id", user.id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load projects: {exc}"}), 500
+
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects", methods=["POST"])   # POST /projects saves a new BoQ project for the user
+def create_project():
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    try:
+        row = _insert_project(
+            user_id=user.id,                                  # force ownership to the authenticated user
+            name=body.get("name"),
+            page_count=body.get("page_count"),
+            estimated_value=body.get("estimated_value"),
+            boq_data=body.get("boq_data"),
+            status=body.get("status"),
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to create project: {exc}"}), 500
+
+    return jsonify(row), 201
+
+
+@app.route("/projects/<project_id>", methods=["DELETE"])   # DELETE /projects/<id> removes one project
+def delete_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    try:
+        # The user_id filter guarantees a user can only delete their own project —
+        # a row owned by someone else simply matches nothing and yields a 404 below.
+        res = (
+            _supabase.table("projects")
+            .delete()
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to delete project: {exc}"}), 500
+
+    if not getattr(res, "data", None):       # no rows deleted → nothing matched id + owner
+        return jsonify({"error": "Project not found."}), 404
+
+    return "", 204                           # 204 No Content — deletion succeeded, no body
+
+
+@app.route("/projects/<project_id>", methods=["GET"])
+def get_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("projects")
+            .select("*")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load project: {exc}"}), 500
+    if not getattr(res, "data", None):
+        return jsonify({"error": "Project not found."}), 404
+    return jsonify(res.data), 200
+
+
+@app.route("/projects/<project_id>", methods=["PUT"])
+def update_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    body = request.get_json(force=True, silent=True) or {}
+    allowed = {"name", "description", "client_name", "contract_type",
+               "location_factor", "notes_for_ai", "auto_delete_days"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "No valid fields to update."}), 400
+    try:
+        res = (
+            _supabase.table("projects")
+            .update(updates)
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update project: {exc}"}), 500
+    return jsonify(res.data[0] if res.data else {}), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["GET"])
+def get_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("chat_messages")
+            .select("id, role, content, created_at")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load chat: {exc}"}), 500
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["POST"])
+def post_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+    user_message = (body.get("message") or "").strip()
+    if not user_message:
+        return jsonify({"error": "Message is required."}), 400
+
+    # Load project for boq_data and notes_for_ai
+    try:
+        proj_res = (
+            _supabase.table("projects")
+            .select("boq_data, notes_for_ai, name, client_name, contract_type, location_factor")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": "Project not found."}), 404
+
+    project = proj_res.data or {}
+
+    # Load last 20 messages for context
+    try:
+        hist_res = (
+            _supabase.table("chat_messages")
+            .select("role, content")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .limit(20)
+            .execute()
+        )
+        history = hist_res.data or []
+    except Exception:
+        history = []
+
+    # Build system prompt
+    boq_summary = json.dumps(project["boq_data"], indent=None)[:6000] if project.get("boq_data") else ""
+
+    system = f"""You are a professional quantity surveyor assistant for the project '{project.get("name", "Unnamed")}' \
+(client: {project.get("client_name") or "not specified"}, contract: {project.get("contract_type") or "not specified"}, \
+location: {project.get("location_factor") or "Belfast"}).
+
+The following is the Bill of Quantities data for this project (NRM2-structured JSON):
+{boq_summary if boq_summary else "No BoQ has been generated yet for this project."}
+
+Answer questions about quantities, rates, costs, scope, and NRM2 structure. \
+Be concise and professional. Give specific figures from the BoQ where relevant.
+{("Additional instructions: " + project["notes_for_ai"]) if project.get("notes_for_ai") else ""}"""
+
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    messages.append({"role": "user", "content": user_message})
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
+
+    try:
+        chat_client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        response = chat_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system,
+            messages=messages,
+        )
+        assistant_reply = response.content[0].text
+    except Exception as exc:
+        return jsonify({"error": f"AI error: {exc}"}), 500
+
+    # Persist both turns — non-fatal if this fails
+    try:
+        _supabase.table("chat_messages").insert([
+            {"project_id": project_id, "user_id": user.id, "role": "user",      "content": user_message},
+            {"project_id": project_id, "user_id": user.id, "role": "assistant", "content": assistant_reply},
+        ]).execute()
+    except Exception:
+        pass
+
+    return jsonify({"reply": assistant_reply}), 200
+
+
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
     if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
@@ -895,6 +1207,7 @@ def process_pdf():                         # Flask calls this function when a ma
             len(full_text),
             len(full_text.split()),
         )
+        _t = time.time()
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
             max_tokens=16000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
@@ -906,6 +1219,9 @@ def process_pdf():                         # Flask calls this function when a ma
                 }
             ],
         )
+        _processing_times.append(round(time.time() - _t, 1))
+        if len(_processing_times) > 200:
+            _processing_times.pop(0)
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
         return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
@@ -935,6 +1251,25 @@ def process_pdf():                         # Flask calls this function when a ma
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
     print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
+
+    # Auto-save the completed BoQ as a project for the authenticated user.
+    # This is best-effort: any failure is logged but never surfaced to the caller,
+    # so a save problem can't turn a successful BoQ generation into an error response.
+    try:
+        user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
+        user     = getattr(user_res, "user", None) if user_res else None
+        if user:
+            project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
+            _insert_project(
+                user_id=user.id,
+                name=project_name,
+                page_count=len(pages_text),                # one entry in pages_text per PDF page
+                estimated_value=_sum_line_totals(boq_data),  # total of every line_total in the enriched BoQ
+                boq_data=boq_data,
+                status='completed',
+            )
+    except Exception as exc:
+        app.logger.warning("Failed to auto-save project from /process: %s", exc)
 
     return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
 
