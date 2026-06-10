@@ -1523,8 +1523,8 @@ function ProjectSetupPage({ go, toast }) {
     if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
     setSaving(true);
     try {
-      const res = window.VQAuth ? await window.VQAuth.getSession() : null;
-      const token = res?.data?.session?.access_token || '';
+      const sessionRes = window.VQAuth ? await window.VQAuth.getSession() : null;
+      const token = sessionRes?.data?.session?.access_token || '';
       const res = await fetch(`${VQ_API}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
