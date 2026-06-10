@@ -181,6 +181,61 @@ function BoQMockup() {
   );
 }
 
+function AppSidebar({ currentPage, go }) {
+  const [logoOk, setLogoOk] = useState(true);
+
+  const handleSignOut = async () => {
+    if (window.VQAuth) {
+      await window.VQAuth.signOut();
+    } else {
+      go('landing');
+    }
+  };
+
+  const navItems = [
+    { label: 'Dashboard', icon: '⊞', target: 'dashboard' },
+    { label: 'Upload',    icon: '↑',  target: 'upload'    },
+    { label: 'History',  icon: '◷',  target: 'dashboard' },
+    { label: 'Settings', icon: '⚙',  target: 'settings'  },
+  ];
+
+  return (
+    <aside className="app-side">
+      <div className="app-side-logo" onClick={() => go('landing')}>
+        {logoOk ? (
+          <img
+            src="logo-transparent.png"
+            alt="Vulcan Quanta"
+            onError={() => setLogoOk(false)}
+            style={{ height: '28px', display: 'block' }}
+          />
+        ) : (
+          <span style={{ fontFamily: "'Cinzel', serif", fontSize: '13px', fontWeight: 700, color: 'white', letterSpacing: '0.15em' }}>VQ</span>
+        )}
+      </div>
+      <p className="app-side-lbl">Navigation</p>
+      <nav>
+        {navItems.map(item => (
+          <div
+            key={item.label}
+            className={`app-side-item${currentPage === item.target ? ' active' : ''}`}
+            onClick={() => go(item.target)}
+          >
+            <span style={{ fontSize: '15px', lineHeight: 1 }}>{item.icon}</span>
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </nav>
+      <div className="app-side-bottom">
+        <div className="app-side-item" onClick={handleSignOut}>
+          <span style={{ fontSize: '13px' }}>→</span>
+          <span>Sign out</span>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function ToastContainer({ toasts }) {
   if (!toasts.length) return null;
   return (
@@ -192,4 +247,4 @@ function ToastContainer({ toasts }) {
   );
 }
 
-Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer });
+Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer, AppSidebar });
