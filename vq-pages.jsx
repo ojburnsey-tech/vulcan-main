@@ -1150,17 +1150,23 @@ function SignUpPage({ go, toast, plan = 'pro' }) {
 
 // ─── SIGN IN ───────────────────────────────────────────────────────────────────────
 function SignInPage({ go, toast }) {
-  const [email, setEmail]               = useState('');
-  const [password, setPassword]         = useState('');
-  const [loading, setLoading]           = useState(false);
-  const [error, setError]               = useState('');
-  const [titleVisible, setTitleVisible] = useState(false);
-  const [dockVisible, setDockVisible]   = useState(false);
+  const [email, setEmail]       = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState('');
+  const [dockVisible, setDockVisible] = useState(false);
+  const videoRef = useRef(null);
 
   useEffect(() => {
-    const tf = setTimeout(() => setTitleVisible(true), 50);
+    // Explicitly call play() — React virtual-DOM navigation doesn't re-trigger
+    // the browser's native autoplay from the attribute alone.
+    const video = videoRef.current;
+    if (video) {
+      video.play().catch(() => {});
+    }
+    // Dock slides up automatically after 4 s, no interaction required.
     const df = setTimeout(() => setDockVisible(true), 4000);
-    return () => { clearTimeout(tf); clearTimeout(df); };
+    return () => clearTimeout(df);
   }, []);
 
   const handleSubmit = async e => {
@@ -1197,10 +1203,12 @@ function SignInPage({ go, toast }) {
     <div style={{ position: 'fixed', inset: 0, background: '#080706', overflow: 'hidden' }}>
       {/* Fullscreen hero video — autoplays, muted, no loop; freezes on last frame */}
       <video
+        ref={videoRef}
         src="hero.mp4"
         autoPlay
         muted
         playsInline
+        preload="auto"
         style={{
           position: 'absolute', inset: 0, width: '100%', height: '100%',
           objectFit: 'cover', zIndex: 0,
@@ -1213,8 +1221,8 @@ function SignInPage({ go, toast }) {
         background: 'rgba(0,0,0,0.48)', zIndex: 1, pointerEvents: 'none',
       }} />
 
-      {/* VULCAN QUANTA title — fades in on mount */}
-      <div className={`signin-vq-title${titleVisible ? ' visible' : ''}`}>
+      {/* VULCAN QUANTA title — CSS animation fades it in from first paint */}
+      <div className="signin-vq-title">
         VULCAN QUANTA
       </div>
 
