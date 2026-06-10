@@ -16,6 +16,7 @@ from export_excel import generate_boq_excel
 import time, statistics
 _processing_times = []
 _start_time = time.time()
+_ai_status = None
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -63,17 +64,19 @@ def add_cors_headers(response):
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    ai_status = "online"
-    try:
-        _api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not _api_key:
-            raise RuntimeError("no key")
-        _hc_client = anthropic.Anthropic(api_key=_api_key, timeout=10.0)
-        _hc_client.messages.create(model="claude-sonnet-4-6", max_tokens=1, messages=[{"role": "user", "content": "ping"}])
-    except Exception:
-        ai_status = "offline"
+    global _ai_status
+    if _ai_status is None:
+        try:
+            _api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not _api_key:
+                raise RuntimeError("no key")
+            _hc_client = anthropic.Anthropic(api_key=_api_key, timeout=10.0)
+            _hc_client.messages.create(model="claude-sonnet-4-6", max_tokens=1, messages=[{"role": "user", "content": "ping"}])
+            _ai_status = "online"
+        except Exception:
+            _ai_status = "offline"
     avg = round(statistics.mean(_processing_times[-50:]), 1) if _processing_times else None
-    return jsonify({"ai_engine": ai_status, "uptime_seconds": int(time.time() - _start_time), "avg_processing_seconds": avg}), 200
+    return jsonify({"ai_engine": _ai_status, "uptime_seconds": int(time.time() - _start_time), "avg_processing_seconds": avg}), 200
 
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
