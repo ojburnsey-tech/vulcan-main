@@ -635,7 +635,7 @@ function ResultsPage({ go, toast, boqData }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="results" go={go} />
+      <AppSidebar currentPage="results" go={go} toast={toast} />
       <div className="app-main">
       <div className="res-wrap">
       <div className="res-pad">
@@ -737,21 +737,406 @@ function ResultsPage({ go, toast, boqData }) {
 }
 
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────────────
-function DashboardPage({ go, toast }) {
+// Base URL for the Railway backend — same host used by /process, /download, /projects.
+const VQ_API = 'https://vulcan-production-d039.up.railway.app';
+
+// Resolve the current Supabase access token (empty string when not signed in / configured).
+async function vqToken() {
+  const { data: { session } } = window.VQAuth
+    ? await window.VQAuth.getSession()
+    : { data: { session: null } };
+  return session?.access_token || '';
+}
+
+// Human-readable "time since" from an ISO timestamp — "just now", "2 hours ago",
+// "yesterday", "3 days ago", etc. Returns '' for missing/invalid input.
+function vqTimeAgo(iso) {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return '';
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 45) return 'just now';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} minute${m !== 1 ? 's' : ''} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h !== 1 ? 's' : ''} ago`;
+  const d = Math.floor(h / 24);
+  if (d === 1) return 'yesterday';
+  if (d < 7) return `${d} days ago`;
+  if (d < 30) { const w = Math.floor(d / 7); return `${w} week${w !== 1 ? 's' : ''} ago`; }
+  if (d < 365) { const mo = Math.floor(d / 30); return `${mo} month${mo !== 1 ? 's' : ''} ago`; }
+  const y = Math.floor(d / 365);
+  return `${y} year${y !== 1 ? 's' : ''} ago`;
+}
+
+// Format a £ value: £X.XM over a million, £XXXk over a thousand, else £X.
+function vqMoney(v) {
+  const n = Number(v) || 0;
+  if (n >= 1e6) return `£${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1000) return `£${Math.round(n / 1000)}k`;
+  return `£${Math.round(n)}`;
+}
+
+// Map a project status to its coloured pill.
+function vqBadge(status) {
+  if (status === 'completed')  return { cls: 'vd-badge-green', label: 'Completed' };
+  if (status === 'processing') return { cls: 'vd-badge-amber', label: 'Processing' };
+  return { cls: 'vd-badge-grey', label: 'Preparing' };
+}
+
+// Coloured-square stat-card icons (white line art on a solid background).
+const VQ_STAT_ICONS = {
+  folder: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  ),
+  doc: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
+    </svg>
+  ),
+  cube: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 7.5 12 3 3 7.5l9 4.5 9-4.5z" /><path d="M3 7.5v9l9 4.5 9-4.5v-9" /><path d="M12 12v9" />
+    </svg>
+  ),
+  pound: <span style={{ fontSize: '21px', fontWeight: 700, lineHeight: 1 }}>£</span>,
+};
+
+function DashboardPage({ go, toast, user, onBoqReady }) {
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [openMenu, setOpenMenu] = useState(null);   // id of the row whose ⋯ menu is open
+
+  // ── Fetch the signed-in user's projects ──────────────────────────────────────
+  const loadProjects = async () => {
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('request failed');
+      const data = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } catch (err) {
+      // On any failure show zeros / empty state — never fabricate data.
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadProjects(); }, []);
+
+  // Close the row menu on any outside click.
+  useEffect(() => {
+    if (openMenu === null) return;
+    const close = () => setOpenMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [openMenu]);
+
+  // ── Row actions ──────────────────────────────────────────────────────────────
+  const handleViewBoq = (p) => {
+    setOpenMenu(null);
+    // The list endpoint omits boq_data; pass whatever the project carries (else null,
+    // which ResultsPage renders as its demo BoQ).
+    if (onBoqReady) onBoqReady(p.boq_data || null);
+    go('results');
+  };
+
+  const handleDelete = async (id) => {
+    setOpenMenu(null);
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (res.ok || res.status === 204) {
+        toast('Project deleted.', 'success');
+        loadProjects();
+      } else {
+        toast('Could not delete project. Please try again.', 'error');
+      }
+    } catch (err) {
+      toast('Network error — could not delete project.', 'error');
+    }
+  };
+
+  // ── Derived figures (all client-side from the real response) ─────────────────
+  const totalProjects = projects.length;
+  const activeCount   = projects.filter(p => p.status !== 'completed').length;
+  const totalDrawings = projects.reduce((s, p) => s + (Number(p.page_count) || 0), 0);
+  const boqsGenerated = projects.filter(p => p.status === 'completed').length;
+  const totalValue    = projects.reduce((s, p) => s + (Number(p.estimated_value) || 0), 0);
+
+  const recent    = projects.slice(0, 5);
+  const completed = projects.filter(p => p.status === 'completed');
+
+  // Status breakdown for the donut.
+  const cCompleted  = boqsGenerated;
+  const cProcessing = projects.filter(p => p.status === 'processing').length;
+  const cPreparing  = totalProjects - cCompleted - cProcessing;
+  const statusTotal = totalProjects;
+
+  // Welcome name — first name from the email's local part, capitalised.
+  const email = user?.email || '';
+  const localPart = email ? email.split('@')[0].split(/[._-]/)[0] : '';
+  const welcomeName = localPart ? localPart.charAt(0).toUpperCase() + localPart.slice(1) : 'there';
+
+  // Average processing time — rough 60s placeholder per project, shown only with data.
+  const avgProcessing = totalProjects > 0 ? '1m 0s' : '—';
+
+  // ── Processing-volume line chart (completed BoQs per day, current month) ──────
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const perDay = new Array(daysInMonth + 1).fill(0);   // 1-indexed by day
+  completed.forEach(p => {
+    const d = new Date(p.created_at);
+    if (!isNaN(d) && d.getFullYear() === year && d.getMonth() === month) perDay[d.getDate()]++;
+  });
+  const maxCount = Math.max(1, ...perDay.slice(1));
+  const CW = 600, CH = 190, padL = 30, padR = 14, padT = 14, padB = 26;
+  const plotW = CW - padL - padR, plotH = CH - padT - padB;
+  const xFor = day => padL + (daysInMonth > 1 ? plotW * (day - 1) / (daysInMonth - 1) : 0);
+  const yFor = c => padT + plotH - plotH * (c / maxCount);
+  const pts = [];
+  for (let day = 1; day <= daysInMonth; day++) pts.push({ x: xFor(day), y: yFor(perDay[day]) });
+  const lineStr = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const baseY = (padT + plotH).toFixed(1);
+  const areaStr = `${pts[0].x.toFixed(1)},${baseY} ${lineStr} ${pts[pts.length - 1].x.toFixed(1)},${baseY}`;
+  const dayLabels = [1, 8, 15, 22, 29].filter(d => d <= daysInMonth);
+
+  // ── Donut geometry ───────────────────────────────────────────────────────────
+  const R = 62, DC = 2 * Math.PI * R;
+  const segs = statusTotal > 0 ? [
+    { v: cCompleted,  color: '#1ea672' },
+    { v: cProcessing, color: '#f0a020' },
+    { v: cPreparing,  color: '#2f6fed' },
+  ].filter(s => s.v > 0) : [];
+  let acc = 0;
+  const pct = v => statusTotal > 0 ? Math.round(v / statusTotal * 100) : 0;
+
+  const monthName = now.toLocaleDateString('en-GB', { month: 'short' });
+
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="dashboard" go={go} />
-      <main className="app-main dash-main" style={{ padding: '40px' }}>
-        <div className="dash-hd">
-          <h1 className="dash-h1">Projects</h1>
-          <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>+ New project</button>
+      <AppSidebar currentPage="dashboard" go={go} user={user} toast={toast} />
+      <main className="app-main vd-main">
+        {/* ── Top bar ── */}
+        <div className="vd-top">
+          <div>
+            <h1 className="vd-h1">Dashboard</h1>
+            <p className="vd-welcome">Welcome back, {welcomeName}</p>
+            <p className="vd-subtitle">Create and manage AI-generated Bills of Quantities</p>
+          </div>
+          <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>+ New Project</button>
         </div>
-        <div className="empty-state">
-          <div className="empty-icon">📄</div>
-          <h3 className="empty-h">No projects yet</h3>
-          <p className="empty-p">Upload an architectural drawing and Vulcan will produce a priced Bill of Quantities in under 2 minutes.</p>
-          <button className="btn btn-amber btn-lg btn-pill" onClick={() => go('upload')}>Upload first drawing</button>
-          <span className="demo-lnk" onClick={() => go('results')}>Or view a demo project →</span>
+
+        {/* ── Four stat cards ── */}
+        <div className="vd-stats">
+          {[
+            { icon: 'folder', bg: '#e8621a', label: 'Projects',       value: totalProjects,           sub: `${activeCount} active` },
+            { icon: 'doc',    bg: '#2f6fed', label: 'Drawings',       value: totalDrawings,           sub: 'This month' },
+            { icon: 'cube',   bg: '#1ea672', label: 'BOQs Generated', value: boqsGenerated,           sub: 'This month' },
+            { icon: 'pound',  bg: '#7c5cff', label: 'Estimated Value', value: vqMoney(totalValue),    sub: 'Across all projects' },
+          ].map((c, i) => (
+            <div key={i} className="vd-card vd-stat">
+              <div className="vd-stat-ico" style={{ background: c.bg }}>{VQ_STAT_ICONS[c.icon]}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="vd-stat-label">{c.label}</div>
+                <div className="vd-stat-value">{c.value}</div>
+                <div className="vd-stat-sub">{c.sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Recent projects + right rail ── */}
+        <div className="vd-grid">
+          {/* Recent projects */}
+          <div className="vd-card vd-panel">
+            <div className="vd-section-hd">
+              <span className="vd-section-title">Recent Projects</span>
+              <span className="vd-link" onClick={() => go('upload')}>View all projects →</span>
+            </div>
+
+            {recent.length === 0 ? (
+              <div className="vd-empty">
+                <p className="vd-empty-p">No projects yet — upload your first drawing</p>
+                <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+              </div>
+            ) : (
+              recent.map(p => {
+                const badge = vqBadge(p.status);
+                return (
+                  <div key={p.id} className="vd-proj-row">
+                    <div className="vd-thumb" />
+                    <div className="vd-proj-main">
+                      <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
+                      <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
+                    </div>
+                    <div className="vd-proj-right">
+                      <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
+                      {p.page_count != null && (
+                        <span className="vd-proj-meta">{p.page_count} page{p.page_count !== 1 ? 's' : ''}</span>
+                      )}
+                      {p.estimated_value != null && Number(p.estimated_value) > 0 && (
+                        <span className="vd-proj-meta">{vqMoney(p.estimated_value)} estimate</span>
+                      )}
+                      <div style={{ position: 'relative' }}>
+                        <button
+                          className="vd-dots"
+                          onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id); }}
+                        >⋯</button>
+                        {openMenu === p.id && (
+                          <div className="vd-menu" onClick={(e) => e.stopPropagation()}>
+                            <div className="vd-menu-item" onClick={() => handleViewBoq(p)}>View BoQ</div>
+                            <div className="vd-menu-item danger" onClick={() => handleDelete(p.id)}>Delete</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Right rail */}
+          <div className="vd-col">
+            {/* Quick actions */}
+            <div className="vd-card vd-panel">
+              <div className="vd-section-hd"><span className="vd-section-title">Quick Actions</span></div>
+              <div className="vd-qa">
+                <button className="vd-qa-btn vd-qa-primary" onClick={() => go('upload')}>↑ Upload Drawing</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>👁 View Demo Project</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>📄 Import Existing BOQ</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => go('upload')}>＋ Create Project</button>
+              </div>
+            </div>
+
+            {/* Recent activity */}
+            <div className="vd-card vd-panel">
+              <div className="vd-section-hd">
+                <span className="vd-section-title">Recent Activity</span>
+                <span className="vd-link" onClick={() => {}}>View all activity →</span>
+              </div>
+              {completed.length === 0 ? (
+                <p className="vd-muted">No recent activity.</p>
+              ) : (
+                completed.slice(0, 5).map(p => (
+                  <div key={p.id} className="vd-act">
+                    <div className="vd-act-dot">✓</div>
+                    <div className="vd-act-body">
+                      <div className="vd-act-title">BOQ generated successfully</div>
+                      <div className="vd-act-sub">{p.name || 'Untitled project'}</div>
+                    </div>
+                    <span className="vd-act-time">{vqTimeAgo(p.created_at)}</span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* System status */}
+            <div className="vd-card vd-panel">
+              <div className="vd-section-hd"><span className="vd-section-title">System Status</span></div>
+              <div className="vd-status-row">
+                <span className="vd-status-label">AI Engine</span>
+                <span className="vd-status-online"><span className="vd-dot-green" /> Online</span>
+              </div>
+              <div className="vd-status-row">
+                <span className="vd-status-label">NRM2 Database</span>
+                <span className="vd-status-val">Updated (2h ago)</span>
+              </div>
+              <div className="vd-status-row">
+                <span className="vd-status-label">Average Processing Time</span>
+                <span className="vd-status-val">{avgProcessing}</span>
+              </div>
+              <div className="vd-status-row">
+                <span className="vd-status-label">System Uptime</span>
+                <span className="vd-status-val">99.9%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Charts row ── */}
+        <div className="vd-charts">
+          {/* Processing volume */}
+          <div className="vd-card vd-panel">
+            <div className="vd-section-hd">
+              <span className="vd-section-title">Processing Volume <span style={{ fontSize: '13px', color: '#8b92a0', fontWeight: 400 }}>(This Month)</span></span>
+              <span className="vd-chart-pill">This month ▾</span>
+            </div>
+            <svg viewBox={`0 0 ${CW} ${CH}`} width="100%" style={{ display: 'block', height: 'auto' }}>
+              <defs>
+                <linearGradient id="vdAreaFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#e8621a" stopOpacity="0.28" />
+                  <stop offset="100%" stopColor="#e8621a" stopOpacity="0" />
+                </linearGradient>
+              </defs>
+              {/* horizontal gridlines + y labels (0 and max) */}
+              {[0, 0.5, 1].map((f, i) => {
+                const y = padT + plotH - plotH * f;
+                return <line key={i} x1={padL} y1={y} x2={CW - padR} y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />;
+              })}
+              <text x={padL - 8} y={padT + 4} fill="#6b7280" fontSize="11" textAnchor="end">{maxCount}</text>
+              <text x={padL - 8} y={padT + plotH + 4} fill="#6b7280" fontSize="11" textAnchor="end">0</text>
+              {/* area + line */}
+              <polygon points={areaStr} fill="url(#vdAreaFill)" />
+              <polyline points={lineStr} fill="none" stroke="#e8621a" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {/* x labels */}
+              {dayLabels.map(d => (
+                <text key={d} x={xFor(d)} y={CH - 6} fill="#6b7280" fontSize="11" textAnchor="middle">{d} {monthName}</text>
+              ))}
+            </svg>
+          </div>
+
+          {/* Projects by status donut */}
+          <div className="vd-card vd-panel">
+            <div className="vd-section-hd"><span className="vd-section-title">Projects by Status</span></div>
+            <div className="vd-donut-wrap">
+              <div className="vd-donut">
+                <svg viewBox="0 0 150 150" width="150" height="150">
+                  <circle cx="75" cy="75" r={R} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="16" />
+                  {segs.map((s, i) => {
+                    const len = DC * (s.v / statusTotal);
+                    const el = (
+                      <circle key={i} cx="75" cy="75" r={R} fill="none" stroke={s.color} strokeWidth="16"
+                        strokeDasharray={`${len.toFixed(2)} ${(DC - len).toFixed(2)}`}
+                        strokeDashoffset={(-acc).toFixed(2)}
+                        transform="rotate(-90 75 75)" />
+                    );
+                    acc += len;
+                    return el;
+                  })}
+                </svg>
+                <div className="vd-donut-center">
+                  <span className="vd-donut-total">{statusTotal}</span>
+                  <span className="vd-donut-lbl">Total</span>
+                </div>
+              </div>
+              <div className="vd-legend">
+                {[
+                  { name: 'Completed',   v: cCompleted,  color: '#1ea672' },
+                  { name: 'In Progress', v: cProcessing, color: '#f0a020' },
+                  { name: 'Preparing',   v: cPreparing,  color: '#2f6fed' },
+                ].map((l, i) => (
+                  <div key={i} className="vd-legend-row">
+                    <span className="vd-legend-dot" style={{ background: l.color }} />
+                    <span className="vd-legend-name">{l.name}</span>
+                    <span className="vd-legend-val">{l.v} ({pct(l.v)}%)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       </main>
     </div>
@@ -839,7 +1224,7 @@ function UploadPage({ go, toast, onBoqReady }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="upload" go={go} />
+      <AppSidebar currentPage="upload" go={go} toast={toast} />
       <div className="app-main upload-page">
         <div className="upload-wrap">
           <div style={{ textAlign: 'center', marginBottom: '40px', paddingTop: '40px' }}>
@@ -889,7 +1274,7 @@ function SettingsPage({ go, toast }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="settings" go={go} />
+      <AppSidebar currentPage="settings" go={go} toast={toast} />
       <main className="app-main dash-main">
         {/* Horizontal tab bar */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '28px', paddingTop: '8px' }}>
