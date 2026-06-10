@@ -784,24 +784,24 @@ function vqBadge(status) {
   return { cls: 'vd-badge-grey', label: 'Preparing' };
 }
 
-// Coloured-square stat-card icons (white line art on a solid background).
+// Flat-circle stat-card icons (20px white line art on a solid colour fill).
 const VQ_STAT_ICONS = {
   folder: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
     </svg>
   ),
   doc: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
     </svg>
   ),
-  cube: (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 7.5 12 3 3 7.5l9 4.5 9-4.5z" /><path d="M3 7.5v9l9 4.5 9-4.5v-9" /><path d="M12 12v9" />
+  check: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 11 12 14 22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
     </svg>
   ),
-  pound: <span style={{ fontSize: '21px', fontWeight: 700, lineHeight: 1 }}>£</span>,
+  pound: <span style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>£</span>,
 };
 
 function DashboardPage({ go, toast, user, onBoqReady }) {
@@ -941,10 +941,10 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
         {/* ── Four stat cards ── */}
         <div className="vd-stats">
           {[
-            { icon: 'folder', bg: '#e8621a', label: 'Projects',       value: totalProjects,           sub: `${activeCount} active` },
-            { icon: 'doc',    bg: '#2f6fed', label: 'Drawings',       value: totalDrawings,           sub: 'This month' },
-            { icon: 'cube',   bg: '#1ea672', label: 'BOQs Generated', value: boqsGenerated,           sub: 'This month' },
-            { icon: 'pound',  bg: '#7c5cff', label: 'Estimated Value', value: vqMoney(totalValue),    sub: 'Across all projects' },
+            { icon: 'folder', bg: '#e8621a', label: 'Projects',        value: totalProjects,        sub: `${activeCount} active` },
+            { icon: 'doc',    bg: '#3b82f6', label: 'Drawings',        value: totalDrawings,        sub: 'This month' },
+            { icon: 'check',  bg: '#22c55e', label: 'BOQs Generated',  value: boqsGenerated,        sub: 'This month' },
+            { icon: 'pound',  bg: '#8b5cf6', label: 'Estimated Value', value: vqMoney(totalValue),  sub: 'Across all projects' },
           ].map((c, i) => (
             <div key={i} className="vd-card vd-stat">
               <div className="vd-stat-ico" style={{ background: c.bg }}>{VQ_STAT_ICONS[c.icon]}</div>
