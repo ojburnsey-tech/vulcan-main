@@ -1314,9 +1314,7 @@ function SignInPage({ go, toast, user }) {
                 </button>
               </form>
 
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '18px', fontSize: '13px' }}>
-                <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}
-                  onClick={() => go('signin')}>← Home</span>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '18px', fontSize: '13px' }}>
                 <span style={{ color: 'var(--amber)', cursor: 'pointer' }}
                   onClick={() => go('forgotpassword')}>Forgot password?</span>
               </div>
