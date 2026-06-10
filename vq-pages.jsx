@@ -955,7 +955,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
             <p className="vd-welcome">Welcome back, {welcomeName}</p>
             <p className="vd-subtitle">Create and manage AI-generated Bills of Quantities</p>
           </div>
-          <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>+ New Project</button>
+          <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>+ New Project</button>
         </div>
 
         {/* ── Four stat cards ── */}
@@ -1037,7 +1037,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
                 <button className="vd-qa-btn vd-qa-primary" onClick={() => go('upload')}>↑ Upload Drawing</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>View Demo Project</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>Import Existing BOQ</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => go('upload')}>＋ Create Project</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => go('projectsetup')}>＋ Create Project</button>
               </div>
             </div>
 

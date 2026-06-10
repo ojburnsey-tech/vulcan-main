@@ -1298,6 +1298,7 @@ const { useState, useEffect, useCallback } = React;
 const { AnnouncementBar, Header, Footer, ToastContainer } = window;
 const {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
+  ProjectSetupPage, ProjectWorkspacePage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
 } = window;
@@ -1310,7 +1311,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 // Pages that have no Header/Footer chrome
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
-                         'forgotpassword','checkemail','resetpassword','landing'];
+                         'forgotpassword','checkemail','resetpassword','landing',
+                         'projectsetup','workspace'];
 
 // Pages that require an authenticated session
 const PROTECTED = ['dashboard','settings','results','upload'];
@@ -1322,6 +1324,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [pendingEmail, setPendingEmail] = useState('');
   const [boqData, setBoqData]         = useState(null);   // holds JSON returned by /process; passed down to ResultsPage
+  const [projectId, setProjectId]     = useState(null);
   const [t, setTweak]                 = useTweaks(TWEAK_DEFAULTS);
 
   // ── Accent CSS token sync ───────────────────────────────────────────────────────
@@ -1398,6 +1401,7 @@ function App() {
   //   to the next page without URL params.
   const go = useCallback((p, opts) => {
     if (opts && opts.pendingEmail !== undefined) setPendingEmail(opts.pendingEmail);
+    if (opts?.projectId) setProjectId(opts.projectId);
     setPage(p);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
@@ -1443,6 +1447,8 @@ function App() {
     dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} />,
+    projectsetup:   <ProjectSetupPage   go={go} toast={toast} />,
+    workspace:      <ProjectWorkspacePage go={go} toast={toast} projectId={projectId} onBoqReady={setBoqData} />,
     signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,
