@@ -20,6 +20,28 @@ function vqPlanLabel(plan) {
   }
 }
 
+// Clean stroke-based line icons for the sidebar (16px, currentColor).
+function VQIcon(props) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}>
+      {props.children}
+    </svg>
+  );
+}
+
+const VQ_NAV_ICONS = {
+  dashboard: <VQIcon><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></VQIcon>,
+  projects:  <VQIcon><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></VQIcon>,
+  uploads:   <VQIcon><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></VQIcon>,
+  reports:   <VQIcon><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></VQIcon>,
+  exports:   <VQIcon><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></VQIcon>,
+  history:   <VQIcon><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></VQIcon>,
+  settings:  <VQIcon><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" /></VQIcon>,
+  signout:   <VQIcon><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></VQIcon>,
+};
+
 function AnnouncementBar({ go }) {
   return null;
 }
@@ -228,13 +250,13 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
   // `match` drives the active highlight; `target` is where the item navigates.
   // Items without a target are placeholders for sections not yet built.
   const navItems = [
-    { label: 'Dashboard', icon: '⊞', target: 'dashboard', match: 'dashboard' },
-    { label: 'Projects',  icon: '▤', target: 'dashboard', match: 'projects'  },
-    { label: 'Uploads',   icon: '↑', target: 'upload',    match: 'upload'     },
-    { label: 'Reports',   icon: '▦', target: null,        match: 'reports'    },
-    { label: 'Exports',   icon: '⤓', target: null,        match: 'exports'    },
-    { label: 'History',   icon: '◷', target: null,        match: 'history'    },
-    { label: 'Settings',  icon: '⚙', target: 'settings',  match: 'settings'   },
+    { label: 'Dashboard', icon: VQ_NAV_ICONS.dashboard, target: 'dashboard', match: 'dashboard' },
+    { label: 'Projects',  icon: VQ_NAV_ICONS.projects,  target: 'dashboard', match: 'projects'  },
+    { label: 'Uploads',   icon: VQ_NAV_ICONS.uploads,   target: 'upload',    match: 'upload'     },
+    { label: 'Reports',   icon: VQ_NAV_ICONS.reports,   target: null,        match: 'reports'    },
+    { label: 'Exports',   icon: VQ_NAV_ICONS.exports,   target: null,        match: 'exports'    },
+    { label: 'History',   icon: VQ_NAV_ICONS.history,   target: null,        match: 'history'    },
+    { label: 'Settings',  icon: VQ_NAV_ICONS.settings,  target: 'settings',  match: 'settings'   },
   ];
 
   const handleNav = (item) => {
@@ -272,7 +294,7 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
             className={`app-side-item${currentPage === item.match ? ' active' : ''}`}
             onClick={() => handleNav(item)}
           >
-            <span style={{ fontSize: '15px', lineHeight: 1 }}>{item.icon}</span>
+            <span style={{ display: 'flex', alignItems: 'center' }}>{item.icon}</span>
             <span>{item.label}</span>
           </div>
         ))}
@@ -288,11 +310,11 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
           </div>
         </div>
         <div className="app-side-item" onClick={() => go('settings')}>
-          <span style={{ fontSize: '14px' }}>⚙</span>
+          <span style={{ display: 'flex', alignItems: 'center' }}>{VQ_NAV_ICONS.settings}</span>
           <span>Settings</span>
         </div>
         <div className="app-side-item" onClick={handleSignOut}>
-          <span style={{ fontSize: '13px' }}>→</span>
+          <span style={{ display: 'flex', alignItems: 'center' }}>{VQ_NAV_ICONS.signout}</span>
           <span>Sign out</span>
         </div>
       </div>
