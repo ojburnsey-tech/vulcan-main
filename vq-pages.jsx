@@ -1523,8 +1523,8 @@ function ProjectSetupPage({ go, toast }) {
     if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
     setSaving(true);
     try {
-      const vqSession = window.VQAuth ? await window.VQAuth.getSession() : null;
-      const token = vqSession?.access_token || '';
+      const res = window.VQAuth ? await window.VQAuth.getSession() : null;
+      const token = res?.data?.session?.access_token || '';
       const res = await fetch(`${VQ_API}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1632,8 +1632,8 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
   const chatEndRef = React.useRef(null);
 
   const getToken = async () => {
-    const vqSession = window.VQAuth ? await window.VQAuth.getSession() : null;
-    return vqSession?.access_token || '';
+    const res = window.VQAuth ? await window.VQAuth.getSession() : null;
+    return res?.data?.session?.access_token || '';
   };
 
   const loadProject = async () => {
@@ -1870,8 +1870,8 @@ function ProjectSettingsPage({ go, toast, projectId }) {
   const [confirmDelete, setConfirmDelete] = React.useState(false);
 
   const getToken = async () => {
-    const vqSession = window.VQAuth ? await window.VQAuth.getSession() : null;
-    return vqSession?.access_token || '';
+    const res = window.VQAuth ? await window.VQAuth.getSession() : null;
+    return res?.data?.session?.access_token || '';
   };
 
   React.useEffect(() => {
