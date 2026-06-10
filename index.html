@@ -904,28 +904,46 @@
       to   { opacity: 1; }
     }
 
-    /* Login dock — slides up from below after 4 s */
+    /* Login dock — invisible until 4 s; fades in centred on screen */
     .signin-dock {
-      position: absolute;
-      bottom: 0;
+      position: fixed;
+      top: 50%;
       left: 50%;
-      transform: translateX(-50%) translateY(110%);
+      transform: translate(-50%, calc(-50% + 40px));
+      opacity: 0;
+      pointer-events: none;
       width: 100%;
       max-width: 460px;
-      padding: 0 24px 48px;
+      padding: 0 24px;
       z-index: 10;
-      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease;
     }
-    .signin-dock.dock-visible { transform: translateX(-50%) translateY(0); }
+    .signin-dock.dock-visible {
+      transform: translate(-50%, -50%);
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    /* Persistent freeze-frame backdrop — lives in the App root, z-index: -1 so
+       it sits behind every auth screen. Background-image is set by JS when the
+       intro video ends; falls back to solid dark until then. */
+    .video-bg-freeze {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      background: #080706;
+      pointer-events: none;
+      background-size: cover;
+      background-position: center;
+    }
 
     /* ── Auth card glassmorphism (signin, signup, forgot, reset) ─────────── */
-    /* Fixed full-screen dark background for all auth screens — matches the
-       video-end frame so there's no jarring transition when navigating between them. */
+    /* Transparent so the .video-bg-freeze frame shows through on all auth screens. */
     .signin-pg {
       position: fixed !important;
       inset: 0 !important;
       min-height: unset !important;
-      background: #080706 !important;
+      background: transparent !important;
       overflow-y: auto;
     }
     .signin-card {
@@ -1312,6 +1330,10 @@ function App() {
 
   return (
     <>
+      {/* Persistent freeze-frame backdrop — always mounted, z-index: -1.
+          JS in SignInPage writes the captured last-frame data URL here when the
+          intro video ends, so all auth screens keep the cinematic background. */}
+      <div id="video-bg-freeze" className="video-bg-freeze" />
       {!CHROME_EXCLUDED.includes(page) && <AnnouncementBar go={go} />}
       {showChrome && <Header page={page} go={go} toast={toast} user={user} />}
       <main>{pages[page] || pages.signin}</main>

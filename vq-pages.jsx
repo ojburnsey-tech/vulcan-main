@@ -1169,8 +1169,19 @@ function SignInPage({ go, toast, user }) {
 
     const video = videoRef.current;
     if (video) {
-      // Record when the video finishes so subsequent mounts skip it.
-      video.addEventListener('ended', () => { heroPlayed = true; }, { once: true });
+      // Record when the video finishes, capture the last frame into the persistent
+      // freeze-frame div so all auth screens keep the cinematic background.
+      video.addEventListener('ended', () => {
+        heroPlayed = true;
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width  = video.videoWidth;
+          canvas.height = video.videoHeight;
+          canvas.getContext('2d').drawImage(video, 0, 0);
+          const freeze = document.getElementById('video-bg-freeze');
+          if (freeze) freeze.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.85)})`;
+        } catch (e) {}
+      }, { once: true });
       // Play immediately if enough data is buffered, otherwise wait for canplaythrough.
       const playVideo = () => video.play().catch(() => {});
       if (video.readyState >= 3) {
@@ -1215,7 +1226,7 @@ function SignInPage({ go, toast, user }) {
   };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: '#080706', overflow: 'hidden' }}>
+    <div style={{ position: 'fixed', inset: 0, background: heroPlayed ? 'transparent' : '#080706', overflow: 'hidden' }}>
       {/* Video only on first visit — skipped once heroPlayed is true */}
       {!heroPlayed && (
         <video
@@ -1225,7 +1236,6 @@ function SignInPage({ go, toast, user }) {
           muted
           playsInline
           preload="auto"
-          poster="logo.png"
           style={{
             position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
             objectFit: 'cover', zIndex: 0,
