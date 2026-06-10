@@ -809,6 +809,29 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   const [loading, setLoading]   = useState(true);
   const [openMenu, setOpenMenu] = useState(null);   // id of the row whose ⋯ menu is open
 
+  const [healthStatus, setHealthStatus] = useState(null); // null = checking
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchHealth = async () => {
+      try {
+        const token = await vqToken();
+        const res = await fetch(`${VQ_API}/api/health`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          credentials: 'include',
+        });
+        if (!res.ok) throw new Error('health fetch failed');
+        const data = await res.json();
+        if (!cancelled) setHealthStatus({ ok: true, ...data });
+      } catch {
+        if (!cancelled) setHealthStatus({ ok: false });
+      }
+    };
+    fetchHealth();
+    const id = setInterval(fetchHealth, 60_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []);
+
   // ── Fetch the signed-in user's projects ──────────────────────────────────────
   const loadProjects = async () => {
     try {
@@ -887,9 +910,6 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   const email = user?.email || '';
   const localPart = email ? email.split('@')[0].split(/[._-]/)[0] : '';
   const welcomeName = localPart ? localPart.charAt(0).toUpperCase() + localPart.slice(1) : 'there';
-
-  // Average processing time — rough 60s placeholder per project, shown only with data.
-  const avgProcessing = totalProjects > 0 ? '1m 0s' : '—';
 
   // ── Processing-volume line chart (completed BoQs per day, current month) ──────
   const now = new Date();
@@ -1048,19 +1068,41 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
               <div className="vd-section-hd"><span className="vd-section-title">System Status</span></div>
               <div className="vd-status-row">
                 <span className="vd-status-label">AI Engine</span>
-                <span className="vd-status-online"><span className="vd-dot-green" /> Online</span>
+                {healthStatus === null ? (
+                  <span className="vd-status-val" style={{ color: '#8b92a0' }}>Checking…</span>
+                ) : healthStatus.ok && healthStatus.ai_engine === 'online' ? (
+                  <span className="vd-status-online"><span className="vd-dot-green" /> Online</span>
+                ) : (
+                  <span className="vd-status-offline"><span className="vd-dot-red" /> Offline</span>
+                )}
               </div>
               <div className="vd-status-row">
                 <span className="vd-status-label">NRM2 Database</span>
-                <span className="vd-status-val">Updated (2h ago)</span>
+                <span className="vd-status-val">
+                  {healthStatus === null ? (
+                    <span style={{ color: '#8b92a0' }}>Checking…</span>
+                  ) : healthStatus.ok ? 'Loaded' : '—'}
+                </span>
               </div>
               <div className="vd-status-row">
                 <span className="vd-status-label">Average Processing Time</span>
-                <span className="vd-status-val">{avgProcessing}</span>
+                <span className="vd-status-val">
+                  {healthStatus === null ? (
+                    <span style={{ color: '#8b92a0' }}>Checking…</span>
+                  ) : healthStatus.ok && healthStatus.avg_processing_seconds != null
+                    ? `${healthStatus.avg_processing_seconds}s`
+                    : '—'}
+                </span>
               </div>
               <div className="vd-status-row">
                 <span className="vd-status-label">System Uptime</span>
-                <span className="vd-status-val">99.9%</span>
+                <span className="vd-status-val">
+                  {healthStatus === null ? (
+                    <span style={{ color: '#8b92a0' }}>Checking…</span>
+                  ) : healthStatus.ok && healthStatus.uptime_seconds != null
+                    ? `${Math.floor(healthStatus.uptime_seconds / 3600)}h ${Math.floor((healthStatus.uptime_seconds % 3600) / 60)}m`
+                    : '—'}
+                </span>
               </div>
             </div>
           </div>

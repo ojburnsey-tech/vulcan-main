@@ -13,6 +13,10 @@ from supabase import create_client # supabase-py v2 — wraps the Supabase REST 
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
+import time, statistics
+_processing_times = []
+_start_time = time.time()
+_ai_status = None
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -57,6 +61,23 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age']           = '86400'
     return response
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    global _ai_status
+    if _ai_status is None:
+        try:
+            _api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not _api_key:
+                raise RuntimeError("no key")
+            _hc_client = anthropic.Anthropic(api_key=_api_key, timeout=10.0)
+            _hc_client.messages.create(model="claude-sonnet-4-6", max_tokens=1, messages=[{"role": "user", "content": "ping"}])
+            _ai_status = "online"
+        except Exception:
+            _ai_status = "offline"
+    avg = round(statistics.mean(_processing_times[-50:]), 1) if _processing_times else None
+    return jsonify({"ai_engine": _ai_status, "uptime_seconds": int(time.time() - _start_time), "avg_processing_seconds": avg}), 200
+
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
 # The anon key is sufficient for client-side auth operations (sign up, sign in).
@@ -1030,6 +1051,7 @@ def process_pdf():                         # Flask calls this function when a ma
             len(full_text),
             len(full_text.split()),
         )
+        _t = time.time()
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
             max_tokens=16000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
@@ -1041,6 +1063,9 @@ def process_pdf():                         # Flask calls this function when a ma
                 }
             ],
         )
+        _processing_times.append(round(time.time() - _t, 1))
+        if len(_processing_times) > 200:
+            _processing_times.pop(0)
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
         return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
