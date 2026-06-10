@@ -1092,7 +1092,7 @@ function SignUpPage({ go, toast, plan = 'pro' }) {
       <div className="signin-card" style={{ maxWidth: '440px' }}>
         <img src="logo-transparent.png" alt="Vulcan Quanta"
           style={{ height: '48px', marginBottom: '32px', display: 'block', cursor: 'pointer' }}
-          onClick={() => go('landing')} />
+          onClick={() => go('signin')} />
         <h1 className="signin-h">Create your account</h1>
         <p className="signin-sub" style={{ marginBottom: '24px' }}>Get a priced BoQ in under 2 minutes.</p>
 
@@ -1277,7 +1277,7 @@ function SignInPage({ go, toast, user }) {
         <div className="signin-card">
           <img src="logo-transparent.png" alt="Vulcan Quanta"
             style={{ height: '40px', marginBottom: '28px', cursor: 'pointer', display: 'block' }}
-            onClick={() => go('landing')} />
+            onClick={() => go('signin')} />
 
           {user ? (
             <>
@@ -1316,7 +1316,7 @@ function SignInPage({ go, toast, user }) {
 
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '18px', fontSize: '13px' }}>
                 <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}
-                  onClick={() => go('landing')}>← Home</span>
+                  onClick={() => go('signin')}>← Home</span>
                 <span style={{ color: 'var(--amber)', cursor: 'pointer' }}
                   onClick={() => go('forgotpassword')}>Forgot password?</span>
               </div>
@@ -1400,7 +1400,7 @@ function ForgotPasswordPage({ go, toast }) {
       <div className="signin-card">
         <img src="logo-transparent.png" alt="Vulcan Quanta"
           style={{ height: '48px', marginBottom: '32px', cursor: 'pointer', display: 'block' }}
-          onClick={() => go('landing')} />
+          onClick={() => go('signin')} />
         <h1 className="signin-h">Reset your password</h1>
         <p className="signin-sub" style={{ marginBottom: '28px' }}>
           Enter your account email and we'll send a reset link.
@@ -1570,7 +1570,7 @@ function ResetPasswordPage({ go, toast }) {
       <div className="signin-card">
         <img src="logo-transparent.png" alt="Vulcan Quanta"
           style={{ height: '48px', marginBottom: '32px', cursor: 'pointer', display: 'block' }}
-          onClick={() => go('landing')} />
+          onClick={() => go('signin')} />
         <h1 className="signin-h">Set a new password</h1>
         <p className="signin-sub" style={{ marginBottom: '28px' }}>Choose a strong password for your account.</p>
 
