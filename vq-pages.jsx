@@ -1838,6 +1838,194 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
   );
 }
 
+// ─── PROJECT SETTINGS ─────────────────────────────────────────────────────────────
+function ProjectSettingsPage({ go, toast, projectId }) {
+  const [form, setForm] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  const getToken = async () =>
+    (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+
+  React.useEffect(() => {
+    const load = async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        setForm({
+          name:             data.name || '',
+          client_name:      data.client_name || '',
+          description:      data.description || '',
+          contract_type:    data.contract_type || 'JCT Standard',
+          location_factor:  data.location_factor || 'Belfast',
+          notes_for_ai:     data.notes_for_ai || '',
+          auto_delete_days: data.auto_delete_days ?? null,
+        });
+      } catch {
+        toast('Could not load project settings.', 'error');
+        go('dashboard');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [projectId]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+      toast('Settings saved.', 'success');
+      go('workspace', { projectId });
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok && res.status !== 204) throw new Error('Delete failed');
+      toast('Project deleted.', 'success');
+      go('dashboard');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  if (loading) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <p style={{ color:'var(--c-400)' }}>Loading…</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+
+        <div className="vd-topbar">
+          <span className="vd-section-title">Project Settings</span>
+          <span className="vd-link" onClick={() => go('workspace', { projectId })}>← Back to project</span>
+        </div>
+
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 24px' }}>
+
+          {/* Name */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Project name <span style={{color:'var(--amber)'}}>*</span></label>
+            <input className="finp" value={form.name} onChange={e => set('name', e.target.value)} />
+          </div>
+
+          {/* Client */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Client name</label>
+            <input className="finp" value={form.client_name} onChange={e => set('client_name', e.target.value)} />
+          </div>
+
+          {/* Description */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Description</label>
+            <textarea className="finp" rows={3} value={form.description} onChange={e => set('description', e.target.value)} style={{ resize:'vertical', minHeight:80 }} />
+          </div>
+
+          {/* Contract + Location */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
+            <div className="fld">
+              <label className="flbl">Contract type</label>
+              <select className="finp" value={form.contract_type} onChange={e => set('contract_type', e.target.value)}>
+                {CONTRACT_TYPES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="fld">
+              <label className="flbl">Location</label>
+              <select className="finp" value={form.location_factor} onChange={e => set('location_factor', e.target.value)}>
+                {LOCATION_FACTORS.map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* AI instructions */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Standing instructions for AI</label>
+            <textarea className="finp" rows={4} value={form.notes_for_ai} onChange={e => set('notes_for_ai', e.target.value)} style={{ resize:'vertical', minHeight:100 }} />
+            <p style={{ fontSize:12, color:'var(--c-400)', marginTop:6 }}>Passed to the AI on every BoQ generation and chat message for this project.</p>
+          </div>
+
+          {/* Auto-delete */}
+          <div className="fld" style={{ marginBottom: 40 }}>
+            <label className="flbl">Auto-delete project after</label>
+            <select className="finp" value={form.auto_delete_days ?? ''} onChange={e => set('auto_delete_days', e.target.value === '' ? null : Number(e.target.value))}>
+              {DELETE_OPTIONS.map(o => <option key={String(o.value)} value={o.value ?? ''}>{o.label}</option>)}
+            </select>
+            <p style={{ fontSize:12, color:'var(--c-400)', marginTop:6 }}>All project data including drawings, BoQ, and chat history will be permanently deleted.</p>
+          </div>
+
+          {/* Save */}
+          <div style={{ display:'flex', gap:12, marginBottom: 48 }}>
+            <button className="btn btn-amber btn-pill" onClick={handleSave} disabled={saving} style={{ flex:1 }}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+            <button className="btn btn-outline btn-pill" onClick={() => go('workspace', { projectId })} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+
+          {/* Danger zone */}
+          <div style={{ borderTop:'1px solid var(--c-200)', paddingTop:32 }}>
+            <p style={{ fontSize:13, fontWeight:600, color:'var(--c-700)', marginBottom:8 }}>Danger zone</p>
+            <p style={{ fontSize:13, color:'var(--c-400)', marginBottom:16 }}>
+              Permanently deletes this project, all uploaded drawings, the generated BoQ, and all chat history. This cannot be undone.
+            </p>
+            <button
+              className="btn btn-pill"
+              onClick={handleDelete}
+              disabled={deleting}
+              style={{ background: confirmDelete ? '#dc2626' : 'transparent', color: confirmDelete ? 'white' : '#dc2626', border:'1px solid #dc2626', padding:'10px 24px', fontSize:13 }}>
+              {deleting ? 'Deleting…' : confirmDelete ? 'Confirm — delete permanently' : 'Delete project'}
+            </button>
+            {confirmDelete && !deleting && (
+              <button className="btn btn-outline btn-pill" onClick={() => setConfirmDelete(false)} style={{ marginLeft:12, fontSize:13 }}>
+                Cancel
+              </button>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SIGN UP ───────────────────────────────────────────────────────────────────────
 function SignUpPage({ go, toast, plan = 'pro' }) {
   const [selectedPlan, setSelectedPlan] = useState(plan);
