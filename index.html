@@ -1162,6 +1162,126 @@
     .edit-inp { color: rgba(255,255,255,0.62) !important; }
     .edit-inp:focus { background: rgba(255,255,255,0.08) !important; }
 
+    /* ── Sidebar profile (bottom) ────────────────────────────────────────── */
+    .vd-profile { display: flex; align-items: center; gap: 11px; padding: 14px 20px; }
+    .vd-avatar {
+      width: 38px; height: 38px; border-radius: 50%;
+      background: #e8621a; color: #fff;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0; font-family: var(--font-b);
+    }
+    .vd-avatar-img { width: 38px; height: 38px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+    .vd-profile-info { min-width: 0; }
+    .vd-profile-name { font-size: 13px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-profile-plan { font-size: 12px; color: var(--amber); font-weight: 600; margin-top: 1px; }
+
+    /* ════════════════════════════════════════════════════════════════════
+       DASHBOARD REDESIGN — stat cards, project list, panels, charts
+    ════════════════════════════════════════════════════════════════════ */
+    .vd-main { padding: 32px 40px 56px; min-width: 0; }
+    .vd-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-bottom: 28px; flex-wrap: wrap; }
+    .vd-h1 { font-family: var(--font-d); font-size: 28px; font-weight: 800; color: #fff; letter-spacing: -0.01em; line-height: 1.15; margin-bottom: 8px; }
+    .vd-welcome { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 2px; }
+    .vd-subtitle { font-size: 13px; color: #8b92a0; }
+
+    .vd-card {
+      background: rgba(29,33,39,0.7);
+      backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.07); border-radius: 12px;
+    }
+
+    /* Stat cards */
+    .vd-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .vd-stat { padding: 20px; display: flex; gap: 14px; align-items: center; }
+    .vd-stat-ico { width: 46px; height: 46px; border-radius: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #fff; }
+    .vd-stat-label { font-size: 13px; color: #8b92a0; margin-bottom: 5px; }
+    .vd-stat-value { font-family: var(--font-d); font-size: 26px; font-weight: 800; color: #fff; line-height: 1; margin-bottom: 6px; }
+    .vd-stat-sub { font-size: 12px; color: #6b7280; }
+
+    /* Main two-column grid */
+    .vd-grid { display: grid; grid-template-columns: minmax(0,1fr) 360px; gap: 24px; align-items: start; }
+    .vd-col { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+    .vd-panel { padding: 22px 24px; }
+    .vd-section-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .vd-section-title { font-family: var(--font-d); font-size: 18px; font-weight: 700; color: #fff; }
+    .vd-link { font-size: 13px; color: var(--amber); font-weight: 600; cursor: pointer; user-select: none; }
+    .vd-link:hover { opacity: 0.82; }
+
+    /* Recent projects */
+    .vd-proj-row { display: flex; align-items: center; gap: 14px; padding: 13px 0; border-top: 1px solid rgba(255,255,255,0.06); position: relative; }
+    .vd-proj-row:first-of-type { border-top: none; }
+    .vd-thumb { width: 48px; height: 48px; border-radius: 8px; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.05); flex-shrink: 0; }
+    .vd-proj-main { min-width: 0; flex: 1; }
+    .vd-proj-name { font-size: 14px; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-proj-time { font-size: 12px; color: #8b92a0; margin-top: 3px; }
+    .vd-proj-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+    .vd-proj-meta { font-size: 12px; color: #8b92a0; white-space: nowrap; }
+    .vd-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+    .vd-badge-green { background: rgba(30,166,114,0.14); color: #2bd496; }
+    .vd-badge-amber { background: rgba(240,160,32,0.16); color: #f0b545; }
+    .vd-badge-grey  { background: rgba(255,255,255,0.07); color: #9aa3b2; }
+
+    .vd-dots { background: none; border: none; color: #8b92a0; font-size: 18px; cursor: pointer; padding: 2px 6px; border-radius: 6px; line-height: 1; }
+    .vd-dots:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .vd-menu { position: absolute; right: 0; top: 100%; margin-top: 4px; background: #20242b; border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,0.5); z-index: 30; min-width: 140px; overflow: hidden; }
+    .vd-menu-item { padding: 10px 14px; font-size: 13px; color: rgba(255,255,255,0.8); cursor: pointer; }
+    .vd-menu-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .vd-menu-item.danger { color: #ef6b6b; }
+    .vd-menu-item.danger:hover { background: rgba(239,68,68,0.1); }
+
+    /* Dashboard empty state */
+    .vd-empty { text-align: center; padding: 44px 24px; }
+    .vd-empty-p { font-size: 15px; color: #8b92a0; margin-bottom: 20px; }
+
+    /* Quick actions */
+    .vd-qa { display: flex; flex-direction: column; gap: 10px; }
+    .vd-qa-btn { display: flex; align-items: center; gap: 10px; width: 100%; padding: 12px 16px; border-radius: 9px; font-size: 14px; font-weight: 600; cursor: pointer; border: 1px solid transparent; transition: all var(--t); text-align: left; font-family: var(--font-b); }
+    .vd-qa-primary { background: var(--amber); color: #fff; justify-content: center; }
+    .vd-qa-primary:hover { background: var(--amber-d); }
+    .vd-qa-dark { background: rgba(255,255,255,0.04); color: rgba(255,255,255,0.78); border-color: rgba(255,255,255,0.08); }
+    .vd-qa-dark:hover { background: rgba(255,255,255,0.08); color: #fff; }
+
+    /* Recent activity */
+    .vd-act { display: flex; align-items: flex-start; gap: 12px; padding: 11px 0; border-top: 1px solid rgba(255,255,255,0.06); }
+    .vd-act:first-of-type { border-top: none; }
+    .vd-act-dot { width: 28px; height: 28px; border-radius: 50%; background: rgba(30,166,114,0.16); color: #2bd496; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+    .vd-act-body { min-width: 0; flex: 1; }
+    .vd-act-title { font-size: 13px; color: #fff; font-weight: 500; }
+    .vd-act-sub { font-size: 12px; color: #8b92a0; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vd-act-time { font-size: 11px; color: #6b7280; white-space: nowrap; flex-shrink: 0; }
+    .vd-muted { font-size: 13px; color: #8b92a0; padding: 8px 0; }
+
+    /* System status */
+    .vd-status-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-top: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+    .vd-status-row:first-of-type { border-top: none; }
+    .vd-status-label { color: #8b92a0; }
+    .vd-status-val { color: rgba(255,255,255,0.82); font-weight: 500; }
+    .vd-status-online { color: #2bd496; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+    .vd-dot-green { width: 7px; height: 7px; border-radius: 50%; background: #2bd496; display: inline-block; }
+
+    /* Charts row */
+    .vd-charts { display: grid; grid-template-columns: 1.5fr 1fr; gap: 24px; margin-top: 24px; align-items: stretch; }
+    .vd-chart-pill { font-size: 12px; color: rgba(255,255,255,0.6); background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 7px; padding: 5px 10px; }
+    .vd-donut-wrap { display: flex; flex-direction: column; align-items: center; }
+    .vd-donut { position: relative; width: 150px; height: 150px; }
+    .vd-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .vd-donut-total { font-family: var(--font-d); font-size: 28px; font-weight: 800; color: #fff; line-height: 1; }
+    .vd-donut-lbl { font-size: 11px; color: #8b92a0; margin-top: 2px; }
+    .vd-legend { display: flex; flex-direction: column; gap: 12px; margin-top: 22px; width: 100%; }
+    .vd-legend-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+    .vd-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .vd-legend-name { color: rgba(255,255,255,0.78); }
+    .vd-legend-val { margin-left: auto; color: #8b92a0; }
+
+    @media (max-width: 1100px) {
+      .vd-grid { grid-template-columns: 1fr; }
+      .vd-charts { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      .vd-main { padding: 24px 18px 40px; }
+      .vd-stats { grid-template-columns: 1fr 1fr; }
+    }
+
     /* ── Mobile: collapse sidebar ────────────────────────────────────────── */
     @media (max-width: 1024px) {
       .app-side { display: none; }
@@ -1317,7 +1437,7 @@ function App() {
   const pages = {
     // landing:     <LandingPage        go={go} tweaks={t} toast={toast} />,
     results:        <ResultsPage        go={go} toast={toast} boqData={boqData} />,
-    dashboard:      <DashboardPage      go={go} toast={toast} />,
+    dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} />,
     signin:         <SignInPage         go={go} toast={toast} user={user} />,

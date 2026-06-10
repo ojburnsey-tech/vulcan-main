@@ -1,5 +1,24 @@
 // vq-shared.jsx — Header, Footer, AnnouncementBar, BoQMockup, ToastContainer
-const { useState } = React;
+const { useState, useEffect } = React;
+
+// Derive up-to-two-letter initials from a full name, falling back to the email's
+// local part (e.g. "Oliver QS" → "OQ", "ojburnsey@gmail.com" → "OJ").
+function vqInitials(fullName, email) {
+  const src = (fullName && fullName.trim()) || (email ? email.split('@')[0] : '');
+  if (!src) return '?';
+  const parts = src.trim().split(/[\s._-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return src.slice(0, 2).toUpperCase();
+}
+
+// Map a stored plan code to a human label, all in orange in the UI.
+function vqPlanLabel(plan) {
+  switch ((plan || 'free').toLowerCase()) {
+    case 'pro':    return 'Professional Plan';
+    case 'studio': return 'Studio Plan';
+    default:       return 'Free Plan';
+  }
+}
 
 function AnnouncementBar({ go }) {
   return null;
@@ -181,8 +200,22 @@ function BoQMockup() {
   );
 }
 
-function AppSidebar({ currentPage, go }) {
+function AppSidebar({ currentPage, go, user: userProp, toast }) {
   const [logoOk, setLogoOk] = useState(true);
+  // The shared sidebar appears on pages that don't pass `user`, so when no prop is
+  // supplied we resolve the signed-in user from the Supabase session ourselves.
+  const [user, setUser] = useState(userProp || null);
+
+  useEffect(() => {
+    if (userProp) { setUser(userProp); return; }
+    let active = true;
+    if (window.VQAuth) {
+      window.VQAuth.getSession()
+        .then(({ data }) => { if (active && data && data.session) setUser(data.session.user); })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [userProp]);
 
   const handleSignOut = async () => {
     if (window.VQAuth) {
@@ -192,12 +225,30 @@ function AppSidebar({ currentPage, go }) {
     }
   };
 
+  // `match` drives the active highlight; `target` is where the item navigates.
+  // Items without a target are placeholders for sections not yet built.
   const navItems = [
-    { label: 'Dashboard', icon: '⊞', target: 'dashboard' },
-    { label: 'Upload',    icon: '↑',  target: 'upload'    },
-    { label: 'History',  icon: '◷',  target: 'dashboard' },
-    { label: 'Settings', icon: '⚙',  target: 'settings'  },
+    { label: 'Dashboard', icon: '⊞', target: 'dashboard', match: 'dashboard' },
+    { label: 'Projects',  icon: '▤', target: 'dashboard', match: 'projects'  },
+    { label: 'Uploads',   icon: '↑', target: 'upload',    match: 'upload'     },
+    { label: 'Reports',   icon: '▦', target: null,        match: 'reports'    },
+    { label: 'Exports',   icon: '⤓', target: null,        match: 'exports'    },
+    { label: 'History',   icon: '◷', target: null,        match: 'history'    },
+    { label: 'Settings',  icon: '⚙', target: 'settings',  match: 'settings'   },
   ];
+
+  const handleNav = (item) => {
+    if (item.target) go(item.target);
+    else if (toast) toast(`${item.label} — coming soon.`, 'info');
+  };
+
+  const email     = user?.email || '';
+  const meta      = user?.user_metadata || {};
+  const fullName  = meta.full_name || '';
+  const avatarUrl = meta.avatar_url || '';
+  const initials  = vqInitials(fullName, email);
+  const planLabel = vqPlanLabel(meta.plan);
+  const profileLabel = email || fullName || 'Account';
 
   return (
     <aside className="app-side">
@@ -218,8 +269,8 @@ function AppSidebar({ currentPage, go }) {
         {navItems.map(item => (
           <div
             key={item.label}
-            className={`app-side-item${currentPage === item.target ? ' active' : ''}`}
-            onClick={() => go(item.target)}
+            className={`app-side-item${currentPage === item.match ? ' active' : ''}`}
+            onClick={() => handleNav(item)}
           >
             <span style={{ fontSize: '15px', lineHeight: 1 }}>{item.icon}</span>
             <span>{item.label}</span>
@@ -227,6 +278,19 @@ function AppSidebar({ currentPage, go }) {
         ))}
       </nav>
       <div className="app-side-bottom">
+        <div className="vd-profile">
+          {avatarUrl
+            ? <img className="vd-avatar-img" src={avatarUrl} alt="" />
+            : <div className="vd-avatar">{initials}</div>}
+          <div className="vd-profile-info">
+            <div className="vd-profile-name" title={profileLabel}>{profileLabel}</div>
+            <div className="vd-profile-plan">{planLabel}</div>
+          </div>
+        </div>
+        <div className="app-side-item" onClick={() => go('settings')}>
+          <span style={{ fontSize: '14px' }}>⚙</span>
+          <span>Settings</span>
+        </div>
         <div className="app-side-item" onClick={handleSignOut}>
           <span style={{ fontSize: '13px' }}>→</span>
           <span>Sign out</span>
