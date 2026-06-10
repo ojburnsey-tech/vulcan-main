@@ -1598,6 +1598,246 @@ function ProjectSetupPage({ go, toast }) {
   );
 }
 
+// ─── PROJECT WORKSPACE ────────────────────────────────────────────────────────────
+function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
+  const [project, setProject] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [tab, setTab] = React.useState('generate');
+  const [chatMessages, setChatMessages] = React.useState([]);
+  const [chatInput, setChatInput] = React.useState('');
+  const [chatSending, setChatSending] = React.useState(false);
+  const [uploadStatus, setUploadStatus] = React.useState('idle'); // idle | uploading | processing | done
+  const [boqData, setBoqData] = React.useState(null);
+  const chatEndRef = React.useRef(null);
+
+  const getToken = async () =>
+    (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+
+  const loadProject = async () => {
+    setLoading(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Project not found');
+      const data = await res.json();
+      setProject(data);
+      if (data.boq_data) { setBoqData(data.boq_data); setTab('results'); }
+    } catch (e) {
+      toast('Could not load project.', 'error');
+      go('dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadChat = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/chat`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setChatMessages(await res.json());
+    } catch (e) {}
+  };
+
+  React.useEffect(() => { loadProject(); loadChat(); }, [projectId]);
+  React.useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+
+  const handleUploadAndGenerate = async (file) => {
+    if (!file) return;
+    setUploadStatus('uploading');
+    setTab('generate');
+    try {
+      const token = await getToken();
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('project_id', projectId);
+      if (project?.notes_for_ai) fd.append('notes_for_ai', project.notes_for_ai);
+      if (project?.location_factor) fd.append('location_factor', project.location_factor);
+      setUploadStatus('processing');
+      const res = await fetch(`${VQ_API}/process`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Processing failed');
+      setBoqData(data);
+      onBoqReady?.(data);
+      setUploadStatus('done');
+      toast('BoQ generated.', 'success');
+      setTab('results');
+    } catch (e) {
+      toast(e.message, 'error');
+      setUploadStatus('idle');
+    }
+  };
+
+  const handleSendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatSending) return;
+    setChatInput('');
+    setChatSending(true);
+    setChatMessages(prev => [...prev, { role: 'user', content: msg, created_at: new Date().toISOString() }]);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Chat failed');
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply, created_at: new Date().toISOString() }]);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  if (loading) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <p style={{ color:'var(--c-400)' }}>Loading project…</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+
+        {/* Topbar */}
+        <div className="vd-topbar" style={{ justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <span className="vd-link" onClick={() => go('dashboard')}>← Projects</span>
+            <span style={{ color:'var(--c-300)' }}>/</span>
+            <span className="vd-section-title">{project?.name || 'Untitled'}</span>
+            {project?.client_name && <span style={{ fontSize:13, color:'var(--c-400)' }}>{project.client_name}</span>}
+          </div>
+          <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('projectsettings', { projectId })}>Settings</button>
+        </div>
+
+        {/* Tab bar */}
+        <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--c-200)', padding:'0 24px', background:'var(--c-50)' }}>
+          {[
+            { id:'generate', label:'Generate BoQ' },
+            { id:'results',  label:'Results' },
+            { id:'chat',     label:'Ask AI' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              padding:'12px 20px', fontSize:13, fontWeight: tab===t.id ? 600 : 400,
+              color: tab===t.id ? 'var(--amber)' : 'var(--c-500)',
+              borderBottom: tab===t.id ? '2px solid var(--amber)' : '2px solid transparent',
+              background:'none', border:'none',
+              cursor:'pointer', transition:'color 0.15s',
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Tab: Generate */}
+        {tab === 'generate' && (
+          <div style={{ padding:'40px 24px', maxWidth:600, margin:'0 auto' }}>
+            {uploadStatus === 'idle' || uploadStatus === 'done' ? (
+              <>
+                <p style={{ fontSize:14, color:'var(--c-400)', marginBottom:24 }}>
+                  Upload a drawing or specification PDF to generate a BoQ for this project.
+                  {project?.notes_for_ai && <span style={{ color:'var(--amber)' }}> AI instructions active.</span>}
+                </p>
+                <label style={{ display:'block', border:'2px dashed var(--c-300)', borderRadius:12, padding:'48px 32px', textAlign:'center', cursor:'pointer', transition:'border-color 0.15s' }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); handleUploadAndGenerate(e.dataTransfer.files[0]); }}>
+                  <input type="file" accept=".pdf" style={{ display:'none' }} onChange={e => handleUploadAndGenerate(e.target.files[0])} />
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color:'var(--c-300)', margin:'0 auto 16px' }}>
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                  <p style={{ fontWeight:600, color:'var(--c-700)', marginBottom:4 }}>Drop PDF here or click to upload</p>
+                  <p style={{ fontSize:12, color:'var(--c-400)' }}>NRM2-compliant BoQ generated automatically</p>
+                </label>
+              </>
+            ) : (
+              <div style={{ textAlign:'center', padding:'48px 0' }}>
+                <div style={{ width:48, height:48, border:'3px solid var(--amber)', borderTopColor:'transparent', borderRadius:'50%', margin:'0 auto 24px', animation:'spin 0.8s linear infinite' }} />
+                <p style={{ fontWeight:600, color:'var(--c-700)' }}>
+                  {uploadStatus === 'uploading' ? 'Uploading drawing…' : 'AI reading your drawing…'}
+                </p>
+                <p style={{ fontSize:13, color:'var(--c-400)', marginTop:8 }}>This takes 30–90 seconds for a typical drawing set.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Results */}
+        {tab === 'results' && (
+          <div style={{ padding:'24px' }}>
+            {boqData ? (
+              <ResultsPage go={go} toast={toast} boqData={boqData} embedded={true} />
+            ) : (
+              <div style={{ textAlign:'center', padding:'64px 0' }}>
+                <p style={{ color:'var(--c-400)' }}>No BoQ generated yet. Upload a drawing to get started.</p>
+                <button className="btn btn-amber btn-pill" style={{ marginTop:16 }} onClick={() => setTab('generate')}>Upload drawing</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Chat */}
+        {tab === 'chat' && (
+          <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 120px)' }}>
+            <div style={{ flex:1, overflowY:'auto', padding:'24px', display:'flex', flexDirection:'column', gap:16 }}>
+              {chatMessages.length === 0 && (
+                <div style={{ textAlign:'center', padding:'48px 0', color:'var(--c-400)' }}>
+                  <p style={{ fontWeight:600, marginBottom:8 }}>Ask anything about this project</p>
+                  <p style={{ fontSize:13 }}>Quantities, costs, scope, NRM2 structure — all answered from your BoQ data.</p>
+                </div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} style={{
+                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                  maxWidth:'72%',
+                  background: m.role === 'user' ? 'var(--amber)' : 'var(--c-100)',
+                  color: m.role === 'user' ? 'white' : 'var(--c-900)',
+                  padding:'12px 16px', borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                  fontSize:14, lineHeight:1.6,
+                }}>
+                  {m.content}
+                </div>
+              ))}
+              {chatSending && (
+                <div style={{ alignSelf:'flex-start', background:'var(--c-100)', padding:'12px 16px', borderRadius:'16px 16px 16px 4px', fontSize:14, color:'var(--c-400)' }}>
+                  Thinking…
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div style={{ padding:'16px 24px', borderTop:'1px solid var(--c-200)', display:'flex', gap:12 }}>
+              <input
+                className="finp"
+                style={{ flex:1 }}
+                placeholder={boqData ? 'Ask about quantities, costs, scope…' : 'Generate a BoQ first to unlock chat'}
+                value={chatInput}
+                disabled={!boqData || chatSending}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
+              />
+              <button className="btn btn-amber btn-pill" onClick={handleSendChat} disabled={!boqData || chatSending || !chatInput.trim()}>
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
 // ─── SIGN UP ───────────────────────────────────────────────────────────────────────
 function SignUpPage({ go, toast, plan = 'pro' }) {
   const [selectedPlan, setSelectedPlan] = useState(plan);
