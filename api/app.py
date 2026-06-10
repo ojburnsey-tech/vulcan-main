@@ -31,6 +31,7 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'None'
 # Browsers always send the bare host (scheme + host only, never a path) as Origin.
 _ALLOWED_ORIGINS = [
     'https://ojburnsey-tech.github.io',
+    'https://vulcan-production-d039.up.railway.app',
     'http://localhost:8080',
     'http://localhost:5001',
 ]
