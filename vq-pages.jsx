@@ -1168,20 +1168,36 @@ function SignInPage({ go, toast, user }) {
     if (heroPlayed) return;
 
     const video = videoRef.current;
+    let fallback;
+
+    // Reveal the centred dock and mark the intro as done. heroPlayed flips the
+    // wrapper to transparent and unmounts the <video>, leaving the captured
+    // last frame (in #video-bg-freeze) as the persistent background.
+    const revealDock = () => {
+      heroPlayed = true;
+      setDockVisible(true);
+    };
+
+    // When the video finishes: freeze on the last frame by painting it to a canvas
+    // and stamping it onto the persistent freeze-frame div, then show the dock.
+    const onEnded = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        canvas.getContext('2d').drawImage(video, 0, 0);
+        const freeze = document.getElementById('video-bg-freeze');
+        if (freeze) freeze.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.85)})`;
+      } catch (e) {}
+      clearTimeout(fallback);
+      revealDock();
+    };
+
     if (video) {
-      // Record when the video finishes, capture the last frame into the persistent
-      // freeze-frame div so all auth screens keep the cinematic background.
-      video.addEventListener('ended', () => {
-        heroPlayed = true;
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width  = video.videoWidth;
-          canvas.height = video.videoHeight;
-          canvas.getContext('2d').drawImage(video, 0, 0);
-          const freeze = document.getElementById('video-bg-freeze');
-          if (freeze) freeze.style.backgroundImage = `url(${canvas.toDataURL('image/jpeg', 0.85)})`;
-        } catch (e) {}
-      }, { once: true });
+      // Dock appears only once the video has played all the way through.
+      video.addEventListener('ended', onEnded, { once: true });
+      // If the video can't load/play, don't strand the user on a blank intro.
+      video.addEventListener('error', revealDock, { once: true });
       // Play immediately if enough data is buffered, otherwise wait for canplaythrough.
       const playVideo = () => video.play().catch(() => {});
       if (video.readyState >= 3) {
@@ -1190,9 +1206,11 @@ function SignInPage({ go, toast, user }) {
         video.addEventListener('canplaythrough', playVideo, { once: true });
       }
     }
-    // Dock slides up automatically after 4 s, no interaction required.
-    const df = setTimeout(() => setDockVisible(true), 4000);
-    return () => clearTimeout(df);
+
+    // Safety net: if 'ended' never fires (codec/load failure), reveal the dock
+    // anyway after a generous window so the sign-in screen is never stuck hidden.
+    fallback = setTimeout(revealDock, 15000);
+    return () => clearTimeout(fallback);
   }, []);
 
   const handleSubmit = async e => {
@@ -1254,7 +1272,7 @@ function SignInPage({ go, toast, user }) {
         VULCAN QUANTA
       </div>
 
-      {/* Login dock — slides up from below at 4 s */}
+      {/* Login dock — centred; fades in once the intro video has played through */}
       <div className={`signin-dock${dockVisible ? ' dock-visible' : ''}`}>
         <div className="signin-card">
           <img src="logo-transparent.png" alt="Vulcan Quanta"
