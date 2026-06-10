@@ -406,6 +406,10 @@ function LandingPage({ go, tweaks = {}, toast }) {
         <div className="inner">
           <div className="sec-items">
             {[
+              { icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>, text: 'GDPR compliant' },
+              { icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>, text: 'Encrypted at rest' },
+              { icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>, text: 'UK-hosted' },
+              { icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>, text: 'Human review built in' },
               {
                 icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
                 text: 'GDPR compliant'
@@ -967,7 +971,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
             <p className="vd-welcome">Welcome back, {welcomeName}</p>
             <p className="vd-subtitle">Create and manage AI-generated Bills of Quantities</p>
           </div>
-          <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>+ New Project</button>
+          <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>+ New Project</button>
         </div>
 
         {/* ── Four stat cards ── */}
@@ -1049,6 +1053,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
                 <button className="vd-qa-btn vd-qa-primary" onClick={() => go('upload')}>↑ Upload Drawing</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>View Demo Project</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>Import Existing BOQ</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => go('projectsetup')}>＋ Create Project</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => go('upload')}>＋ Create Project</button>
               </div>
             </div>
@@ -1131,8 +1136,8 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
             <svg viewBox={`0 0 ${CW} ${CH}`} width="100%" style={{ display: 'block', height: 'auto' }}>
               <defs>
                 <linearGradient id="vdAreaFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#e8621a" stopOpacity="0.28" />
-                  <stop offset="100%" stopColor="#e8621a" stopOpacity="0" />
+                  <stop offset="0%" stopColor="#d77555" stopOpacity="0.28" />
+                  <stop offset="100%" stopColor="#d77555" stopOpacity="0" />
                 </linearGradient>
               </defs>
               {/* horizontal gridlines + y labels (0 and max) */}
@@ -1144,7 +1149,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
               <text x={padL - 8} y={padT + plotH + 4} fill="#6b7280" fontSize="11" textAnchor="end">0</text>
               {/* area + line */}
               <polygon points={areaStr} fill="url(#vdAreaFill)" />
-              <polyline points={lineStr} fill="none" stroke="#e8621a" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              <polyline points={lineStr} fill="none" stroke="#d77555" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
               {/* x labels */}
               {dayLabels.map(d => (
                 <text key={d} x={xFor(d)} y={CH - 6} fill="#6b7280" fontSize="11" textAnchor="middle">{d} {monthName}</text>
@@ -1292,6 +1297,7 @@ function UploadPage({ go, toast, onBoqReady }) {
             onDragLeave={() => setDragOver(false)}
             onClick={() => document.getElementById('vq-file-input').click()}
           >
+            <p className="upload-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{color:'var(--c-300)'}}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></p>
             <p className="upload-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{color:'var(--c-300)'}}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></p>
             <p className="upload-h">Drop your drawing here</p>
             <p className="upload-sub">or click to select a file</p>
@@ -1324,7 +1330,12 @@ function SettingsPage({ go, toast }) {
   const [saved, setSaved] = useState({});
   const save = key => { setSaved(p => ({ ...p, [key]: true })); toast('Changes saved.', 'success'); setTimeout(() => setSaved(p => ({ ...p, [key]: false })), 2000); };
 
-  const tabs = [{ id: 'account', icon: '👤', label: 'Account' },{ id: 'branding', icon: '🎨', label: 'Branding' },{ id: 'rates', icon: '💷', label: 'Rates' },{ id: 'billing', icon: '💳', label: 'Billing' }];
+  const tabs = [
+    { id: 'account',  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>, label: 'Account' },
+    { id: 'branding', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 20a8 8 0 100-16"/></svg>, label: 'Branding' },
+    { id: 'rates',    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>, label: 'Rates' },
+    { id: 'billing',  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>, label: 'Billing' },
+  ];
 
   return (
     <div className="app-wrap">
@@ -1478,6 +1489,557 @@ function SettingsPage({ go, toast }) {
           </>
         )}
       </main>
+    </div>
+  );
+}
+
+// ─── PROJECT SETUP ────────────────────────────────────────────────────────────────
+const CONTRACT_TYPES = ['JCT Standard','JCT Design & Build','NEC3','NEC4','CIJC','Minor Works','Cost Plus','Framework'];
+const LOCATION_FACTORS = ['Belfast','Londonderry','Dublin','London','Manchester','Birmingham','Edinburgh','Glasgow','Cardiff','Bristol'];
+const DELETE_OPTIONS = [
+  { label: 'Never',   value: null },
+  { label: '30 days', value: 30 },
+  { label: '60 days', value: 60 },
+  { label: '90 days', value: 90 },
+  { label: '180 days', value: 180 },
+  { label: '1 year',  value: 365 },
+];
+
+function ProjectSetupPage({ go, toast }) {
+  const [form, setForm] = React.useState({
+    name: '',
+    client_name: '',
+    contract_type: 'JCT Standard',
+    location_factor: 'Belfast',
+    notes_for_ai: '',
+    auto_delete_days: null,
+    description: '',
+  });
+  const [saving, setSaving] = React.useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const token = (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+      const res = await fetch(`${VQ_API}/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...form, status: 'draft' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create project');
+      toast('Project created.', 'success');
+      go('workspace', { projectId: data.id });
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+        <div className="vd-topbar">
+          <span className="vd-section-title">New Project</span>
+          <span className="vd-link" onClick={() => go('dashboard')}>← Back to dashboard</span>
+        </div>
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 24px' }}>
+
+          {/* Name */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Project name <span style={{color:'var(--amber)'}}>*</span></label>
+            <input className="finp" placeholder="e.g. Elmwood Avenue — New Build" value={form.name} onChange={e => set('name', e.target.value)} />
+          </div>
+
+          {/* Client */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Client name</label>
+            <input className="finp" placeholder="e.g. Apex Developments Ltd" value={form.client_name} onChange={e => set('client_name', e.target.value)} />
+          </div>
+
+          {/* Description */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Description</label>
+            <textarea className="finp" rows={3} placeholder="Brief project scope or notes" value={form.description} onChange={e => set('description', e.target.value)} style={{ resize: 'vertical', minHeight: 80 }} />
+          </div>
+
+          {/* Contract + Location row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            <div className="fld">
+              <label className="flbl">Contract type</label>
+              <select className="finp" value={form.contract_type} onChange={e => set('contract_type', e.target.value)}>
+                {CONTRACT_TYPES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="fld">
+              <label className="flbl">Location</label>
+              <select className="finp" value={form.location_factor} onChange={e => set('location_factor', e.target.value)}>
+                {LOCATION_FACTORS.map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* AI instructions */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Standing instructions for AI</label>
+            <textarea className="finp" rows={4} placeholder="e.g. Always use CIJC wage rates. Flag any provisional sums above £10,000. This project excludes external works." value={form.notes_for_ai} onChange={e => set('notes_for_ai', e.target.value)} style={{ resize: 'vertical', minHeight: 100 }} />
+            <p style={{ fontSize: 12, color: 'var(--c-400)', marginTop: 6 }}>These instructions are passed to the AI on every BoQ generation and chat message for this project.</p>
+          </div>
+
+          {/* Auto-delete */}
+          <div className="fld" style={{ marginBottom: 32 }}>
+            <label className="flbl">Auto-delete project after</label>
+            <select className="finp" value={form.auto_delete_days ?? ''} onChange={e => set('auto_delete_days', e.target.value === '' ? null : Number(e.target.value))}>
+              {DELETE_OPTIONS.map(o => <option key={String(o.value)} value={o.value ?? ''}>{o.label}</option>)}
+            </select>
+            <p style={{ fontSize: 12, color: 'var(--c-400)', marginTop: 6 }}>All project data including drawings, BoQ, and chat history will be permanently deleted. GDPR compliant.</p>
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="btn btn-amber btn-pill" onClick={handleCreate} disabled={saving} style={{ flex: 1 }}>
+              {saving ? 'Creating…' : 'Create project →'}
+            </button>
+            <button className="btn btn-outline btn-pill" onClick={() => go('dashboard')} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PROJECT WORKSPACE ────────────────────────────────────────────────────────────
+function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
+  const [project, setProject] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [tab, setTab] = React.useState('generate');
+  const [chatMessages, setChatMessages] = React.useState([]);
+  const [chatInput, setChatInput] = React.useState('');
+  const [chatSending, setChatSending] = React.useState(false);
+  const [uploadStatus, setUploadStatus] = React.useState('idle'); // idle | uploading | processing | done
+  const [boqData, setBoqData] = React.useState(null);
+  const chatEndRef = React.useRef(null);
+
+  const getToken = async () =>
+    (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+
+  const loadProject = async () => {
+    setLoading(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Project not found');
+      const data = await res.json();
+      setProject(data);
+      if (data.boq_data) { setBoqData(data.boq_data); setTab('results'); }
+    } catch (e) {
+      toast('Could not load project.', 'error');
+      go('dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadChat = async () => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/chat`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setChatMessages(await res.json());
+    } catch (e) {}
+  };
+
+  React.useEffect(() => { loadProject(); loadChat(); }, [projectId]);
+  React.useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+
+  const handleUploadAndGenerate = async (file) => {
+    if (!file) return;
+    setUploadStatus('uploading');
+    setTab('generate');
+    try {
+      const token = await getToken();
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('project_id', projectId);
+      if (project?.notes_for_ai) fd.append('notes_for_ai', project.notes_for_ai);
+      if (project?.location_factor) fd.append('location_factor', project.location_factor);
+      setUploadStatus('processing');
+      const res = await fetch(`${VQ_API}/process`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Processing failed');
+      setBoqData(data);
+      onBoqReady?.(data);
+      setUploadStatus('done');
+      toast('BoQ generated.', 'success');
+      setTab('results');
+    } catch (e) {
+      toast(e.message, 'error');
+      setUploadStatus('idle');
+    }
+  };
+
+  const handleSendChat = async () => {
+    const msg = chatInput.trim();
+    if (!msg || chatSending) return;
+    setChatInput('');
+    setChatSending(true);
+    setChatMessages(prev => [...prev, { role: 'user', content: msg, created_at: new Date().toISOString() }]);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ message: msg }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Chat failed');
+      setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply, created_at: new Date().toISOString() }]);
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setChatSending(false);
+    }
+  };
+
+  if (loading) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <p style={{ color:'var(--c-400)' }}>Loading project…</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+
+        {/* Topbar */}
+        <div className="vd-topbar" style={{ justifyContent:'space-between' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <span className="vd-link" onClick={() => go('dashboard')}>← Projects</span>
+            <span style={{ color:'var(--c-300)' }}>/</span>
+            <span className="vd-section-title">{project?.name || 'Untitled'}</span>
+            {project?.client_name && <span style={{ fontSize:13, color:'var(--c-400)' }}>{project.client_name}</span>}
+          </div>
+          <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('projectsettings', { projectId })}>Settings</button>
+        </div>
+
+        {/* Tab bar */}
+        <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--c-200)', padding:'0 24px', background:'var(--c-50)' }}>
+          {[
+            { id:'generate', label:'Generate BoQ' },
+            { id:'results',  label:'Results' },
+            { id:'chat',     label:'Ask AI' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setTab(t.id)} style={{
+              padding:'12px 20px', fontSize:13, fontWeight: tab===t.id ? 600 : 400,
+              color: tab===t.id ? 'var(--amber)' : 'var(--c-500)',
+              borderBottom: tab===t.id ? '2px solid var(--amber)' : '2px solid transparent',
+              background:'none', border:'none',
+              cursor:'pointer', transition:'color 0.15s',
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Tab: Generate */}
+        {tab === 'generate' && (
+          <div style={{ padding:'40px 24px', maxWidth:600, margin:'0 auto' }}>
+            {uploadStatus === 'idle' || uploadStatus === 'done' ? (
+              <>
+                <p style={{ fontSize:14, color:'var(--c-400)', marginBottom:24 }}>
+                  Upload a drawing or specification PDF to generate a BoQ for this project.
+                  {project?.notes_for_ai && <span style={{ color:'var(--amber)' }}> AI instructions active.</span>}
+                </p>
+                <label style={{ display:'block', border:'2px dashed var(--c-300)', borderRadius:12, padding:'48px 32px', textAlign:'center', cursor:'pointer', transition:'border-color 0.15s' }}
+                  onDragOver={e => e.preventDefault()}
+                  onDrop={e => { e.preventDefault(); handleUploadAndGenerate(e.dataTransfer.files[0]); }}>
+                  <input type="file" accept=".pdf" style={{ display:'none' }} onChange={e => handleUploadAndGenerate(e.target.files[0])} />
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color:'var(--c-300)', margin:'0 auto 16px' }}>
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                  <p style={{ fontWeight:600, color:'var(--c-700)', marginBottom:4 }}>Drop PDF here or click to upload</p>
+                  <p style={{ fontSize:12, color:'var(--c-400)' }}>NRM2-compliant BoQ generated automatically</p>
+                </label>
+              </>
+            ) : (
+              <div style={{ textAlign:'center', padding:'48px 0' }}>
+                <div style={{ width:48, height:48, border:'3px solid var(--amber)', borderTopColor:'transparent', borderRadius:'50%', margin:'0 auto 24px', animation:'spin 0.8s linear infinite' }} />
+                <p style={{ fontWeight:600, color:'var(--c-700)' }}>
+                  {uploadStatus === 'uploading' ? 'Uploading drawing…' : 'AI reading your drawing…'}
+                </p>
+                <p style={{ fontSize:13, color:'var(--c-400)', marginTop:8 }}>This takes 30–90 seconds for a typical drawing set.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Results */}
+        {tab === 'results' && (
+          <div style={{ padding:'24px' }}>
+            {boqData ? (
+              <ResultsPage go={go} toast={toast} boqData={boqData} embedded={true} />
+            ) : (
+              <div style={{ textAlign:'center', padding:'64px 0' }}>
+                <p style={{ color:'var(--c-400)' }}>No BoQ generated yet. Upload a drawing to get started.</p>
+                <button className="btn btn-amber btn-pill" style={{ marginTop:16 }} onClick={() => setTab('generate')}>Upload drawing</button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Chat */}
+        {tab === 'chat' && (
+          <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 120px)' }}>
+            <div style={{ flex:1, overflowY:'auto', padding:'24px', display:'flex', flexDirection:'column', gap:16 }}>
+              {chatMessages.length === 0 && (
+                <div style={{ textAlign:'center', padding:'48px 0', color:'var(--c-400)' }}>
+                  <p style={{ fontWeight:600, marginBottom:8 }}>Ask anything about this project</p>
+                  <p style={{ fontSize:13 }}>Quantities, costs, scope, NRM2 structure — all answered from your BoQ data.</p>
+                </div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} style={{
+                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                  maxWidth:'72%',
+                  background: m.role === 'user' ? 'var(--amber)' : 'var(--c-100)',
+                  color: m.role === 'user' ? 'white' : 'var(--c-900)',
+                  padding:'12px 16px', borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                  fontSize:14, lineHeight:1.6,
+                }}>
+                  {m.content}
+                </div>
+              ))}
+              {chatSending && (
+                <div style={{ alignSelf:'flex-start', background:'var(--c-100)', padding:'12px 16px', borderRadius:'16px 16px 16px 4px', fontSize:14, color:'var(--c-400)' }}>
+                  Thinking…
+                </div>
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <div style={{ padding:'16px 24px', borderTop:'1px solid var(--c-200)', display:'flex', gap:12 }}>
+              <input
+                className="finp"
+                style={{ flex:1 }}
+                placeholder={boqData ? 'Ask about quantities, costs, scope…' : 'Generate a BoQ first to unlock chat'}
+                value={chatInput}
+                disabled={!boqData || chatSending}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
+              />
+              <button className="btn btn-amber btn-pill" onClick={handleSendChat} disabled={!boqData || chatSending || !chatInput.trim()}>
+                Send
+              </button>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+// ─── PROJECT SETTINGS ─────────────────────────────────────────────────────────────
+function ProjectSettingsPage({ go, toast, projectId }) {
+  const [form, setForm] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+  const [confirmDelete, setConfirmDelete] = React.useState(false);
+
+  const getToken = async () =>
+    (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+
+  React.useEffect(() => {
+    const load = async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        setForm({
+          name:             data.name || '',
+          client_name:      data.client_name || '',
+          description:      data.description || '',
+          contract_type:    data.contract_type || 'JCT Standard',
+          location_factor:  data.location_factor || 'Belfast',
+          notes_for_ai:     data.notes_for_ai || '',
+          auto_delete_days: data.auto_delete_days ?? null,
+        });
+      } catch {
+        toast('Could not load project settings.', 'error');
+        go('dashboard');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [projectId]);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || 'Save failed');
+      toast('Settings saved.', 'success');
+      go('workspace', { projectId });
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    setDeleting(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok && res.status !== 204) throw new Error('Delete failed');
+      toast('Project deleted.', 'success');
+      go('dashboard');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
+  if (loading) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <p style={{ color:'var(--c-400)' }}>Loading…</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+
+        <div className="vd-topbar">
+          <span className="vd-section-title">Project Settings</span>
+          <span className="vd-link" onClick={() => go('workspace', { projectId })}>← Back to project</span>
+        </div>
+
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 24px' }}>
+
+          {/* Name */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Project name <span style={{color:'var(--amber)'}}>*</span></label>
+            <input className="finp" value={form.name} onChange={e => set('name', e.target.value)} />
+          </div>
+
+          {/* Client */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Client name</label>
+            <input className="finp" value={form.client_name} onChange={e => set('client_name', e.target.value)} />
+          </div>
+
+          {/* Description */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Description</label>
+            <textarea className="finp" rows={3} value={form.description} onChange={e => set('description', e.target.value)} style={{ resize:'vertical', minHeight:80 }} />
+          </div>
+
+          {/* Contract + Location */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
+            <div className="fld">
+              <label className="flbl">Contract type</label>
+              <select className="finp" value={form.contract_type} onChange={e => set('contract_type', e.target.value)}>
+                {CONTRACT_TYPES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="fld">
+              <label className="flbl">Location</label>
+              <select className="finp" value={form.location_factor} onChange={e => set('location_factor', e.target.value)}>
+                {LOCATION_FACTORS.map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* AI instructions */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Standing instructions for AI</label>
+            <textarea className="finp" rows={4} value={form.notes_for_ai} onChange={e => set('notes_for_ai', e.target.value)} style={{ resize:'vertical', minHeight:100 }} />
+            <p style={{ fontSize:12, color:'var(--c-400)', marginTop:6 }}>Passed to the AI on every BoQ generation and chat message for this project.</p>
+          </div>
+
+          {/* Auto-delete */}
+          <div className="fld" style={{ marginBottom: 40 }}>
+            <label className="flbl">Auto-delete project after</label>
+            <select className="finp" value={form.auto_delete_days ?? ''} onChange={e => set('auto_delete_days', e.target.value === '' ? null : Number(e.target.value))}>
+              {DELETE_OPTIONS.map(o => <option key={String(o.value)} value={o.value ?? ''}>{o.label}</option>)}
+            </select>
+            <p style={{ fontSize:12, color:'var(--c-400)', marginTop:6 }}>All project data including drawings, BoQ, and chat history will be permanently deleted.</p>
+          </div>
+
+          {/* Save */}
+          <div style={{ display:'flex', gap:12, marginBottom: 48 }}>
+            <button className="btn btn-amber btn-pill" onClick={handleSave} disabled={saving} style={{ flex:1 }}>
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+            <button className="btn btn-outline btn-pill" onClick={() => go('workspace', { projectId })} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+
+          {/* Danger zone */}
+          <div style={{ borderTop:'1px solid var(--c-200)', paddingTop:32 }}>
+            <p style={{ fontSize:13, fontWeight:600, color:'var(--c-700)', marginBottom:8 }}>Danger zone</p>
+            <p style={{ fontSize:13, color:'var(--c-400)', marginBottom:16 }}>
+              Permanently deletes this project, all uploaded drawings, the generated BoQ, and all chat history. This cannot be undone.
+            </p>
+            <button
+              className="btn btn-pill"
+              onClick={handleDelete}
+              disabled={deleting}
+              style={{ background: confirmDelete ? '#dc2626' : 'transparent', color: confirmDelete ? 'white' : '#dc2626', border:'1px solid #dc2626', padding:'10px 24px', fontSize:13 }}>
+              {deleting ? 'Deleting…' : confirmDelete ? 'Confirm — delete permanently' : 'Delete project'}
+            </button>
+            {confirmDelete && !deleting && (
+              <button className="btn btn-outline btn-pill" onClick={() => setConfirmDelete(false)} style={{ marginLeft:12, fontSize:13 }}>
+                Cancel
+              </button>
+            )}
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }
@@ -1807,8 +2369,8 @@ function ForgotPasswordPage({ go, toast }) {
         <div className="signin-card" style={{ textAlign: 'center' }}>
           <img src="logo-transparent.png" alt="Vulcan Quanta"
             style={{ height: '48px', marginBottom: '32px', display: 'block', margin: '0 auto 32px' }} />
-          <div style={{ width: '64px', height: '64px', background: 'rgba(249,115,22,0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '28px' }}>
-            ✉️
+          <div style={{ width: '64px', height: '64px', background: 'rgba(215,117,85,0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '28px' }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'inline',verticalAlign:'middle'}}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
           </div>
           <h1 className="signin-h" style={{ marginBottom: '12px' }}>Check your inbox</h1>
           <p style={{ color: 'var(--c-500)', fontSize: '15px', lineHeight: '1.65', marginBottom: '8px' }}>
@@ -1898,8 +2460,8 @@ function CheckEmailPage({ go, toast, email }) {
       <div className="signin-card" style={{ textAlign: 'center' }}>
         <img src="logo-transparent.png" alt="Vulcan Quanta"
           style={{ height: '48px', marginBottom: '32px', display: 'block', margin: '0 auto 32px' }} />
-        <div style={{ width: '64px', height: '64px', background: 'rgba(249,115,22,0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '28px' }}>
-          ✉️
+        <div style={{ width: '64px', height: '64px', background: 'rgba(215,117,85,0.1)', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', fontSize: '28px' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{display:'inline',verticalAlign:'middle'}}><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
         </div>
         <h1 className="signin-h" style={{ marginBottom: '12px' }}>Verify your email</h1>
         {email

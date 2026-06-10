@@ -944,6 +944,12 @@ def get_projects():
     if err:
         return err
 
+    # Auto-delete expired projects
+    try:
+        _supabase.rpc("delete_expired_projects", {"uid": user.id}).execute()
+    except Exception:
+        pass  # non-fatal — list still returns normally
+
     try:
         # Select every column except boq_data — the BoQ JSON is too large for a list view.
         # order(..., desc=True) gives newest-first, like .OrderByDescending(p => p.CreatedAt) in C#.
@@ -1006,6 +1012,156 @@ def delete_project(project_id):
         return jsonify({"error": "Project not found."}), 404
 
     return "", 204                           # 204 No Content — deletion succeeded, no body
+
+
+@app.route("/projects/<project_id>", methods=["GET"])
+def get_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("projects")
+            .select("*")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load project: {exc}"}), 500
+    if not getattr(res, "data", None):
+        return jsonify({"error": "Project not found."}), 404
+    return jsonify(res.data), 200
+
+
+@app.route("/projects/<project_id>", methods=["PUT"])
+def update_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    body = request.get_json(force=True, silent=True) or {}
+    allowed = {"name", "description", "client_name", "contract_type",
+               "location_factor", "notes_for_ai", "auto_delete_days"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "No valid fields to update."}), 400
+    try:
+        res = (
+            _supabase.table("projects")
+            .update(updates)
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update project: {exc}"}), 500
+    return jsonify(res.data[0] if res.data else {}), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["GET"])
+def get_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("chat_messages")
+            .select("id, role, content, created_at")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load chat: {exc}"}), 500
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["POST"])
+def post_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+    user_message = (body.get("message") or "").strip()
+    if not user_message:
+        return jsonify({"error": "Message is required."}), 400
+
+    # Load project for boq_data and notes_for_ai
+    try:
+        proj_res = (
+            _supabase.table("projects")
+            .select("boq_data, notes_for_ai, name, client_name, contract_type, location_factor")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": "Project not found."}), 404
+
+    project = proj_res.data or {}
+
+    # Load last 20 messages for context
+    try:
+        hist_res = (
+            _supabase.table("chat_messages")
+            .select("role, content")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .limit(20)
+            .execute()
+        )
+        history = hist_res.data or []
+    except Exception:
+        history = []
+
+    # Build system prompt
+    boq_summary = json.dumps(project["boq_data"], indent=None)[:6000] if project.get("boq_data") else ""
+
+    system = f"""You are a professional quantity surveyor assistant for the project '{project.get("name", "Unnamed")}' \
+(client: {project.get("client_name") or "not specified"}, contract: {project.get("contract_type") or "not specified"}, \
+location: {project.get("location_factor") or "Belfast"}).
+
+The following is the Bill of Quantities data for this project (NRM2-structured JSON):
+{boq_summary if boq_summary else "No BoQ has been generated yet for this project."}
+
+Answer questions about quantities, rates, costs, scope, and NRM2 structure. \
+Be concise and professional. Give specific figures from the BoQ where relevant.
+{("Additional instructions: " + project["notes_for_ai"]) if project.get("notes_for_ai") else ""}"""
+
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    messages.append({"role": "user", "content": user_message})
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
+
+    try:
+        chat_client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        response = chat_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system,
+            messages=messages,
+        )
+        assistant_reply = response.content[0].text
+    except Exception as exc:
+        return jsonify({"error": f"AI error: {exc}"}), 500
+
+    # Persist both turns — non-fatal if this fails
+    try:
+        _supabase.table("chat_messages").insert([
+            {"project_id": project_id, "user_id": user.id, "role": "user",      "content": user_message},
+            {"project_id": project_id, "user_id": user.id, "role": "assistant", "content": assistant_reply},
+        ]).execute()
+    except Exception:
+        pass
+
+    return jsonify({"reply": assistant_reply}), 200
 
 
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API

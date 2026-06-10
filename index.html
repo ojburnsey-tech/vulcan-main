@@ -306,6 +306,7 @@
     .upload-wrap { max-width: 640px; margin: 0 auto; padding: 0 24px 64px; }
     .upload-zone { border: 2px dashed var(--c-200); border-radius: 12px; padding: 80px 40px; text-align: center; cursor: pointer; transition: border-color var(--t), background var(--t); background: white; }
     .upload-zone:hover, .upload-zone.drag { border-color: var(--amber); background: rgba(215,117,85,0.03); }
+    .upload-icon { font-size: 40px; margin-bottom: 16px; display: flex; justify-content: center; align-items: center; }
     .upload-icon { font-size: 40px; margin-bottom: 16px; }
     .upload-h { font-family: var(--font-d); font-size: 22px; font-weight: 700; color: var(--c-950); margin-bottom: 8px; }
     .upload-sub { font-size: 14px; color: var(--c-400); margin-bottom: 24px; }
@@ -1298,6 +1299,7 @@ const { useState, useEffect, useCallback } = React;
 const { AnnouncementBar, Header, Footer, ToastContainer } = window;
 const {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
+  ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
 } = window;
@@ -1310,7 +1312,8 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 // Pages that have no Header/Footer chrome
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
-                         'forgotpassword','checkemail','resetpassword','landing'];
+                         'forgotpassword','checkemail','resetpassword','landing',
+                         'projectsetup','workspace','projectsettings'];
 
 // Pages that require an authenticated session
 const PROTECTED = ['dashboard','settings','results','upload'];
@@ -1322,6 +1325,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [pendingEmail, setPendingEmail] = useState('');
   const [boqData, setBoqData]         = useState(null);   // holds JSON returned by /process; passed down to ResultsPage
+  const [projectId, setProjectId]     = useState(null);
   const [t, setTweak]                 = useTweaks(TWEAK_DEFAULTS);
 
   // ── Accent CSS token sync ───────────────────────────────────────────────────────
@@ -1398,6 +1402,7 @@ function App() {
   //   to the next page without URL params.
   const go = useCallback((p, opts) => {
     if (opts && opts.pendingEmail !== undefined) setPendingEmail(opts.pendingEmail);
+    if (opts?.projectId) setProjectId(opts.projectId);
     setPage(p);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
@@ -1443,6 +1448,9 @@ function App() {
     dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} />,
+    projectsetup:    <ProjectSetupPage    go={go} toast={toast} />,
+    workspace:       <ProjectWorkspacePage go={go} toast={toast} projectId={projectId} onBoqReady={setBoqData} />,
+    projectsettings: <ProjectSettingsPage  go={go} toast={toast} projectId={projectId} />,
     signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,
