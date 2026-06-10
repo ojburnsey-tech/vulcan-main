@@ -13,6 +13,10 @@ from supabase import create_client # supabase-py v2 — wraps the Supabase REST 
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
+import time, statistics
+_processing_times = []
+_start_time = time.time()
+_ai_status = None
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -54,10 +58,27 @@ def add_cors_headers(response):
     if origin in _ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin']      = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, OPTIONS'
+        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age']           = '86400'
     return response
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    global _ai_status
+    if _ai_status != "online":
+        try:
+            _api_key = os.environ.get("ANTHROPIC_API_KEY")
+            if not _api_key:
+                raise RuntimeError("no key")
+            _hc_client = anthropic.Anthropic(api_key=_api_key, timeout=10.0)
+            _hc_client.messages.create(model="claude-sonnet-4-6", max_tokens=1, messages=[{"role": "user", "content": "ping"}])
+            _ai_status = "online"
+        except Exception:
+            _ai_status = "offline"
+    avg = round(statistics.mean(_processing_times[-50:]), 1) if _processing_times else None
+    return jsonify({"ai_engine": _ai_status, "uptime_seconds": int(time.time() - _start_time), "avg_processing_seconds": avg}), 200
+
 
 # ── Supabase client ───────────────────────────────────────────────────────────────────
 # The anon key is sufficient for client-side auth operations (sign up, sign in).
@@ -85,6 +106,69 @@ def _get_bearer_token() -> str:
     if auth.startswith('Bearer '):
         return auth[7:].strip()
     return ''
+
+
+def _authenticated_user():
+    """Resolve the Supabase user from the Bearer token.
+
+    Returns (user, None) on success, or (None, (response, status)) on failure so
+    callers can `return error` immediately — like a TryGetUser out-pattern in C#.
+    """
+    if not _supabase:
+        return None, (jsonify({"error": "Auth not configured — set SUPABASE_URL and SUPABASE_ANON_KEY."}), 503)
+    token = _get_bearer_token()
+    if not token:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    try:
+        # get_user validates the JWT against Supabase and returns the owning user
+        res  = _supabase.auth.get_user(token)
+        user = getattr(res, "user", None)
+    except Exception as exc:
+        return None, (jsonify({"error": _auth_error_msg(exc)}), 401)
+    if not user:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    return user, None
+
+
+def _insert_project(user_id, name, page_count, estimated_value, boq_data, status):
+    """Insert a single project row owned by user_id and return the created row dict.
+
+    Shared by POST /projects and the auto-save step in /process so both write the
+    same shape. Raises on failure — callers decide whether that is fatal.
+    """
+    res = _supabase.table("projects").insert({
+        "user_id":         user_id,
+        "name":            name,
+        "page_count":      page_count,
+        "estimated_value": estimated_value,
+        "boq_data":        boq_data,
+        "status":          status,
+    }).execute()
+    # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
+    return res.data[0] if getattr(res, "data", None) else None
+
+
+def _sum_line_totals(boq_data) -> float:
+    """Sum every item's line_total across all trade groups in an enriched BoQ.
+
+    Mirrors the outer-shape normalisation in _enrich_boq so it works whether the
+    BoQ is a list of groups, a {bill_of_quantities: [...]} wrapper, or {trades: [...]}.
+    """
+    if isinstance(boq_data, dict):
+        groups = boq_data.get('bill_of_quantities') or boq_data.get('trades') or []
+    elif isinstance(boq_data, list):
+        groups = boq_data
+    else:
+        return 0.0
+
+    total = 0.0
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get('items') or group.get('line_items') or []):
+            if isinstance(item, dict):
+                total += float(item.get('line_total') or 0)
+    return round(total, 2)
 
 
 def _extract_claude_text(response) -> str:
@@ -125,12 +209,33 @@ SYSTEM_PROMPT = (
     "disposal quantities. Example: 45m² plan area → 45 × 0.15 = 6.75m³ excavation → "
     "6.75 × 1.30 = 8.78m³ disposal off site.\n"
 
+    # ── Wetroom tanking ───────────────────────────────────────────────────────
+    "- Wetroom tanking (rate_key: wetroom_tanking_system) is measured in m². "
+    "Measure the floor area plus wall area up to 1800mm height for all wetroom/shower "
+    "enclosure areas. Do not use qty: 1 for this item.\n"
+    "- WETROOM TANKING RULE: Wetroom tanking (rate_key: wetroom_tanking_system) is "
+    "measured in m². Measure the floor area plus wall area up to 1800mm height for "
+    "all wetroom and shower enclosure areas. Never set quantity to 1 for this item.\n"
+
     # ── Double-counting prevention ────────────────────────────────────────────
     "- DOUBLE-COUNTING RULE: Never measure the same physical work in both a composite item "
     "and a constituent item. For cavity walls: choose either a single composite item covering "
     "the full wall build-up (both leaves, insulation, ties) OR separate items for each "
     "component — never both. If you use a composite cavity wall item, do not add separate "
     "items for the outer leaf, inner leaf, or wall ties.\n"
+
+    # ── Plasterboard double-counting prevention ───────────────────────────────
+    "- Plasterboard double-counting prevention:\n"
+    "  * Stud partitions: the composite stud partition rate already includes "
+    "plasterboard to both faces. Never add separate plasterboard line items "
+    "for the faces of stud partitions. If a stud partition item exists, "
+    "plasterboard to that partition is already priced.\n"
+    "  * Dot-and-dab plasterboard to masonry: measure to one face only — the "
+    "masonry face receiving the board. Do not measure the reverse face.\n"
+    "  * Internal partitions of any construction type: never measure plasterboard "
+    "to both faces. One face only, always.\n"
+    "  * Ceiling plasterboard and plasterboard to external walls or soffits are "
+    "measured independently and are not affected by this rule.\n"
 
     # ── Missing trades checklist ──────────────────────────────────────────────
     "- MANDATORY TRADES CHECKLIST: For any residential extension or new build, you MUST "
@@ -144,6 +249,33 @@ SYSTEM_PROMPT = (
     "(5) structural steelwork — if the input references any SE or structural drawing; "
     "(6) internal door leaves — supply and hang, separate from door linings; "
     "(7) floor finishes — screed, tiling, or timber flooring.\n"
+    "- Always include a 5.41 Builder's Work in Connection with Services section. "
+    "This section covers all building work carried out solely to accommodate M&E "
+    "installations — not the M&E installation itself. "
+    "Classify items into 5.41 using the following categories:\n"
+    "  Penetrations — holes formed through walls, floors or ceilings for services to pass through:\n"
+    "    * Through masonry walls (nr) — rate_key: bwic_service_penetration_masonry\n"
+    "    * Through concrete floors or walls (nr) — rate_key: bwic_service_penetration_concrete\n"
+    "  Sleeves — cast-in or post-fixed service sleeves lining or protecting penetrations:\n"
+    "    * 100mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_100mm\n"
+    "    * 150mm diameter duct sleeve (nr) — rate_key: bwic_duct_sleeve_150mm\n"
+    "  Boxing-in — enclosing service risers, exposed ducts or pipe casings in timber and board:\n"
+    "    * Pipework boxed in timber framing and plasterboard (m) — rate_key: bwic_boxing_in_pipework_timber\n"
+    "  Fire stopping — sealing service penetrations through fire-rated compartment walls or floors:\n"
+    "    * Fire stopping to service penetration through compartment (nr) — rate_key: bwic_fire_stopping_penetration\n"
+    "  Making good — reinstating finishes around completed service installations:\n"
+    "    * Plaster or plasterboard around services (nr) — rate_key: bwic_making_good_plaster\n"
+    "    * Masonry around services (nr) — rate_key: bwic_making_good_masonry\n"
+    "  Chases — cutting service routes through masonry, including making good:\n"
+    "    * Chase in masonry for conduit or pipework (m) — rate_key: bwic_chase_masonry_small\n"
+    "BWIC NEGATIVE RULE: Do NOT classify MEP equipment installation itself as BWIC. "
+    "Boilers, radiators, pipework runs, ductwork, cable containment, luminaires, "
+    "distribution boards, consumer units, and all M&E equipment and wiring belong in "
+    "5.14 Mechanical services or 5.15 Electrical services. Only the associated building "
+    "work — the hole, sleeve, boxing-in, fire stop, or reinstatement around the service "
+    "— belongs in 5.41. Never duplicate a service item in both a services section and 5.41.\n"
+    "Scale quantities to the size of the project and complexity of M&E installations "
+    "described in the drawings. Never omit this section.\n"
 
     # ── UPVC surfaces ─────────────────────────────────────────────────────────
     # ── MEP measurement rule ──────────────────────────────────────────────────
@@ -155,22 +287,125 @@ SYSTEM_PROMPT = (
     "- UPVC RULE: Never include a paint or decoration line item for UPVC surfaces. UPVC "
     "windows, fascias, soffits, gutters, and downpipes are factory-finished and do not "
     "receive paint. Delete any such item before producing output.\n"
-    
 
     # ── NRM2 section numbering ────────────────────────────────────────────────
     "- NRM2 SECTION NUMBERING: Prefix every trade heading with its NRM2 work section "
-    "number. Use these mappings: 5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
+    "number. Every section must have a unique number — never reuse the same number for "
+    "two different trade headings. Use these exact mappings and no others: "
+    "1 Preliminaries and general conditions; "
+    "5.1 Groundworks; 5.4 In-situ concrete; 5.8 Masonry; "
     "5.9 Structural metalwork; 5.11 Carpentry and joinery; 5.12 Roofing; "
     "5.14 Mechanical services; 5.15 Electrical services; "
-    "5.17 Finishes (plastering, floor finishes, ceiling finishes); "
-    "5.20 Painting and decorating; 5.21 Drainage below ground.\n"
+    "5.17 Plastering and internal finishes; "
+    "5.18 Roof Coverings; 5.19 Waterproof Coverings; 5.20 Proprietary Linings; "
+    "5.21 Drainage below ground; "
+    "5.23 Windows and external doors; "
+    "5.28 Floor, Wall and Ceiling Finishes; 5.29 Decoration.\n"
+    "5.28 Floor finishes (tiling, screed, timber flooring); "
+    "5.31 Insulation; "
+    "5.35 External works — hard landscaping and site paving; "
+    "5.36 Fencing and gates; "
+    "5.37 Soft landscaping and planting; "
+    "5.41 Builder's Work in Connection with Services.\n"
+    "- PRELIMINARIES RULE: Preliminaries items (site establishment, supervision, welfare, "
+    "temporary services, insurance, health and safety, cleaning) belong in Section 1 "
+    "Preliminaries. Never include these items in the Measured Works sections (5.x). "
+    "If the input describes contractor overhead or site running cost items, do not measure "
+    "them — the Preliminaries section is a fixed structure in the PDF and is handled "
+    "separately from the measured works you are generating.\n"
+    "5.28 Floor, Wall and Ceiling Finishes; "
+    "5.41 Builder's Work in Connection with Services.\n"
+    "- External render, tyrolean render, monocouche render, sand and cement render, "
+    "polymer render, and all applied render finishes to external masonry walls belong "
+    "in section 5.8 Masonry — not 5.29 Decoration. Render is a structural "
+    "finish applied to the building fabric. Never classify render under painting or "
+    "decorating sections.\n"
+    "5.23 Windows, screens and lights; 5.24 Doors, shutters and hatches; "
+    "5.28 Floor, Wall and Ceiling Finishes; 5.29 Decoration; "
+    "5.31 Insulation; "
+    "5.41 Builder's work in connection with services.\n"
+
+    # ── NRM2 section detail mappings ─────────────────────────────────────────
+    "- NRM2 SECTION DETAIL MAPPINGS: Use the following guidance to distinguish between "
+    "sections with overlapping scope:\n"
+    "5.18 Roof Coverings: roof tiles, slates, ridge tiles, hip tiles, roof sheets, "
+    "profiled metal roof systems. Use for all pitched and flat roof coverings made of "
+    "discrete units or sheet materials.\n"
+    "5.19 Waterproof Coverings: single-ply membrane, felt roofing, liquid waterproofing, "
+    "flat roof membranes, roof waterproofing systems. Use for continuous membrane and "
+    "liquid-applied waterproofing systems. "
+    "Do not place roof waterproofing in 5.18.\n"
+    "5.20 Proprietary Linings: dry lining systems, proprietary wall systems, proprietary "
+    "ceiling systems, specialist lining systems. "
+    "Do not place proprietary lining systems in 5.28.\n"
+    "5.28 Floor, Wall and Ceiling Finishes: screeds, floor finishes, wall finishes, "
+    "ceiling finishes, tiling. "
+    "Do not place decorative coatings in 5.28. "
+    "Do not place proprietary lining systems in 5.28.\n"
+    "5.29 Decoration: painting, decorating, stains, varnishes, coatings.\n"
+    "Do not place insulation in the serving trade section — all insulation belongs in 5.31.\n"
+
+    # ── Windows and doors rule ────────────────────────────────────────────────
+    "- WINDOWS AND DOORS RULE: Always create separate trade sections for windows and doors. "
+    "Never combine them in a single section. "
+    "Window items include: window frames, glazing units, glazing beads, window boards, "
+    "ironmongery to windows, manifestation film. "
+    "Door items include: door sets, door leaves, door frames and linings, ironmongery to doors, "
+    "door closers, access control to doors. "
+    "If glazing is separately described as a standalone element (structural glazing, frameless glass, "
+    "glass balustrades), measure it under 5.23.\n"
+
+    # ── Insulation rule ───────────────────────────────────────────────────────
+    "- INSULATION RULE: All insulation items must be grouped together in a dedicated "
+    "5.31 Insulation section. Do not attach insulation items to the trade they serve. "
+    "The following all belong in 5.31, not in other sections: "
+    "cavity wall insulation (partial fill or full fill) — not in 5.8 Masonry; "
+    "roof insulation (between/over rafters, flat roof insulation board) — not in 5.12 Roofing, 5.18 Roof Coverings, or 5.19 Waterproof Coverings; "
+    "floor insulation (rigid insulation board below screed or slab) — not in 5.1 Groundworks; "
+    "acoustic insulation (between floors, party walls) — not in 5.8 or 5.11; "
+    "pipe and duct insulation lagging — not in 5.14 Mechanical services; "
+    "fire-rated insulation to structural elements — not in 5.9. "
+    "Always create a 5.31 Insulation section. If the specification does not describe insulation "
+    "types or thicknesses, insert a Provisional Sum under 5.31 labelled "
+    "'Thermal and acoustic insulation — specification not issued at tender stage; "
+    "contractor to include own allowance'.\n"
+
+    # ── External works rule ───────────────────────────────────────────────────
+    "- EXTERNAL WORKS RULE: Where external works are present, group all external "
+    "works items together in their own dedicated sections rather than scattering "
+    "them across unrelated building trades. "
+    "External works include: paving (block paving, tarmac, concrete slabs), "
+    "kerbs, roadways, car parks, footpaths, fencing, gates, landscaping, "
+    "planting, external drainage runs (above-ground surface water routes and "
+    "connections), retaining structures, external steps, hard landscaping, "
+    "soft landscaping, and reinstatement works.\n"
+    "Use these NRM2 section allocations for external works:\n"
+    "  5.35 External works — hard landscaping and site paving: block paving, "
+    "tarmac, concrete paving slabs, kerbs, roadways, car parks, footpaths, "
+    "retaining structures, external steps, hard landscaping, reinstatement.\n"
+    "  5.36 Fencing and gates: all fencing types, gates and barriers.\n"
+    "  5.37 Soft landscaping and planting: turf, seeding, planting, topsoil, "
+    "mulching, tree and shrub planting, soft landscaping.\n"
+    "External works sections must appear after all building works sections "
+    "(5.1 to 5.41) and before any provisional sums.\n"
+    "EXTERNAL DRAINAGE NOTE: External below-ground drainage (foul and surface "
+    "water drain runs, inspection chambers, manholes, rodding eyes, connections "
+    "to sewer) remains in 5.21 Drainage below ground. Do not move below-ground "
+    "drainage to 5.35.\n"
+    "EXTERNAL WORKS NEGATIVE RULE: Do not classify internal building elements "
+    "as external works. Internal floor finishes, internal staircases, internal "
+    "drainage, and internal paving (e.g. tiled floors) belong in their correct "
+    "building trade sections — not in 5.35, 5.36, or 5.37.\n"
 
     # ── Structural engineer references ────────────────────────────────────────
     "- STRUCTURAL ENGINEER RULE: If the input references a structural engineer's drawing "
     "or calculation sheet (any reference beginning SE-, S-, or described as structural), "
     "you MUST include a structural steelwork section or a Provisional Sum labelled "
     "'Structural steelwork — refer to SE drawings Ref: [X] — measure on receipt of "
-    "fabrication drawings'. Never silently omit structural elements.\n"
+    "fabrication drawings'. Never silently omit structural elements. "
+    "Structural steel beams must be measured in linear metres (m) "
+    "with the quantity being the beam span plus 300mm minimum "
+    "end bearing each side. Never measure a beam as 1 nr.\n"
 
     # ── Description format ────────────────────────────────────────────────────
     "- DESCRIPTION FORMAT: Write every item description in this pattern: "
@@ -184,17 +419,145 @@ SYSTEM_PROMPT = (
     "wall ties type 4 at 2.5/m²; 100mm dense blockwork inner leaf; Ref Drawing PL-03' "
     "— "
     "'Provisional Sum: Electrical installation first and second fix — electrical drawings "
-    "not issued at tender stage; contractor to include own allowance'.\n"
+    "not issued at tender stage; contractor to include own allowance'. "
+    "Where proprietary product names are referenced in "
+    "descriptions (for example Catnic, Hyload, Velux, Rockwool, "
+    "Kingspan, Celotex, or any other manufacturer or brand name), "
+    "always append 'or equal approved' immediately after the brand "
+    "name. Example: 'Hyload or equal approved; 150mm wide DPC'. "
+    "Never omit this qualifier when a brand name appears in a "
+    "bill description.\n"
+
+    # ── Provisional sum classification ────────────────────────────────────────
+    "- PROVISIONAL SUM CLASSIFICATION: Every provisional sum you generate must be "
+    "classified as either Defined or Undefined in accordance with NRM2:\n"
+    "DEFINED provisional sum: Use when the scope, location, and timing of the work "
+    "is known but the precise cost cannot be determined at tender. The contractor "
+    "is expected to include allowances in their programme and method statement. "
+    "Examples: specialist supplier installations, known future fit-out works, "
+    "named subcontractor packages where scope is described. "
+    "Output format: include a field 'ps_type': 'Defined'\n"
+    "UNDEFINED provisional sum: Use when the nature and extent of the work cannot "
+    "be foreseen at tender stage. The contractor makes no programme or preliminary "
+    "allowance. "
+    "Examples: archaeological investigations, unknown service diversions, "
+    "contingency allowances, unforeseen ground conditions. "
+    "Output format: include a field 'ps_type': 'Undefined'\n"
+    "Never output a provisional sum without a ps_type classification. If uncertain, "
+    "classify as Undefined.\n"
+
+    # ── Contractor Designed Portions ─────────────────────────────────────────
+    "- CONTRACTOR DESIGNED PORTION (CDP) RULE: Flag cdp=true where the contractor "
+    "is likely to carry design responsibility for the element. Typical examples include: "
+    "boilers, heating systems, underfloor heating, MVHR, ventilation systems, "
+    "fire alarm systems, electrical design packages, specialist glazing, solar PV systems, "
+    "and specialist building systems. "
+    "Where cdp=true, include a concise performance_requirement. "
+    "Examples: "
+    "'Provide system to achieve design flow rates.' — "
+    "'Provide system to manufacturer's performance criteria.' — "
+    "'Provide installation to achieve specified thermal performance.' "
+    "Do not mark ordinary measured building elements as CDP. "
+    "Omit cdp and performance_requirement entirely from items that are not CDP.\n"
+    # ── Tender Query and Assumptions Register ────────────────────────────────
+    "- TENDER QUERY AND ASSUMPTIONS RULE: Whenever information is incomplete, "
+    "inferred, or excluded, you MUST populate the top-level assumptions_register "
+    "array. Each entry must contain three fields: category (a short trade or topic "
+    "label, e.g. 'Roofing', 'Drainage', 'Structural'), description (a clear "
+    "statement of the assumption, query, or exclusion), and status (one of the "
+    "three values below).\n"
+    "  * Assumption — use when you have inferred information not explicitly stated "
+    "in the input. Example: category 'Roofing', description 'Roof structure assumed "
+    "timber trussed rafter construction', status 'Assumption'.\n"
+    "  * Clarification Required — use when information is missing and a decision "
+    "is needed before the BoQ can be finalised. Example: category 'Drainage', "
+    "description 'Drainage route not shown on drawings — confirm connection point "
+    "to existing sewer', status 'Clarification Required'.\n"
+    "  * Exclusion — use when an item is deliberately omitted from the priced works. "
+    "Example: category 'Specialist Surveys', description 'Specialist surveys "
+    "excluded from this tender — client to procure direct', status 'Exclusion'.\n"
+    "Do not generate entries where all information is fully confirmed by the input. "
+    "If no assumptions, clarifications, or exclusions apply, output an empty array "
+    "for assumptions_register.\n"
 
     # ── Standard fields ───────────────────────────────────────────────────────
     "- description is a human-readable label for the PDF output — write it clearly.\n"
     "- quantity is your professional QS estimate based on the specification.\n"
     "- unit must match the unit for that rate_key as listed.\n"
+    "- drawing_ref: If the input PDF contains drawing numbers, specification "
+    "references, or document revision codes, record the reference(s) this "
+    "item was measured from. Format as: 'Drawing [ref] Rev [rev]' or "
+    "'[ref1] / [ref2]' for multiple sources. If no drawing references are "
+    "visible in the input, omit this field entirely — do not invent references.\n"
+    "- dimension_string: Show the arithmetic used to derive the quantity. "
+    "Format as a readable calculation string. Examples: "
+    "'4.200m × 3.600m = 15.12m²' — "
+    "'(12.400m + 8.600m) × 2 = 42.000m perimeter' — "
+    "'45.0m² plan × 0.150m depth = 6.75m³ × 1.30 bulking = 8.78m³ disposal' — "
+    "'27.0m perimeter × 5.400m height = 145.8m² gross − 10.8m² openings = 135.0m² net'. "
+    "Always include this field. If a quantity is a single dimension with no "
+    "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
+    "item'. This field is mandatory for every line item.\n"
+
+    # ── Risk schedule ─────────────────────────────────────────────────────────
+    "- RISK SCHEDULE RULE: Generate a risk_schedule whenever the project contains "
+    "significant uncertainty. Risks must be construction-related only — do not "
+    "provide contractual or legal advice. Classify each risk as either Defined or "
+    "Undefined using the same NRM2 definitions as provisional sums. "
+    "For each risk include: description (what the risk is), risk_type (Defined or "
+    "Undefined), impact (consequence if the risk materialises, e.g. cost overrun, "
+    "programme delay), likelihood (Low / Medium / High), and mitigation (recommended "
+    "action to reduce or manage the risk). "
+    "Typical risks warranting inclusion: unknown ground conditions; unverified "
+    "drainage routes; existing services not confirmed on drawings; restricted "
+    "site access; partial or incomplete design information at tender stage; "
+    "unconfirmed structural elements. "
+    "Omit risk_schedule entirely if the specification is complete and no material "
+    "uncertainties are present.\n"
+    # ── NRM2 annexes ─────────────────────────────────────────────────────────
+    "- NRM2 ANNEXES RULE: Only populate the annexes object where supporting "
+    "information exists in the input. Do not invent quotations, utility "
+    "information, statutory undertaker requirements, or specialist "
+    "specifications. If none of the annex categories can be populated from "
+    "the available information, omit the annexes field entirely — do not "
+    "output an empty annexes object. Where applicable:\n"
+    "  * risk_notes may reference risks identified during measurement "
+    "(e.g. unknown ground conditions, existing service routes, structural "
+    "elements requiring specialist input).\n"
+    "  * contractor_designed_scope may reference any CDP (Contractor Designed "
+    "Portion) items identified in the drawings or specification.\n"
+    "  * schedules should list any supporting schedules or measurement "
+    "appendices derived from the input (e.g. door schedule, window schedule, "
+    "finishes schedule) only where the input contains that information.\n"
+    "  * performance_specifications should list performance-based requirements "
+    "only where the input explicitly states them.\n"
+    "  * quotations and statutory_undertaker_information must never be "
+    "invented; include only if the input contains actual quotation references "
+    "or named statutory undertaker requirements.\n"
+    # ── Document control ──────────────────────────────────────────────────────
+    "- DOCUMENT CONTROL RULE: When document-control information is known, populate "
+    "the following top-level fields in your output (all optional — omit only if "
+    "genuinely unknown):\n"
+    "  * revision: document revision letter, e.g. 'A'\n"
+    "  * issue_status: e.g. 'Tender Issue'\n"
+    "  * prepared_by: e.g. 'Vulcan Quanta'\n"
+    "  * checked_by: e.g. 'Professional Review Required'\n"
+    "  * intended_use: e.g. 'Tender Pricing'\n"
+    "Use the typical values above unless the input document states otherwise. "
+    "Do not invent project-specific revision information that is not in the input.\n"
+    "Respond with a single raw JSON object only — no markdown, no code fences, "
+    "no preamble, no trailing text. The root key must be bill_of_quantities "
+    "containing an array of trade groups, each with a trade string and an items array."
 )
 
 BOQ_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "revision":      {"type": "string", "description": "Document revision letter, e.g. 'A'."},
+        "issue_status":  {"type": "string", "description": "Issue status, e.g. 'Tender Issue'."},
+        "prepared_by":   {"type": "string", "description": "Name of the party that prepared this BoQ."},
+        "checked_by":    {"type": "string", "description": "Name of the party that checked this BoQ."},
+        "intended_use":  {"type": "string", "description": "Intended use of this document, e.g. 'Tender Pricing'."},
         "bill_of_quantities": {
             "type": "array",
             "items": {
@@ -213,6 +576,27 @@ BOQ_OUTPUT_SCHEMA = {
                                 },
                                 "quantity": {"type": "number"},
                                 "unit": {"type": "string"},
+                                "drawing_ref": {
+                                    "type": "string",
+                                    "description": "Drawing and specification references this item was measured from, e.g. 'A02 Rev P03 / SP Rev 04'",
+                                },
+                                "dimension_string": {
+                                    "type": "string",
+                                    "description": "Quantity derivation showing the measurement calculation, e.g. '27m × 5.4m = 145.8m² gross - 10.8m² openings = 135.0m² net'",
+                                },
+                                "cdp": {
+                                    "type": "boolean",
+                                    "description": "True where the contractor carries design responsibility for this element.",
+                                },
+                                "performance_requirement": {
+                                    "type": "string",
+                                    "description": "Concise performance specification for CDP items, e.g. 'Provide system to achieve design flow rates.'",
+                                },
+                                # This internal item_code is the future integration key for external QS software exporters.
+                                "item_code": {
+                                    "type": "string",
+                                    "description": "Internal codification key in {NRM2-section}/{sequence} format, e.g. '5.8/001'. Generated during enrichment.",
+                                },
                             },
                             "required": ["description", "rate_key", "quantity", "unit"],
                             "additionalProperties": False,
@@ -221,6 +605,74 @@ BOQ_OUTPUT_SCHEMA = {
                 },
                 "required": ["trade", "items"],
                 "additionalProperties": False,
+            },
+        },
+        "risk_schedule": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "risk_type": {
+                        "type": "string",
+                        "enum": ["Defined", "Undefined"],
+                    },
+                    "impact": {"type": "string"},
+                    "likelihood": {"type": "string"},
+                    "mitigation": {"type": "string"},
+                },
+            },
+        },
+        "annexes": {
+            "type": "object",
+            "properties": {
+                "schedules": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "performance_specifications": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "quotations": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "risk_notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "contractor_designed_scope": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+                "statutory_undertaker_information": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "additionalProperties": False,
+        },
+        "assumptions_register": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "description": {"type": "string"},
+                    "risk_type": {
+                        "type": "string",
+                        "enum": ["Defined", "Undefined"],
+                    },
+                    "impact": {"type": "string"},
+                    "likelihood": {"type": "string"},
+                    "mitigation": {"type": "string"},
+                    "category":    {"type": "string"},
+                    "description": {"type": "string"},
+                    "status": {
+                        "type": "string",
+                        "enum": ["Assumption", "Clarification Required", "Exclusion"],
+                    },
+                },
             },
         },
     },
@@ -293,6 +745,27 @@ def _match_rate(description):
     return None, None
 
 
+# Canonical NRM2 ordering improves consistency across projects and export formats.
+_NRM2_SECTION_ORDER: dict[str, int] = {
+    "5.1":  10,  "5.2":  20,  "5.4":  30,  "5.8":  40,
+    "5.9":  50,  "5.11": 60,  "5.12": 70,  "5.14": 80,
+    "5.15": 90,  "5.18": 100, "5.19": 110, "5.20": 120,
+    "5.21": 130, "5.23": 140, "5.24": 150, "5.28": 160,
+    "5.29": 170, "5.31": 180, "5.35": 190, "5.36": 200,
+    "5.37": 210, "5.41": 220,
+}
+
+_RE_NRM2_PREFIX = re.compile(r'^\s*(\d+(?:\.\d+)*)')
+
+
+def _nrm2_sort_key(group: dict) -> int:
+    """Return the canonical NRM2 sort position for a trade group; unknowns sort last."""
+    if not isinstance(group, dict):
+        return 9999
+    m = _RE_NRM2_PREFIX.match(group.get('trade') or '')
+    return _NRM2_SECTION_ORDER.get(m.group(1), 9999) if m else 9999
+
+
 def _enrich_boq(boq_data):
     """
     Walk the Claude JSON (regardless of its outer shape) and apply RATES_DB rates to
@@ -316,15 +789,26 @@ def _enrich_boq(boq_data):
     else:
         return boq_data                            # unexpected shape — pass through untouched
 
+    # This internal item_code is the future integration key for external QS software exporters.
+    section_counters = {}  # separate sequence counter per NRM2 section, e.g. {"5.8": 3, "5.1": 1}
+
     for group in groups:                           # iterate each trade section
         if not isinstance(group, dict):            # skip strings or other non-dict entries Claude may have included
             continue
         items = group.get('items') or group.get('line_items') or []
         if not isinstance(items, list):            # guard against items being a scalar or dict
             continue
+
+        # Extract the NRM2 section prefix from the trade heading (e.g. "5.8 Masonry" → "5.8")
+        trade_str = group.get('trade', '')
+        _section_match = re.match(r'^[\d.]+', trade_str.strip())
+        _section = _section_match.group() if _section_match else (trade_str.strip() or 'X')
+
         for item in items:                         # iterate each line item within the trade
             desc = item.get('description') or item.get('desc') or ''
             qty  = float(item.get('quantity') or item.get('qty') or 0)
+            item.setdefault('drawing_ref', '')
+            item.setdefault('dimension_string', '')
 
             # Prefer the rate_key Claude was instructed to output — direct O(1) lookup
             rate_key_direct = item.get('rate_key', '').strip()
@@ -356,6 +840,15 @@ def _enrich_boq(boq_data):
                 item['rate']                = 0.00
                 item['line_total']          = 0.00
                 item['rate_source']         = None
+
+            # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
+            # This internal item_code is the future integration key for external QS software exporters.
+            if not item.get('item_code'):
+                section_counters[_section] = section_counters.get(_section, 0) + 1
+                item['item_code'] = f"{_section}/{section_counters[_section]:03d}"
+
+    # Sort trade groups into canonical NRM2 section order.
+    groups.sort(key=_nrm2_sort_key)
 
     return boq_data   # return the same object so callers can chain: data = _enrich_boq(data)
 
@@ -444,6 +937,234 @@ def me():
     return jsonify({"email": session.get('user_email'), "user_id": session.get('user_id')}), 200
 
 
+# ── Project CRUD routes ───────────────────────────────────────────────────────────────
+
+@app.route("/projects", methods=["GET"])   # GET /projects lists the signed-in user's saved BoQs
+def get_projects():
+    user, err = _authenticated_user()       # verify the Bearer token and resolve the owning user
+    if err:
+        return err
+
+    # Auto-delete expired projects
+    try:
+        _supabase.rpc("delete_expired_projects", {"uid": user.id}).execute()
+    except Exception:
+        pass  # non-fatal — list still returns normally
+
+    try:
+        # Select every column except boq_data — the BoQ JSON is too large for a list view.
+        # order(..., desc=True) gives newest-first, like .OrderByDescending(p => p.CreatedAt) in C#.
+        res = (
+            _supabase.table("projects")
+            .select("id, user_id, name, page_count, estimated_value, status, created_at")
+            .eq("user_id", user.id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load projects: {exc}"}), 500
+
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects", methods=["POST"])   # POST /projects saves a new BoQ project for the user
+def create_project():
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    try:
+        row = _insert_project(
+            user_id=user.id,                                  # force ownership to the authenticated user
+            name=body.get("name"),
+            page_count=body.get("page_count"),
+            estimated_value=body.get("estimated_value"),
+            boq_data=body.get("boq_data"),
+            status=body.get("status"),
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to create project: {exc}"}), 500
+
+    return jsonify(row), 201
+
+
+@app.route("/projects/<project_id>", methods=["DELETE"])   # DELETE /projects/<id> removes one project
+def delete_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    try:
+        # The user_id filter guarantees a user can only delete their own project —
+        # a row owned by someone else simply matches nothing and yields a 404 below.
+        res = (
+            _supabase.table("projects")
+            .delete()
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to delete project: {exc}"}), 500
+
+    if not getattr(res, "data", None):       # no rows deleted → nothing matched id + owner
+        return jsonify({"error": "Project not found."}), 404
+
+    return "", 204                           # 204 No Content — deletion succeeded, no body
+
+
+@app.route("/projects/<project_id>", methods=["GET"])
+def get_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("projects")
+            .select("*")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load project: {exc}"}), 500
+    if not getattr(res, "data", None):
+        return jsonify({"error": "Project not found."}), 404
+    return jsonify(res.data), 200
+
+
+@app.route("/projects/<project_id>", methods=["PUT"])
+def update_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    body = request.get_json(force=True, silent=True) or {}
+    allowed = {"name", "description", "client_name", "contract_type",
+               "location_factor", "notes_for_ai", "auto_delete_days"}
+    updates = {k: v for k, v in body.items() if k in allowed}
+    if not updates:
+        return jsonify({"error": "No valid fields to update."}), 400
+    try:
+        res = (
+            _supabase.table("projects")
+            .update(updates)
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to update project: {exc}"}), 500
+    return jsonify(res.data[0] if res.data else {}), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["GET"])
+def get_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+    try:
+        res = (
+            _supabase.table("chat_messages")
+            .select("id, role, content, created_at")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load chat: {exc}"}), 500
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects/<project_id>/chat", methods=["POST"])
+def post_chat(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+    user_message = (body.get("message") or "").strip()
+    if not user_message:
+        return jsonify({"error": "Message is required."}), 400
+
+    # Load project for boq_data and notes_for_ai
+    try:
+        proj_res = (
+            _supabase.table("projects")
+            .select("boq_data, notes_for_ai, name, client_name, contract_type, location_factor")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .single()
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": "Project not found."}), 404
+
+    project = proj_res.data or {}
+
+    # Load last 20 messages for context
+    try:
+        hist_res = (
+            _supabase.table("chat_messages")
+            .select("role, content")
+            .eq("project_id", project_id)
+            .eq("user_id", user.id)
+            .order("created_at", desc=False)
+            .limit(20)
+            .execute()
+        )
+        history = hist_res.data or []
+    except Exception:
+        history = []
+
+    # Build system prompt
+    boq_summary = json.dumps(project["boq_data"], indent=None)[:6000] if project.get("boq_data") else ""
+
+    system = f"""You are a professional quantity surveyor assistant for the project '{project.get("name", "Unnamed")}' \
+(client: {project.get("client_name") or "not specified"}, contract: {project.get("contract_type") or "not specified"}, \
+location: {project.get("location_factor") or "Belfast"}).
+
+The following is the Bill of Quantities data for this project (NRM2-structured JSON):
+{boq_summary if boq_summary else "No BoQ has been generated yet for this project."}
+
+Answer questions about quantities, rates, costs, scope, and NRM2 structure. \
+Be concise and professional. Give specific figures from the BoQ where relevant.
+{("Additional instructions: " + project["notes_for_ai"]) if project.get("notes_for_ai") else ""}"""
+
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    messages.append({"role": "user", "content": user_message})
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
+
+    try:
+        chat_client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        response = chat_client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=1024,
+            system=system,
+            messages=messages,
+        )
+        assistant_reply = response.content[0].text
+    except Exception as exc:
+        return jsonify({"error": f"AI error: {exc}"}), 500
+
+    # Persist both turns — non-fatal if this fails
+    try:
+        _supabase.table("chat_messages").insert([
+            {"project_id": project_id, "user_id": user.id, "role": "user",      "content": user_message},
+            {"project_id": project_id, "user_id": user.id, "role": "assistant", "content": assistant_reply},
+        ]).execute()
+    except Exception:
+        pass
+
+    return jsonify({"reply": assistant_reply}), 200
+
+
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
     if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
@@ -476,7 +1197,7 @@ def process_pdf():                         # Flask calls this function when a ma
     if not api_key:                                 # fail fast with a clear message if the variable is missing
         return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
 
-    client = anthropic.Anthropic(api_key=api_key)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
+    client = anthropic.Anthropic(api_key=api_key, timeout=180.0)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
 
     try:
         app.logger.info(
@@ -487,9 +1208,10 @@ def process_pdf():                         # Flask calls this function when a ma
             len(full_text),
             len(full_text.split()),
         )
+        _t = time.time()
         response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
             model="claude-sonnet-4-6",             # the specific Claude model to use
-            max_tokens=12000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
+            max_tokens=16000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
             system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in Anthropic SDK (NOT a {"role":"system"} entry — that is the OpenAI convention)
             messages=[                             # messages is a list of conversation turns; here just one user turn with no prior history
                 {
@@ -497,13 +1219,10 @@ def process_pdf():                         # Flask calls this function when a ma
                     "content": full_text,          # the extracted PDF text is the entire user message for Claude to analyse
                 }
             ],
-            output_config={
-                "format": {
-                    "type": "json_schema",
-                    "schema": BOQ_OUTPUT_SCHEMA,
-                }
-            },
         )
+        _processing_times.append(round(time.time() - _t, 1))
+        if len(_processing_times) > 200:
+            _processing_times.pop(0)
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
         return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
@@ -533,6 +1252,25 @@ def process_pdf():                         # Flask calls this function when a ma
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
     print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
+
+    # Auto-save the completed BoQ as a project for the authenticated user.
+    # This is best-effort: any failure is logged but never surfaced to the caller,
+    # so a save problem can't turn a successful BoQ generation into an error response.
+    try:
+        user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
+        user     = getattr(user_res, "user", None) if user_res else None
+        if user:
+            project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
+            _insert_project(
+                user_id=user.id,
+                name=project_name,
+                page_count=len(pages_text),                # one entry in pages_text per PDF page
+                estimated_value=_sum_line_totals(boq_data),  # total of every line_total in the enriched BoQ
+                boq_data=boq_data,
+                status='completed',
+            )
+    except Exception as exc:
+        app.logger.warning("Failed to auto-save project from /process: %s", exc)
 
     return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
 
