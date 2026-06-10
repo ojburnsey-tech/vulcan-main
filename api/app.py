@@ -86,6 +86,69 @@ def _get_bearer_token() -> str:
     return ''
 
 
+def _authenticated_user():
+    """Resolve the Supabase user from the Bearer token.
+
+    Returns (user, None) on success, or (None, (response, status)) on failure so
+    callers can `return error` immediately — like a TryGetUser out-pattern in C#.
+    """
+    if not _supabase:
+        return None, (jsonify({"error": "Auth not configured — set SUPABASE_URL and SUPABASE_ANON_KEY."}), 503)
+    token = _get_bearer_token()
+    if not token:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    try:
+        # get_user validates the JWT against Supabase and returns the owning user
+        res  = _supabase.auth.get_user(token)
+        user = getattr(res, "user", None)
+    except Exception as exc:
+        return None, (jsonify({"error": _auth_error_msg(exc)}), 401)
+    if not user:
+        return None, (jsonify({"error": "Authentication required. Please sign in."}), 401)
+    return user, None
+
+
+def _insert_project(user_id, name, page_count, estimated_value, boq_data, status):
+    """Insert a single project row owned by user_id and return the created row dict.
+
+    Shared by POST /projects and the auto-save step in /process so both write the
+    same shape. Raises on failure — callers decide whether that is fatal.
+    """
+    res = _supabase.table("projects").insert({
+        "user_id":         user_id,
+        "name":            name,
+        "page_count":      page_count,
+        "estimated_value": estimated_value,
+        "boq_data":        boq_data,
+        "status":          status,
+    }).execute()
+    # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
+    return res.data[0] if getattr(res, "data", None) else None
+
+
+def _sum_line_totals(boq_data) -> float:
+    """Sum every item's line_total across all trade groups in an enriched BoQ.
+
+    Mirrors the outer-shape normalisation in _enrich_boq so it works whether the
+    BoQ is a list of groups, a {bill_of_quantities: [...]} wrapper, or {trades: [...]}.
+    """
+    if isinstance(boq_data, dict):
+        groups = boq_data.get('bill_of_quantities') or boq_data.get('trades') or []
+    elif isinstance(boq_data, list):
+        groups = boq_data
+    else:
+        return 0.0
+
+    total = 0.0
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get('items') or group.get('line_items') or []):
+            if isinstance(item, dict):
+                total += float(item.get('line_total') or 0)
+    return round(total, 2)
+
+
 def _extract_claude_text(response) -> str:
     """Join all text blocks returned by Claude into one response string."""
     return "".join(
@@ -852,6 +915,78 @@ def me():
     return jsonify({"email": session.get('user_email'), "user_id": session.get('user_id')}), 200
 
 
+# ── Project CRUD routes ───────────────────────────────────────────────────────────────
+
+@app.route("/projects", methods=["GET"])   # GET /projects lists the signed-in user's saved BoQs
+def get_projects():
+    user, err = _authenticated_user()       # verify the Bearer token and resolve the owning user
+    if err:
+        return err
+
+    try:
+        # Select every column except boq_data — the BoQ JSON is too large for a list view.
+        # order(..., desc=True) gives newest-first, like .OrderByDescending(p => p.CreatedAt) in C#.
+        res = (
+            _supabase.table("projects")
+            .select("id, user_id, name, page_count, estimated_value, status, created_at")
+            .eq("user_id", user.id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to load projects: {exc}"}), 500
+
+    return jsonify(res.data or []), 200
+
+
+@app.route("/projects", methods=["POST"])   # POST /projects saves a new BoQ project for the user
+def create_project():
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+
+    try:
+        row = _insert_project(
+            user_id=user.id,                                  # force ownership to the authenticated user
+            name=body.get("name"),
+            page_count=body.get("page_count"),
+            estimated_value=body.get("estimated_value"),
+            boq_data=body.get("boq_data"),
+            status=body.get("status"),
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to create project: {exc}"}), 500
+
+    return jsonify(row), 201
+
+
+@app.route("/projects/<project_id>", methods=["DELETE"])   # DELETE /projects/<id> removes one project
+def delete_project(project_id):
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    try:
+        # The user_id filter guarantees a user can only delete their own project —
+        # a row owned by someone else simply matches nothing and yields a 404 below.
+        res = (
+            _supabase.table("projects")
+            .delete()
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .execute()
+        )
+    except Exception as exc:
+        return jsonify({"error": f"Failed to delete project: {exc}"}), 500
+
+    if not getattr(res, "data", None):       # no rows deleted → nothing matched id + owner
+        return jsonify({"error": "Project not found."}), 404
+
+    return "", 204                           # 204 No Content — deletion succeeded, no body
+
+
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
     if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
@@ -935,6 +1070,25 @@ def process_pdf():                         # Flask calls this function when a ma
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
 
     print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
+
+    # Auto-save the completed BoQ as a project for the authenticated user.
+    # This is best-effort: any failure is logged but never surfaced to the caller,
+    # so a save problem can't turn a successful BoQ generation into an error response.
+    try:
+        user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
+        user     = getattr(user_res, "user", None) if user_res else None
+        if user:
+            project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
+            _insert_project(
+                user_id=user.id,
+                name=project_name,
+                page_count=len(pages_text),                # one entry in pages_text per PDF page
+                estimated_value=_sum_line_totals(boq_data),  # total of every line_total in the enriched BoQ
+                boq_data=boq_data,
+                status='completed',
+            )
+    except Exception as exc:
+        app.logger.warning("Failed to auto-save project from /process: %s", exc)
 
     return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
 
