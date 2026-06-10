@@ -1541,6 +1541,7 @@ function ProjectSetupPage({ go, toast }) {
   };
 
   return (
+    <div style={{ background: 'var(--vd-bg, #0f1117)', minHeight: '100vh' }}>
     <div className="vd-root">
       <AppSidebar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main">
@@ -1612,6 +1613,7 @@ function ProjectSetupPage({ go, toast }) {
 
         </div>
       </div>
+    </div>
     </div>
   );
 }
