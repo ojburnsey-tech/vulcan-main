@@ -1148,24 +1148,35 @@ function SignUpPage({ go, toast, plan = 'pro' }) {
   );
 }
 
+// Persists across SignInPage unmount/remount within the same browser session.
+// Set to true when the video plays to completion; checked on every mount.
+let heroPlayed = false;
+
 // ─── SIGN IN ───────────────────────────────────────────────────────────────────────
 function SignInPage({ go, toast, user }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
   const [error, setError]       = useState('');
-  const [dockVisible, setDockVisible] = useState(false);
+  // Initialise from heroPlayed so returning visitors see the dock immediately,
+  // with no post-mount state update or visible flicker.
+  const [dockVisible, setDockVisible] = useState(heroPlayed);
   const videoRef = useRef(null);
 
   useEffect(() => {
-    // Explicitly call play() — React virtual-DOM navigation doesn't re-trigger
-    // the browser's native autoplay from the attribute alone.
+    // Video already played this session — dock is visible via initial state, nothing to do.
+    if (heroPlayed) return;
+
     const video = videoRef.current;
     if (video) {
+      // Record when the video finishes so subsequent mounts skip it.
+      video.addEventListener('ended', () => { heroPlayed = true; }, { once: true });
+      // Play immediately if enough data is buffered, otherwise wait for canplaythrough.
+      const playVideo = () => video.play().catch(() => {});
       if (video.readyState >= 3) {
-        video.play().catch(() => {});
+        playVideo();
       } else {
-        video.addEventListener('canplaythrough', () => video.play().catch(() => {}), { once: true });
+        video.addEventListener('canplaythrough', playVideo, { once: true });
       }
     }
     // Dock slides up automatically after 4 s, no interaction required.
@@ -1205,21 +1216,23 @@ function SignInPage({ go, toast, user }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#080706', overflow: 'hidden' }}>
-      {/* Fullscreen hero video — autoplays, muted, no loop; freezes on last frame */}
-      <video
-        ref={videoRef}
-        src="hero.mp4"
-        autoPlay
-        muted
-        playsInline
-        preload="auto"
-        poster="logo.png"
-        style={{
-          position: 'absolute', inset: 0, width: '100%', height: '100%',
-          objectFit: 'cover', zIndex: 0,
-        }}
-        aria-hidden="true"
-      />
+      {/* Video only on first visit — skipped once heroPlayed is true */}
+      {!heroPlayed && (
+        <video
+          ref={videoRef}
+          src="hero.mp4"
+          autoPlay
+          muted
+          playsInline
+          preload="auto"
+          poster="logo.png"
+          style={{
+            position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+            objectFit: 'cover', zIndex: 0,
+          }}
+          aria-hidden="true"
+        />
+      )}
       {/* Dark overlay to improve text contrast */}
       <div style={{
         position: 'absolute', inset: 0,

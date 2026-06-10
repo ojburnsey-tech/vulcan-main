@@ -919,7 +919,15 @@
     .signin-dock.dock-visible { transform: translateX(-50%) translateY(0); }
 
     /* ── Auth card glassmorphism (signin, signup, forgot, reset) ─────────── */
-    .signin-pg { background: #131619 !important; }
+    /* Fixed full-screen dark background for all auth screens — matches the
+       video-end frame so there's no jarring transition when navigating between them. */
+    .signin-pg {
+      position: fixed !important;
+      inset: 0 !important;
+      min-height: unset !important;
+      background: #080706 !important;
+      overflow-y: auto;
+    }
     .signin-card {
       background: rgba(29,33,39,0.65) !important;
       backdrop-filter: blur(20px) saturate(1.2);
