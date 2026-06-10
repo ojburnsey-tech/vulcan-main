@@ -1475,6 +1475,129 @@ function SettingsPage({ go, toast }) {
   );
 }
 
+// ─── PROJECT SETUP ────────────────────────────────────────────────────────────────
+const CONTRACT_TYPES = ['JCT Standard','JCT Design & Build','NEC3','NEC4','CIJC','Minor Works','Cost Plus','Framework'];
+const LOCATION_FACTORS = ['Belfast','Londonderry','Dublin','London','Manchester','Birmingham','Edinburgh','Glasgow','Cardiff','Bristol'];
+const DELETE_OPTIONS = [
+  { label: 'Never',   value: null },
+  { label: '30 days', value: 30 },
+  { label: '60 days', value: 60 },
+  { label: '90 days', value: 90 },
+  { label: '180 days', value: 180 },
+  { label: '1 year',  value: 365 },
+];
+
+function ProjectSetupPage({ go, toast }) {
+  const [form, setForm] = React.useState({
+    name: '',
+    client_name: '',
+    contract_type: 'JCT Standard',
+    location_factor: 'Belfast',
+    notes_for_ai: '',
+    auto_delete_days: null,
+    description: '',
+  });
+  const [saving, setSaving] = React.useState(false);
+
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { toast('Project name is required.', 'error'); return; }
+    setSaving(true);
+    try {
+      const token = (await window._supabase?.auth?.getSession())?.data?.session?.access_token;
+      const res = await fetch(`${VQ_API}/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ ...form, status: 'draft' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create project');
+      toast('Project created.', 'success');
+      go('workspace', { projectId: data.id });
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <div className="vd-main">
+        <div className="vd-topbar">
+          <span className="vd-section-title">New Project</span>
+          <span className="vd-link" onClick={() => go('dashboard')}>← Back to dashboard</span>
+        </div>
+        <div style={{ maxWidth: 640, margin: '0 auto', padding: '32px 24px' }}>
+
+          {/* Name */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Project name <span style={{color:'var(--amber)'}}>*</span></label>
+            <input className="finp" placeholder="e.g. Elmwood Avenue — New Build" value={form.name} onChange={e => set('name', e.target.value)} />
+          </div>
+
+          {/* Client */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Client name</label>
+            <input className="finp" placeholder="e.g. Apex Developments Ltd" value={form.client_name} onChange={e => set('client_name', e.target.value)} />
+          </div>
+
+          {/* Description */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Description</label>
+            <textarea className="finp" rows={3} placeholder="Brief project scope or notes" value={form.description} onChange={e => set('description', e.target.value)} style={{ resize: 'vertical', minHeight: 80 }} />
+          </div>
+
+          {/* Contract + Location row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+            <div className="fld">
+              <label className="flbl">Contract type</label>
+              <select className="finp" value={form.contract_type} onChange={e => set('contract_type', e.target.value)}>
+                {CONTRACT_TYPES.map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="fld">
+              <label className="flbl">Location</label>
+              <select className="finp" value={form.location_factor} onChange={e => set('location_factor', e.target.value)}>
+                {LOCATION_FACTORS.map(l => <option key={l}>{l}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* AI instructions */}
+          <div className="fld" style={{ marginBottom: 20 }}>
+            <label className="flbl">Standing instructions for AI</label>
+            <textarea className="finp" rows={4} placeholder="e.g. Always use CIJC wage rates. Flag any provisional sums above £10,000. This project excludes external works." value={form.notes_for_ai} onChange={e => set('notes_for_ai', e.target.value)} style={{ resize: 'vertical', minHeight: 100 }} />
+            <p style={{ fontSize: 12, color: 'var(--c-400)', marginTop: 6 }}>These instructions are passed to the AI on every BoQ generation and chat message for this project.</p>
+          </div>
+
+          {/* Auto-delete */}
+          <div className="fld" style={{ marginBottom: 32 }}>
+            <label className="flbl">Auto-delete project after</label>
+            <select className="finp" value={form.auto_delete_days ?? ''} onChange={e => set('auto_delete_days', e.target.value === '' ? null : Number(e.target.value))}>
+              {DELETE_OPTIONS.map(o => <option key={String(o.value)} value={o.value ?? ''}>{o.label}</option>)}
+            </select>
+            <p style={{ fontSize: 12, color: 'var(--c-400)', marginTop: 6 }}>All project data including drawings, BoQ, and chat history will be permanently deleted. GDPR compliant.</p>
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button className="btn btn-amber btn-pill" onClick={handleCreate} disabled={saving} style={{ flex: 1 }}>
+              {saving ? 'Creating…' : 'Create project →'}
+            </button>
+            <button className="btn btn-outline btn-pill" onClick={() => go('dashboard')} disabled={saving}>
+              Cancel
+            </button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SIGN UP ───────────────────────────────────────────────────────────────────────
 function SignUpPage({ go, toast, plan = 'pro' }) {
   const [selectedPlan, setSelectedPlan] = useState(plan);
