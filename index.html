@@ -1166,7 +1166,7 @@ const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upl
 const PROTECTED = ['dashboard','settings','results','upload'];
 
 function App() {
-  const [page, setPage]               = useState('landing');
+  const [page, setPage]               = useState('signin');
   const [toasts, setToasts]           = useState([]);
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1217,7 +1217,7 @@ function App() {
         setPage('resetpassword');
         window.scrollTo({ top: 0, behavior: 'instant' });
       } else if (event === 'SIGNED_OUT') {
-        setPage('landing');
+        setPage('signin');
         window.scrollTo({ top: 0, behavior: 'instant' });
       }
     });
@@ -1288,12 +1288,12 @@ function App() {
   const showChrome = !CHROME_EXCLUDED.includes(page);
 
   const pages = {
-    landing:        <LandingPage        go={go} tweaks={t} toast={toast} />,
+    // landing:     <LandingPage        go={go} tweaks={t} toast={toast} />,
     results:        <ResultsPage        go={go} toast={toast} boqData={boqData} />,
     dashboard:      <DashboardPage      go={go} toast={toast} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} />,
-    signin:         <SignInPage         go={go} toast={toast} />,
+    signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,
     forgotpassword: <ForgotPasswordPage go={go} toast={toast} />,
@@ -1305,7 +1305,7 @@ function App() {
     <>
       {!CHROME_EXCLUDED.includes(page) && <AnnouncementBar go={go} />}
       {showChrome && <Header page={page} go={go} toast={toast} user={user} />}
-      <main>{pages[page] || pages.landing}</main>
+      <main>{pages[page] || pages.signin}</main>
       {showChrome && <Footer go={go} />}
       <ToastContainer toasts={toasts} />
       <TweaksPanel>

@@ -1149,7 +1149,7 @@ function SignUpPage({ go, toast, plan = 'pro' }) {
 }
 
 // ─── SIGN IN ───────────────────────────────────────────────────────────────────────
-function SignInPage({ go, toast }) {
+function SignInPage({ go, toast, user }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading]   = useState(false);
@@ -1232,41 +1232,55 @@ function SignInPage({ go, toast }) {
           <img src="logo-transparent.png" alt="Vulcan Quanta"
             style={{ height: '40px', marginBottom: '28px', cursor: 'pointer', display: 'block' }}
             onClick={() => go('landing')} />
-          <h1 className="signin-h">Sign in</h1>
-          <p className="signin-sub" style={{ marginBottom: '24px' }}>Welcome back.</p>
 
-          {error && <div className="auth-err" role="alert">{error}</div>}
+          {user ? (
+            <>
+              <h1 className="signin-h">Welcome back.</h1>
+              <p className="signin-sub" style={{ marginBottom: '32px' }}>You're already signed in.</p>
+              <button className="btn btn-amber btn-pill" style={{ width: '100%' }}
+                onClick={() => go('dashboard')}>
+                Enter Dashboard →
+              </button>
+            </>
+          ) : (
+            <>
+              <h1 className="signin-h">Sign in</h1>
+              <p className="signin-sub" style={{ marginBottom: '24px' }}>Welcome back.</p>
 
-          <form onSubmit={handleSubmit} noValidate>
-            <div className="fld" style={{ marginBottom: '14px' }}>
-              <label className="flbl" htmlFor="si-email">Email address</label>
-              <input id="si-email" className="finp" type="email" placeholder="you@example.com"
-                value={email} onChange={e => setEmail(e.target.value)}
-                autoComplete="email" required autoFocus />
-            </div>
-            <div className="fld" style={{ marginBottom: '24px' }}>
-              <label className="flbl" htmlFor="si-pw">Password</label>
-              <input id="si-pw" className="finp" type="password" placeholder="••••••••"
-                value={password} onChange={e => setPassword(e.target.value)}
-                autoComplete="current-password" required />
-            </div>
-            <button className="btn btn-amber btn-pill" style={{ width: '100%' }}
-              type="submit" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+              {error && <div className="auth-err" role="alert">{error}</div>}
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '18px', fontSize: '13px' }}>
-            <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}
-              onClick={() => go('landing')}>← Home</span>
-            <span style={{ color: 'var(--amber)', cursor: 'pointer' }}
-              onClick={() => go('forgotpassword')}>Forgot password?</span>
-          </div>
-          <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>
-            No account?{' '}
-            <span style={{ color: 'var(--amber)', fontWeight: 600, cursor: 'pointer' }}
-              onClick={() => go('signup')}>Start free →</span>
-          </p>
+              <form onSubmit={handleSubmit} noValidate>
+                <div className="fld" style={{ marginBottom: '14px' }}>
+                  <label className="flbl" htmlFor="si-email">Email address</label>
+                  <input id="si-email" className="finp" type="email" placeholder="you@example.com"
+                    value={email} onChange={e => setEmail(e.target.value)}
+                    autoComplete="email" required autoFocus />
+                </div>
+                <div className="fld" style={{ marginBottom: '24px' }}>
+                  <label className="flbl" htmlFor="si-pw">Password</label>
+                  <input id="si-pw" className="finp" type="password" placeholder="••••••••"
+                    value={password} onChange={e => setPassword(e.target.value)}
+                    autoComplete="current-password" required />
+                </div>
+                <button className="btn btn-amber btn-pill" style={{ width: '100%' }}
+                  type="submit" disabled={loading}>
+                  {loading ? 'Signing in…' : 'Sign in'}
+                </button>
+              </form>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '18px', fontSize: '13px' }}>
+                <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}
+                  onClick={() => go('landing')}>← Home</span>
+                <span style={{ color: 'var(--amber)', cursor: 'pointer' }}
+                  onClick={() => go('forgotpassword')}>Forgot password?</span>
+              </div>
+              <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>
+                No account?{' '}
+                <span style={{ color: 'var(--amber)', fontWeight: 600, cursor: 'pointer' }}
+                  onClick={() => go('signup')}>Start free →</span>
+              </p>
+            </>
+          )}
         </div>
       </div>
     </div>
