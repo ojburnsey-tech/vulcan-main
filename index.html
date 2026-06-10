@@ -21,7 +21,7 @@
   <script type="text/babel" src="vq-pages.jsx"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     /* ── RESET ────────────────────────────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -871,6 +871,271 @@
         pointer-events: auto;
       }
     }
+
+    /* ═══════════════════════════════════════════════════════════════════════
+       REDESIGN — Cinzel headings · Video intro login · Glassmorphism app
+    ═══════════════════════════════════════════════════════════════════════ */
+
+    /* ── Cinzel as primary heading font ─────────────────────────────────── */
+    :root { --font-d: 'Cinzel', 'DM Sans', sans-serif; }
+
+    /* ── Login page: video intro title ──────────────────────────────────── */
+    .signin-vq-title {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-family: 'Cinzel', 'Trajan Pro', serif;
+      font-size: clamp(3rem, 6vw, 6rem);
+      font-weight: 700;
+      color: white;
+      letter-spacing: 0.3em;
+      text-align: center;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 1.5s ease;
+      pointer-events: none;
+      z-index: 5;
+      text-shadow: 0 4px 40px rgba(0,0,0,0.55);
+    }
+    .signin-vq-title.visible { opacity: 1; }
+
+    /* Login dock — slides up from below after 4 s */
+    .signin-dock {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%) translateY(110%);
+      width: 100%;
+      max-width: 460px;
+      padding: 0 24px 48px;
+      z-index: 10;
+      transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .signin-dock.dock-visible { transform: translateX(-50%) translateY(0); }
+
+    /* ── Auth card glassmorphism (signin, signup, forgot, reset) ─────────── */
+    .signin-pg { background: #131619 !important; }
+    .signin-card {
+      background: rgba(29,33,39,0.65) !important;
+      backdrop-filter: blur(20px) saturate(1.2);
+      -webkit-backdrop-filter: blur(20px) saturate(1.2);
+      border: 1px solid rgba(255,255,255,0.08) !important;
+      box-shadow: 0 32px 80px rgba(0,0,0,0.5) !important;
+    }
+    .signin-card .signin-h   { color: white !important; }
+    .signin-card .signin-sub { color: rgba(255,255,255,0.48) !important; }
+    .signin-card .flbl       { color: rgba(255,255,255,0.62) !important; }
+    .signin-card .finp {
+      background: rgba(255,255,255,0.07) !important;
+      border-color: rgba(255,255,255,0.11) !important;
+      color: white !important;
+    }
+    .signin-card .finp::placeholder { color: rgba(255,255,255,0.28) !important; }
+    .signin-card .finp:focus {
+      border-color: rgba(249,115,22,0.55) !important;
+      box-shadow: 0 0 0 3px rgba(249,115,22,0.12) !important;
+      background: rgba(255,255,255,0.09) !important;
+    }
+    /* Dropdown chevron stays visible on dark background */
+    .signin-card select.finp {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='7' viewBox='0 0 12 7'%3E%3Cpath fill='%2394A3B8' d='M0 0h12L6 7z'/%3E%3C/svg%3E") !important;
+      background-repeat: no-repeat !important;
+      background-position: right 12px center !important;
+      background-color: rgba(255,255,255,0.07) !important;
+    }
+
+    /* ── App shell ───────────────────────────────────────────────────────── */
+    .app-wrap {
+      display: flex;
+      min-height: 100vh;
+      background: #1d2127;
+    }
+    .app-main { flex: 1; overflow: auto; min-width: 0; }
+
+    /* ── Sidebar ─────────────────────────────────────────────────────────── */
+    .app-side {
+      width: 240px;
+      flex-shrink: 0;
+      background: rgba(29,33,39,0.8);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-right: 1px solid rgba(255,255,255,0.07);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+    }
+    .app-side-logo {
+      padding: 20px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .app-side-lbl {
+      padding: 18px 20px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.22);
+    }
+    .app-side-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 20px;
+      font-size: 14px;
+      font-weight: 500;
+      color: rgba(255,255,255,0.5);
+      cursor: pointer;
+      transition: all var(--t);
+      border-left: 3px solid transparent;
+      user-select: none;
+    }
+    .app-side-item:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.88); }
+    .app-side-item.active {
+      background: rgba(249,115,22,0.09);
+      color: white;
+      border-left-color: var(--amber);
+      font-weight: 600;
+    }
+    .app-side-bottom {
+      margin-top: auto;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding: 8px 0;
+    }
+
+    /* ── Override old dash sidebar (replaced by app-side) ───────────────── */
+    .dash-wrap { background: #1d2127 !important; }
+    .dash-side  { display: none !important; }
+    .dash-main  { color: rgba(255,255,255,0.85); background: transparent !important; }
+    .dash-h1    { color: white !important; }
+
+    /* ── Post-login page backgrounds ────────────────────────────────────── */
+    .res-wrap    { background: #1d2127 !important; }
+    .upload-page { background: #1d2127 !important; padding-top: 0 !important; }
+
+    /* ── Glass cards ─────────────────────────────────────────────────────── */
+    .scard {
+      background: rgba(29,33,39,0.6) !important;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.08) !important;
+      box-shadow: none !important;
+    }
+    .scard-title {
+      color: white !important;
+      border-color: rgba(255,255,255,0.08) !important;
+    }
+    .scard .flbl { color: rgba(255,255,255,0.62) !important; }
+    .scard .finp {
+      background: rgba(255,255,255,0.06) !important;
+      border-color: rgba(255,255,255,0.11) !important;
+      color: white !important;
+    }
+    .scard .finp::placeholder { color: rgba(255,255,255,0.28) !important; }
+    .scard .finp:focus {
+      border-color: rgba(249,115,22,0.5) !important;
+      box-shadow: 0 0 0 3px rgba(249,115,22,0.12) !important;
+      background: rgba(255,255,255,0.09) !important;
+    }
+    .scard .btn-outline {
+      border-color: rgba(255,255,255,0.18) !important;
+      color: rgba(255,255,255,0.6) !important;
+    }
+    .scard .btn-outline:hover {
+      border-color: rgba(255,255,255,0.38) !important;
+      color: white !important;
+      background: rgba(255,255,255,0.06) !important;
+    }
+    .scard .btn-ghost { color: rgba(255,255,255,0.5) !important; }
+    .scard .btn-ghost:hover { color: white !important; }
+
+    /* ── Empty state ─────────────────────────────────────────────────────── */
+    .empty-state {
+      background: rgba(29,33,39,0.6) !important;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.08) !important;
+      box-shadow: none !important;
+    }
+    .empty-h { color: white !important; }
+    .empty-p { color: rgba(255,255,255,0.45) !important; }
+    .empty-icon { background: rgba(255,255,255,0.07) !important; }
+    .demo-lnk { color: var(--amber) !important; }
+    .demo-lnk:hover { color: var(--amber-d) !important; }
+
+    /* ── Upload zone ─────────────────────────────────────────────────────── */
+    .upload-zone {
+      background: rgba(29,33,39,0.55) !important;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-color: rgba(255,255,255,0.12) !important;
+    }
+    .upload-zone:hover, .upload-zone.drag {
+      border-color: var(--amber) !important;
+      background: rgba(249,115,22,0.06) !important;
+    }
+    .upload-h   { color: white !important; }
+    .upload-sub { color: rgba(255,255,255,0.42) !important; }
+    .upload-status {
+      background: rgba(29,33,39,0.55) !important;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-color: rgba(255,255,255,0.08) !important;
+    }
+
+    /* ── Results page ────────────────────────────────────────────────────── */
+    .res-title  { color: white !important; }
+    .res-back   { color: var(--amber) !important; }
+    .res-meta   { color: rgba(255,255,255,0.42) !important; }
+    .conf-lbl   { color: rgba(255,255,255,0.65) !important; }
+    .conf-pct   { color: white !important; }
+    .conf-note  { color: rgba(255,255,255,0.38) !important; }
+    .res-disclaimer {
+      background: rgba(29,33,39,0.5) !important;
+      border-color: rgba(255,255,255,0.07) !important;
+      color: rgba(255,255,255,0.35) !important;
+    }
+
+    /* BoQ table — dark glass */
+    .rboq {
+      background: rgba(29,33,39,0.65) !important;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255,255,255,0.08) !important;
+      box-shadow: none !important;
+    }
+    .rboq thead th {
+      background: rgba(15,20,28,0.7) !important;
+      color: rgba(255,255,255,0.38) !important;
+      border-color: rgba(255,255,255,0.07) !important;
+    }
+    .rboq .rboq-trade { background: rgba(8,14,24,0.85) !important; }
+    .rboq .rboq-trade td { color: white !important; }
+    .rboq .rboq-item td {
+      color: rgba(255,255,255,0.62) !important;
+      border-color: rgba(255,255,255,0.04) !important;
+    }
+    .rboq .rboq-item:hover td { background: rgba(255,255,255,0.04) !important; }
+    .rboq .rboq-item.alt { background: rgba(255,255,255,0.02) !important; }
+    .rboq .rboq-sub td {
+      background: rgba(255,255,255,0.06) !important;
+      color: rgba(255,255,255,0.72) !important;
+      border-color: rgba(255,255,255,0.09) !important;
+    }
+    .rboq .rboq-sub-main td { background: rgba(255,255,255,0.10) !important; }
+    .rboq .rboq-total td { background: rgba(8,14,24,0.92) !important; }
+    .edit-inp { color: rgba(255,255,255,0.62) !important; }
+    .edit-inp:focus { background: rgba(255,255,255,0.08) !important; }
+
+    /* ── Mobile: collapse sidebar ────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      .app-side { display: none; }
+    }
   </style>
 </head>
 <body>
@@ -891,7 +1156,7 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 }/*EDITMODE-END*/;
 
 // Pages that have no Header/Footer chrome
-const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings',
+const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
                          'forgotpassword','checkemail','resetpassword'];
 
 // Pages that require an authenticated session

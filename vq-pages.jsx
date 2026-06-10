@@ -1,6 +1,6 @@
 // vq-pages.jsx — all page components
 const { useState, useEffect, useRef } = React;
-const { BoQMockup } = window;
+const { BoQMockup, AppSidebar } = window;
 
 // ─── LANDING ────────────────────────────────────────────────────────────────────────
 function LandingPage({ go, tweaks = {}, toast }) {
@@ -634,7 +634,10 @@ function ResultsPage({ go, toast, boqData }) {
   };
 
   return (
-    <div className="res-wrap">
+    <div className="app-wrap">
+      <AppSidebar currentPage="results" go={go} />
+      <div className="app-main">
+      <div className="res-wrap">
       <div className="res-pad">
         <span className="res-back" onClick={() => go('dashboard')}>← Back to dashboard</span>
         <h1 className="res-title">Bill of Quantities</h1>
@@ -723,9 +726,11 @@ function ResultsPage({ go, toast, boqData }) {
             </tr>
           </tbody>
         </table>
-        <p style={{ marginTop: '20px', fontSize: '12px', color: 'var(--c-400)', fontStyle: 'italic' }}>
+        <p style={{ marginTop: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.32)', fontStyle: 'italic' }}>
           AI-estimated using BCIS Q2 2026 rates. Subject to market variation and supplier pricing. Professional QS review recommended before tender or client issue.
         </p>
+      </div>
+      </div>
       </div>
     </div>
   );
@@ -733,33 +738,10 @@ function ResultsPage({ go, toast, boqData }) {
 
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────────────
 function DashboardPage({ go, toast }) {
-  const handleSignOut = async () => {
-    if (window.VQAuth) {
-      await window.VQAuth.signOut();
-    } else {
-      go('landing');
-    }
-  };
-
   return (
-    <div className="dash-wrap">
-      <aside className="dash-side">
-        <p className="side-lbl">Workspace</p>
-        <div className="side-item active" onClick={() => {}}>
-          <span>📋</span><span>Projects</span>
-        </div>
-        <div className="side-item" onClick={() => go('upload')}>
-          <span>➕</span><span>New project</span>
-        </div>
-        <p className="side-lbl">Account</p>
-        <div className="side-item" onClick={() => go('settings')}>
-          <span>⚙️</span><span>Settings</span>
-        </div>
-        <div className="side-item" onClick={handleSignOut}>
-          <span style={{ fontSize: '12px' }}>→</span><span>Sign out</span>
-        </div>
-      </aside>
-      <main className="dash-main">
+    <div className="app-wrap">
+      <AppSidebar currentPage="dashboard" go={go} />
+      <main className="app-main dash-main" style={{ padding: '40px' }}>
         <div className="dash-hd">
           <h1 className="dash-h1">Projects</h1>
           <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>+ New project</button>
@@ -856,39 +838,42 @@ function UploadPage({ go, toast, onBoqReady }) {
   const barColor = status === 'done' ? 'var(--green)' : status === 'processing' ? 'var(--amber)' : 'var(--blue)';
 
   return (
-    <div className="upload-page">
-      <div className="upload-wrap">
-        <div style={{ textAlign: 'center', marginBottom: '40px' }}>
-          <h2 className="display-md" style={{ marginBottom: '8px' }}>Upload a drawing</h2>
-          <p style={{ color: 'var(--c-400)', fontSize: '15px' }}>PDF, single or multi-page. Raster or vector. Up to 50 MB.</p>
-        </div>
-        <div
-          className={`upload-zone${dragOver ? ' drag' : ''}`}
-          onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onClick={() => document.getElementById('vq-file-input').click()}
-        >
-          <p className="upload-icon">📄</p>
-          <p className="upload-h">Drop your drawing here</p>
-          <p className="upload-sub">or click to select a file</p>
-          {status === 'idle' && (
-            <button className="btn btn-outline btn-pill" onClick={e => { e.stopPropagation(); document.getElementById('vq-file-input').click(); }}>
-              Select PDF
-            </button>
-          )}
-          <input id="vq-file-input" type="file" accept=".pdf" style={{ display: 'none' }}
-            onChange={e => { if (e.target.files[0]) processFile(e.target.files[0]); }} />
-        </div>
-        {fileName && (
-          <div className="upload-status">
-            <p style={{ fontWeight: 600, fontSize: '14px', color: 'var(--c-950)', marginBottom: '6px' }}>{fileName}</p>
-            <p style={{ fontSize: '13px', color: status === 'done' ? 'var(--green)' : 'var(--c-400)', marginBottom: '12px' }}>{statusMsg[status]}</p>
-            <div className="upload-track">
-              <div className="upload-bar" style={{ width: `${progress}%`, background: barColor }} />
-            </div>
+    <div className="app-wrap">
+      <AppSidebar currentPage="upload" go={go} />
+      <div className="app-main upload-page">
+        <div className="upload-wrap">
+          <div style={{ textAlign: 'center', marginBottom: '40px', paddingTop: '40px' }}>
+            <h2 className="display-md" style={{ marginBottom: '8px', color: 'white' }}>Upload a drawing</h2>
+            <p style={{ color: 'rgba(255,255,255,0.42)', fontSize: '15px' }}>PDF, single or multi-page. Raster or vector. Up to 50 MB.</p>
           </div>
-        )}
+          <div
+            className={`upload-zone${dragOver ? ' drag' : ''}`}
+            onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onClick={() => document.getElementById('vq-file-input').click()}
+          >
+            <p className="upload-icon">📄</p>
+            <p className="upload-h">Drop your drawing here</p>
+            <p className="upload-sub">or click to select a file</p>
+            {status === 'idle' && (
+              <button className="btn btn-outline btn-pill" onClick={e => { e.stopPropagation(); document.getElementById('vq-file-input').click(); }}>
+                Select PDF
+              </button>
+            )}
+            <input id="vq-file-input" type="file" accept=".pdf" style={{ display: 'none' }}
+              onChange={e => { if (e.target.files[0]) processFile(e.target.files[0]); }} />
+          </div>
+          {fileName && (
+            <div className="upload-status">
+              <p style={{ fontWeight: 600, fontSize: '14px', color: 'white', marginBottom: '6px' }}>{fileName}</p>
+              <p style={{ fontSize: '13px', color: status === 'done' ? 'var(--green)' : 'rgba(255,255,255,0.5)', marginBottom: '12px' }}>{statusMsg[status]}</p>
+              <div className="upload-track">
+                <div className="upload-bar" style={{ width: `${progress}%`, background: barColor }} />
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -903,19 +888,26 @@ function SettingsPage({ go, toast }) {
   const tabs = [{ id: 'account', icon: '👤', label: 'Account' },{ id: 'branding', icon: '🎨', label: 'Branding' },{ id: 'rates', icon: '💷', label: 'Rates' },{ id: 'billing', icon: '💳', label: 'Billing' }];
 
   return (
-    <div className="dash-wrap">
-      <aside className="dash-side">
-        <div style={{ padding: '0 24px 16px' }}>
-          <span style={{ fontSize: '13px', color: 'var(--amber)', cursor: 'pointer', fontWeight: 600 }} onClick={() => go('dashboard')}>← Dashboard</span>
+    <div className="app-wrap">
+      <AppSidebar currentPage="settings" go={go} />
+      <main className="app-main dash-main">
+        {/* Horizontal tab bar */}
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '28px', paddingTop: '8px' }}>
+          {tabs.map(t => (
+            <button key={t.id}
+              style={{
+                background: 'none', border: 'none', outline: 'none',
+                borderBottom: `2px solid ${tab === t.id ? 'var(--amber)' : 'transparent'}`,
+                color: tab === t.id ? 'white' : 'rgba(255,255,255,0.45)',
+                padding: '8px 20px 14px',
+                fontSize: '14px', fontWeight: tab === t.id ? 600 : 500,
+                cursor: 'pointer', transition: 'all 0.15s ease',
+                marginBottom: '-1px', fontFamily: 'var(--font-b)',
+              }}
+              onClick={() => setTab(t.id)}>{t.label}
+            </button>
+          ))}
         </div>
-        <p className="side-lbl">Settings</p>
-        {tabs.map(t => (
-          <div key={t.id} className={`side-item${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
-            <span>{t.icon}</span><span>{t.label}</span>
-          </div>
-        ))}
-      </aside>
-      <main className="dash-main">
         {tab === 'account' && (
           <>
             <div className="dash-hd"><h1 className="dash-h1">Account</h1></div>
@@ -939,7 +931,7 @@ function SettingsPage({ go, toast }) {
             </div>
             <div className="scard">
               <p className="scard-title" style={{ color: 'var(--red)' }}>Danger zone</p>
-              <p style={{ fontSize: '14px', color: 'var(--c-600)', marginBottom: '16px' }}>Permanently delete your account. Cannot be undone.</p>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>Permanently delete your account. Cannot be undone.</p>
               <button className="btn btn-pill" style={{ background: 'var(--red)', color: 'white' }} onClick={() => toast('Contact support to delete your account.', 'info')}>Delete account</button>
             </div>
           </>
@@ -949,7 +941,7 @@ function SettingsPage({ go, toast }) {
             <div className="dash-hd"><h1 className="dash-h1">Branding</h1></div>
             <div className="scard">
               <p className="scard-title">Company identity</p>
-              <p style={{ fontSize: '14px', color: 'var(--c-400)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Company name</label><input className="finp" defaultValue="Henderson QS Ltd" /></div>
                 <div className="fld"><label className="flbl">Website</label><input className="finp" defaultValue="www.henderson-qs.co.uk" /></div>
@@ -978,7 +970,7 @@ function SettingsPage({ go, toast }) {
             <div className="dash-hd"><h1 className="dash-h1">Rate overrides</h1></div>
             <div className="scard">
               <p className="scard-title">Regional settings</p>
-              <p style={{ fontSize: '14px', color: 'var(--c-400)', marginBottom: '20px' }}>Base rates follow BCIS Q2 2026. Override individual trades below. Leave blank to use BCIS defaults.</p>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Base rates follow BCIS Q2 2026. Override individual trades below. Leave blank to use BCIS defaults.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Region</label>
                   <select className="finp">{['North West England','London','South East','Yorkshire','East Midlands','West Midlands','Scotland','Wales'].map(r => <option key={r}>{r}</option>)}</select>
@@ -989,14 +981,14 @@ function SettingsPage({ go, toast }) {
             <div className="scard">
               <p className="scard-title">Trade overrides (£/unit)</p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead><tr style={{ background: 'var(--c-50)', borderBottom: '1px solid var(--c-200)' }}>
-                  {['Trade','BCIS default','Your override'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--c-600)', fontSize: '13px' }}>{h}</th>)}
+                <thead><tr style={{ background: 'rgba(15,20,28,0.7)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  {['Trade','BCIS default','Your override'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.45)', fontSize: '13px' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {[['Brickwork (stretcher bond)','£0.65/No'],['Blockwork (common)','£0.45/No'],['Clay tile roof covering','£38.50/m²'],['Internal plaster','£7.50/m²'],['Emulsion paint (2 coats)','£2.10/m²']].map(([trade, bcis], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--c-100)' }}>
-                      <td style={{ padding: '12px 16px' }}>{trade}</td>
-                      <td style={{ padding: '12px 16px', color: 'var(--c-400)' }}>{bcis}</td>
+                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{trade}</td>
+                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.38)' }}>{bcis}</td>
                       <td style={{ padding: '12px 16px' }}><input type="text" placeholder="e.g. 0.70" className="finp" style={{ width: '120px' }} /></td>
                     </tr>
                   ))}
@@ -1013,15 +1005,15 @@ function SettingsPage({ go, toast }) {
             <div className="dash-hd"><h1 className="dash-h1">Billing</h1></div>
             <div className="scard">
               <p className="scard-title">Current plan</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', background: 'var(--c-50)', borderRadius: '8px', marginBottom: '16px' }}>
-                <div><p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px' }}>Pro — £39/month</p><p style={{ fontSize: '13px', color: 'var(--c-400)' }}>Renews 4 July 2026</p></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', marginBottom: '16px' }}>
+                <div><p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px', color: 'white' }}>Pro — £39/month</p><p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)' }}>Renews 4 July 2026</p></div>
                 <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('pricing')}>Change plan</button>
               </div>
             </div>
             <div className="scard">
               <p className="scard-title">Payment method</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', border: '1px solid var(--c-200)', borderRadius: '6px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '14px' }}>Visa ···· 4242 · Exp 12/28</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', marginBottom: '12px' }}>
+                <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>Visa ···· 4242 · Exp 12/28</span>
                 <button className="btn btn-ghost btn-sm" onClick={() => toast('Payment management coming soon.', 'info')}>Replace</button>
               </div>
               <button className="btn btn-outline btn-pill btn-sm" onClick={() => toast('Payment management coming soon.', 'info')}>+ Add payment method</button>
@@ -1029,14 +1021,14 @@ function SettingsPage({ go, toast }) {
             <div className="scard">
               <p className="scard-title">Invoices</p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead><tr style={{ background: 'var(--c-50)', borderBottom: '1px solid var(--c-200)' }}>
-                  {['Date','Amount','Status',''].map((h, i) => <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--c-600)', fontSize: '13px' }}>{h}</th>)}
+                <thead><tr style={{ background: 'rgba(15,20,28,0.7)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                  {['Date','Amount','Status',''].map((h, i) => <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.45)', fontSize: '13px' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {[['4 Jun 2026','£39.00'],['4 May 2026','£39.00'],['4 Apr 2026','£39.00']].map(([date, amount], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--c-100)' }}>
-                      <td style={{ padding: '12px 16px' }}>{date}</td>
-                      <td style={{ padding: '12px 16px' }}>{amount}</td>
+                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{date}</td>
+                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{amount}</td>
                       <td style={{ padding: '12px 16px' }}><span style={{ color: 'var(--green)', fontWeight: 600 }}>Paid</span></td>
                       <td style={{ padding: '12px 16px' }}><button className="btn btn-ghost btn-sm" onClick={() => toast('Invoice PDF download coming soon.', 'info')}>Download</button></td>
                     </tr>
@@ -1158,10 +1150,18 @@ function SignUpPage({ go, toast, plan = 'pro' }) {
 
 // ─── SIGN IN ───────────────────────────────────────────────────────────────────────
 function SignInPage({ go, toast }) {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading]   = useState(false);
-  const [error, setError]       = useState('');
+  const [email, setEmail]               = useState('');
+  const [password, setPassword]         = useState('');
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState('');
+  const [titleVisible, setTitleVisible] = useState(false);
+  const [dockVisible, setDockVisible]   = useState(false);
+
+  useEffect(() => {
+    const tf = setTimeout(() => setTitleVisible(true), 50);
+    const df = setTimeout(() => setDockVisible(true), 4000);
+    return () => { clearTimeout(tf); clearTimeout(df); };
+  }, []);
 
   const handleSubmit = async e => {
     e.preventDefault();
@@ -1194,46 +1194,72 @@ function SignInPage({ go, toast }) {
   };
 
   return (
-    <div className="signin-pg">
-      <div className="signin-card">
-        <img src="logo-transparent.png" alt="Vulcan Quanta"
-          style={{ height: '48px', marginBottom: '32px', cursor: 'pointer', display: 'block' }}
-          onClick={() => go('landing')} />
-        <h1 className="signin-h">Sign in</h1>
-        <p className="signin-sub" style={{ marginBottom: '28px' }}>Welcome back.</p>
+    <div style={{ position: 'fixed', inset: 0, background: '#080706', overflow: 'hidden' }}>
+      {/* Fullscreen hero video — autoplays, muted, no loop; freezes on last frame */}
+      <video
+        src="hero.mp4"
+        autoPlay
+        muted
+        playsInline
+        style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          objectFit: 'cover', zIndex: 0,
+        }}
+        aria-hidden="true"
+      />
+      {/* Dark overlay to improve text contrast */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        background: 'rgba(0,0,0,0.48)', zIndex: 1, pointerEvents: 'none',
+      }} />
 
-        {error && <div className="auth-err" role="alert">{error}</div>}
+      {/* VULCAN QUANTA title — fades in on mount */}
+      <div className={`signin-vq-title${titleVisible ? ' visible' : ''}`}>
+        VULCAN QUANTA
+      </div>
 
-        <form onSubmit={handleSubmit} noValidate>
-          <div className="fld" style={{ marginBottom: '16px' }}>
-            <label className="flbl" htmlFor="si-email">Email address</label>
-            <input id="si-email" className="finp" type="email" placeholder="you@example.com"
-              value={email} onChange={e => setEmail(e.target.value)}
-              autoComplete="email" required autoFocus />
+      {/* Login dock — slides up from below at 4 s */}
+      <div className={`signin-dock${dockVisible ? ' dock-visible' : ''}`}>
+        <div className="signin-card">
+          <img src="logo-transparent.png" alt="Vulcan Quanta"
+            style={{ height: '40px', marginBottom: '28px', cursor: 'pointer', display: 'block' }}
+            onClick={() => go('landing')} />
+          <h1 className="signin-h">Sign in</h1>
+          <p className="signin-sub" style={{ marginBottom: '24px' }}>Welcome back.</p>
+
+          {error && <div className="auth-err" role="alert">{error}</div>}
+
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="fld" style={{ marginBottom: '14px' }}>
+              <label className="flbl" htmlFor="si-email">Email address</label>
+              <input id="si-email" className="finp" type="email" placeholder="you@example.com"
+                value={email} onChange={e => setEmail(e.target.value)}
+                autoComplete="email" required autoFocus />
+            </div>
+            <div className="fld" style={{ marginBottom: '24px' }}>
+              <label className="flbl" htmlFor="si-pw">Password</label>
+              <input id="si-pw" className="finp" type="password" placeholder="••••••••"
+                value={password} onChange={e => setPassword(e.target.value)}
+                autoComplete="current-password" required />
+            </div>
+            <button className="btn btn-amber btn-pill" style={{ width: '100%' }}
+              type="submit" disabled={loading}>
+              {loading ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '18px', fontSize: '13px' }}>
+            <span style={{ color: 'rgba(255,255,255,0.45)', cursor: 'pointer' }}
+              onClick={() => go('landing')}>← Home</span>
+            <span style={{ color: 'var(--amber)', cursor: 'pointer' }}
+              onClick={() => go('forgotpassword')}>Forgot password?</span>
           </div>
-          <div className="fld" style={{ marginBottom: '28px' }}>
-            <label className="flbl" htmlFor="si-pw">Password</label>
-            <input id="si-pw" className="finp" type="password" placeholder="••••••••"
-              value={password} onChange={e => setPassword(e.target.value)}
-              autoComplete="current-password" required />
-          </div>
-          <button className="btn btn-amber btn-pill" style={{ width: '100%' }}
-            type="submit" disabled={loading}>
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '20px', fontSize: '13px' }}>
-          <span style={{ color: 'var(--blue)', cursor: 'pointer' }}
-            onClick={() => go('landing')}>← Home</span>
-          <span style={{ color: 'var(--blue)', cursor: 'pointer' }}
-            onClick={() => go('forgotpassword')}>Forgot password?</span>
+          <p style={{ marginTop: '18px', textAlign: 'center', fontSize: '13px', color: 'rgba(255,255,255,0.4)' }}>
+            No account?{' '}
+            <span style={{ color: 'var(--amber)', fontWeight: 600, cursor: 'pointer' }}
+              onClick={() => go('signup')}>Start free →</span>
+          </p>
         </div>
-        <p style={{ marginTop: '20px', textAlign: 'center', fontSize: '13px', color: 'var(--c-400)' }}>
-          No account?{' '}
-          <span style={{ color: 'var(--amber)', fontWeight: 600, cursor: 'pointer' }}
-            onClick={() => go('signup')}>Start free →</span>
-        </p>
       </div>
     </div>
   );
