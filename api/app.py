@@ -65,7 +65,7 @@ def add_cors_headers(response):
 @app.route('/api/health', methods=['GET'])
 def health_check():
     global _ai_status
-    if _ai_status is None:
+    if _ai_status != "online":
         try:
             _api_key = os.environ.get("ANTHROPIC_API_KEY")
             if not _api_key:
