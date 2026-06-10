@@ -406,10 +406,22 @@ function LandingPage({ go, tweaks = {}, toast }) {
         <div className="inner">
           <div className="sec-items">
             {[
-              { icon: '🔒', text: 'GDPR compliant' },
-              { icon: '🛡️', text: 'Encrypted at rest' },
-              { icon: '🇬🇧', text: 'UK-hosted' },
-              { icon: '👤', text: 'Human review built in' },
+              {
+                icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
+                text: 'GDPR compliant'
+              },
+              {
+                icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>,
+                text: 'Encrypted at rest'
+              },
+              {
+                icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 010 20M12 2a15.3 15.3 0 000 20"/></svg>,
+                text: 'UK-hosted'
+              },
+              {
+                icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
+                text: 'Human review built in'
+              },
             ].map((s, i) => (
               <div key={i} className="sec-item"><span>{s.icon}</span><span>{s.text}</span></div>
             ))}
@@ -660,7 +672,7 @@ function ResultsPage({ go, toast, boqData }) {
             {pdfState === 'done'       && '✓ Downloaded'}
           </button>
 <button className="btn btn-outline btn-pill" onClick={handleExcelDownload} disabled={excelState !== 'idle'}>
-  {excelState === 'idle'       && '📊 Excel'}
+  {excelState === 'idle'       && 'Excel'}
   {excelState === 'generating' && '⏳ Generating…'}
   {excelState === 'done'       && '✓ Downloaded'}
 </button>          <button className="btn btn-outline btn-pill" onClick={() => { navigator.clipboard?.writeText?.(window.location.href); toast('Share link copied to clipboard!', 'success'); }}>🔗 Share</button>
@@ -961,7 +973,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
         {/* ── Four stat cards ── */}
         <div className="vd-stats">
           {[
-            { icon: 'folder', bg: '#e8621a', label: 'Projects',        value: totalProjects,        sub: `${activeCount} active` },
+            { icon: 'folder', bg: '#d77555', label: 'Projects',        value: totalProjects,        sub: `${activeCount} active` },
             { icon: 'doc',    bg: '#3b82f6', label: 'Drawings',        value: totalDrawings,        sub: 'This month' },
             { icon: 'check',  bg: '#22c55e', label: 'BOQs Generated',  value: boqsGenerated,        sub: 'This month' },
             { icon: 'pound',  bg: '#8b5cf6', label: 'Estimated Value', value: vqMoney(totalValue),  sub: 'Across all projects' },
@@ -1035,8 +1047,8 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
               <div className="vd-section-hd"><span className="vd-section-title">Quick Actions</span></div>
               <div className="vd-qa">
                 <button className="vd-qa-btn vd-qa-primary" onClick={() => go('upload')}>↑ Upload Drawing</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>👁 View Demo Project</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>📄 Import Existing BOQ</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>View Demo Project</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>Import Existing BOQ</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => go('upload')}>＋ Create Project</button>
               </div>
             </div>
@@ -1280,7 +1292,7 @@ function UploadPage({ go, toast, onBoqReady }) {
             onDragLeave={() => setDragOver(false)}
             onClick={() => document.getElementById('vq-file-input').click()}
           >
-            <p className="upload-icon">📄</p>
+            <p className="upload-icon"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{color:'var(--c-300)'}}><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg></p>
             <p className="upload-h">Drop your drawing here</p>
             <p className="upload-sub">or click to select a file</p>
             {status === 'idle' && (
@@ -1385,7 +1397,7 @@ function SettingsPage({ go, toast }) {
             <div className="scard">
               <p className="scard-title">Brand colours</p>
               <div className="form-grid">
-                <div className="fld"><label className="flbl">Primary colour</label><input className="finp" defaultValue="#F97316" /></div>
+                <div className="fld"><label className="flbl">Primary colour</label><input className="finp" defaultValue="#d77555" /></div>
                 <div className="fld"><label className="flbl">Secondary / footer</label><input className="finp" defaultValue="#0F172A" /></div>
               </div>
               <button className="btn btn-amber btn-pill" onClick={() => save('branding')}>{saved.branding ? '✓ Saved' : 'Save branding'}</button>
