@@ -3532,10 +3532,45 @@ function PricingPage({ go, toast }) {
 // ─── MEASUREMENT HUB ────────────────────────────────────────────────────────────
 // Phase 1: UI shell only — static three-panel workspace, no data wiring, no API
 // calls. Sources listed here are placeholders for the upcoming integrations.
+// Stroke line-icons for the source cards (18px, currentColor) — same visual family
+// as the sidebar/stat icons used elsewhere in the app.
+const MHUB_ICON = {
+  csv: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
+      <line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="13" y2="17" />
+    </svg>
+  ),
+  xlsx: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" /><line x1="4" y1="10" x2="20" y2="10" />
+      <line x1="4" y1="15" x2="20" y2="15" /><line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  ),
+  excel: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" /><line x1="4" y1="9" x2="20" y2="9" />
+      <line x1="9" y1="9" x2="9" y2="20" /><polyline points="13 13 15 15 18 12" />
+    </svg>
+  ),
+  manual: (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  ),
+  file: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" />
+    </svg>
+  ),
+};
+
+// Source cards. `accept` only filters the native picker; nothing is processed yet.
 const MHUB_SOURCES = [
-  { name: 'Bluebeam Revu',   desc: 'Import markups and measurements from Revu sessions.' },
-  { name: 'PDF Takeoff',     desc: 'Measure lengths and areas directly on uploaded drawings.' },
-  { name: 'Manual Entry',    desc: 'Key in dimensions and quantities by hand.' },
+  { id: 'bluebeam_csv',  name: 'Import Bluebeam CSV',       desc: 'Load a measurements CSV exported from Bluebeam Revu.',      accept: '.csv',            icon: MHUB_ICON.csv },
+  { id: 'bluebeam_xlsx', name: 'Import Bluebeam XLSX',      desc: 'Load a measurements workbook exported from Bluebeam Revu.', accept: '.xlsx',           icon: MHUB_ICON.xlsx },
+  { id: 'excel_takeoff', name: 'Import Excel Takeoff',      desc: 'Load a takeoff prepared in Excel (.xlsx, .xls or .csv).',   accept: '.xlsx,.xls,.csv', icon: MHUB_ICON.excel },
+  { id: 'manual_entry',  name: 'Manual Measurement Entry',  desc: 'Attach a sketch or notes to key measurements in by hand.',  accept: '',                icon: MHUB_ICON.manual },
 ];
 
 const MHUB_DETAIL_ROWS = [
@@ -3546,7 +3581,191 @@ const MHUB_DETAIL_ROWS = [
   ['Drawing ref', '—'],
 ];
 
+// Sortable, searchable, paginated grid for parsed measurements. Pure display —
+// no AI, classification or pricing. Filtering/sorting run once per change via
+// useMemo over the full dataset, but only one page of rows (PAGE_SIZE) is ever
+// in the DOM, so 1000+ rows stay responsive.
+const MHUB_PAGE_SIZE = 50;
+
+function MeasurementGrid({ rows, meta }) {
+  const [q, setQ]             = useState('');
+  const [sortKey, setSortKey] = useState('description');
+  const [sortDir, setSortDir] = useState('asc');
+  const [page, setPage]       = useState(0);
+
+  const filtered = React.useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter(r =>
+      String(r.description ?? '').toLowerCase().includes(term) ||
+      String(r.unit ?? '').toLowerCase().includes(term) ||
+      String(r.quantity ?? '').toLowerCase().includes(term));
+  }, [rows, q]);
+
+  const sorted = React.useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const arr = filtered.slice();
+    arr.sort((a, b) => {
+      if (sortKey === 'quantity') {
+        const av = a.quantity == null ? -Infinity : Number(a.quantity);
+        const bv = b.quantity == null ? -Infinity : Number(b.quantity);
+        return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+      }
+      const av = String(a[sortKey] ?? '').toLowerCase();
+      const bv = String(b[sortKey] ?? '').toLowerCase();
+      return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / MHUB_PAGE_SIZE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const start     = safePage * MHUB_PAGE_SIZE;
+  const visible   = sorted.slice(start, start + MHUB_PAGE_SIZE);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(0);
+  };
+  const caret = (key) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const onSearch = (v) => { setQ(v); setPage(0); };
+
+  const COLS = [
+    { key: 'description', label: 'Description', align: 'left'  },
+    { key: 'quantity',    label: 'Quantity',    align: 'right' },
+    { key: 'unit',        label: 'Unit',        align: 'left'  },
+  ];
+
+  return (
+    <div className="scard vd-rise mhub-grid-card" style={{ marginBottom: 0, animationDelay: '0.08s', padding: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '18px' }}>
+        <div>
+          <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Measurements</p>
+          <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.42)' }}>
+            {meta?.source ? `${meta.source} · ` : ''}{meta?.file ? `${meta.file} · ` : ''}
+            {rows.length.toLocaleString('en-GB')} row{rows.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <input
+          className="finp"
+          type="search"
+          placeholder="Search description or unit…"
+          value={q}
+          onChange={e => onSearch(e.target.value)}
+          data-testid="mhub-search"
+          style={{ width: '260px', maxWidth: '100%' }}
+        />
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="rboq" data-testid="mhub-table">
+          <thead>
+            <tr>
+              {COLS.map(c => (
+                <th key={c.key}
+                  className={c.align === 'right' ? 'r' : ''}
+                  onClick={() => toggleSort(c.key)}
+                  data-testid={`mhub-th-${c.key}`}
+                  aria-sort={sortKey === c.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+                  {c.label}{caret(c.key)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? (
+              <tr className="rboq-item"><td colSpan={3} style={{ textAlign: 'center', padding: '28px 16px', color: 'rgba(255,255,255,0.45)' }}>
+                No measurements match “{q}”.
+              </td></tr>
+            ) : visible.map((r, i) => (
+              <tr key={start + i} className={`rboq-item${(start + i) % 2 === 1 ? ' alt' : ''}`}>
+                <td>{r.description}</td>
+                <td className="r">{r.quantity == null || r.quantity === '' ? '—' : r.quantity}</td>
+                <td>{r.unit || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
+        <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="mhub-range">
+          {sorted.length === 0
+            ? 'No results'
+            : `Showing ${start + 1}–${start + visible.length} of ${sorted.length.toLocaleString('en-GB')}` +
+              (sorted.length !== rows.length ? ` (filtered from ${rows.length.toLocaleString('en-GB')})` : '')}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="mhub-prev">← Prev</button>
+          <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.6)' }} data-testid="mhub-page">
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage >= pageCount - 1}
+            onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} data-testid="mhub-next">Next →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MeasurementHubPage({ go, toast }) {
+  // Per-source picked File (drives the filename chip). Picking a file also kicks
+  // off an import to POST /measurement/import, whose parsed rows populate the grid.
+  const [files, setFiles]         = useState({});
+  const [measurements, setMeasurements] = useState(null);   // null until first successful import
+  const [activeMeta, setActiveMeta]     = useState(null);   // { source, file }
+  const [importId, setImportId]   = useState(0);            // bumps to remount the grid (resets sort/search/page)
+  const [importing, setImporting] = useState(null);         // source id currently importing
+  const [importError, setImportError]   = useState(null);
+  const inputRefs = useRef({});
+
+  const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
+
+  const runImport = async (source, file) => {
+    setImporting(source.id);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res  = await fetch(`${VQ_API}/measurement/import`, { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.error || 'Import failed — please check the file and try again.';
+        setImportError(msg);
+        toast(msg, 'error');
+        return;
+      }
+      const parsed = Array.isArray(data.measurements) ? data.measurements : [];
+      setMeasurements(parsed);
+      setActiveMeta({ source: source.name, file: file.name });
+      setImportId(n => n + 1);   // fresh grid state for the new dataset
+      toast(`Imported ${parsed.length} measurement${parsed.length !== 1 ? 's' : ''}.`, 'success');
+    } catch (e) {
+      const msg = 'Network error — could not reach the server.';
+      setImportError(msg);
+      toast(msg, 'error');
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const handlePick = (id, fileList) => {
+    const file = fileList && fileList[0];
+    if (!file) return;
+    setFiles(prev => ({ ...prev, [id]: file }));
+    const source = MHUB_SOURCES.find(s => s.id === id);
+    if (source) runImport(source, file);
+  };
+
+  const clearFile = (id) => setFiles(prev => {
+    const next = { ...prev };
+    delete next[id];
+    return next;
+  });
+
   return (
     <div className="app-wrap">
       <AppSidebar currentPage="measurehub" go={go} toast={toast} />
@@ -3561,39 +3780,77 @@ function MeasurementHubPage({ go, toast }) {
 
         <div className="mhub-grid">
 
-          {/* Left panel — Measurement Sources */}
-          <div className="scard vd-rise" style={{ marginBottom: 0 }}>
-            <p className="scard-title">Measurement Sources</p>
-            {MHUB_SOURCES.map((s, i) => (
-              <div key={s.name} style={{
-                padding: '14px 0',
-                borderBottom: i < MHUB_SOURCES.length - 1 ? '1px solid rgba(255,255,255,0.07)' : 'none',
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>{s.name}</p>
-                  <span style={{
-                    fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
-                    color: 'var(--amber)', border: '1px solid rgba(215,117,85,0.4)',
-                    borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap',
-                  }}>Soon</span>
+          {/* Left panel — Measurement Sources (one glass card per source) */}
+          <div className="vd-rise" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)' }}>
+              Measurement Sources
+            </p>
+            {MHUB_SOURCES.map(s => {
+              const picked = files[s.id];
+              return (
+                <div key={s.id} className="scard" style={{ marginBottom: 0, padding: '20px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
+                    <div style={{
+                      width: '38px', height: '38px', borderRadius: '10px', flexShrink: 0,
+                      background: 'rgba(215,117,85,0.12)', border: '1px solid rgba(215,117,85,0.25)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--amber)',
+                    }}>
+                      {s.icon}
+                    </div>
+                    <p style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>{s.name}</p>
+                  </div>
+                  <p style={{ fontSize: '12.5px', lineHeight: 1.5, color: 'rgba(255,255,255,0.42)', marginBottom: '14px' }}>{s.desc}</p>
+
+                  <input
+                    ref={el => { inputRefs.current[s.id] = el; }}
+                    type="file"
+                    accept={s.accept || undefined}
+                    style={{ display: 'none' }}
+                    data-testid={`mhub-input-${s.id}`}
+                    onChange={e => { handlePick(s.id, e.target.files); e.target.value = ''; }}
+                  />
+                  <button className="btn btn-outline btn-pill btn-sm" onClick={() => openPicker(s.id)} disabled={importing === s.id}>
+                    {importing === s.id ? 'Importing…' : (picked ? 'Replace file' : 'Import')}
+                  </button>
+
+                  {picked && (
+                    <div style={{
+                      marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px',
+                      background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: '8px', padding: '8px 10px',
+                    }}>
+                      <span style={{ color: 'var(--amber)', flexShrink: 0, display: 'flex' }}>{MHUB_ICON.file}</span>
+                      <span title={picked.name} style={{
+                        fontSize: '12.5px', color: 'rgba(255,255,255,0.8)', flex: 1, minWidth: 0,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>{picked.name}</span>
+                      <button onClick={() => clearFile(s.id)} aria-label="Remove file" style={{
+                        background: 'none', border: 'none', color: 'rgba(255,255,255,0.4)',
+                        cursor: 'pointer', fontSize: '16px', lineHeight: 1, padding: 0, flexShrink: 0,
+                      }}>×</button>
+                    </div>
+                  )}
                 </div>
-                <p style={{ fontSize: '12.5px', lineHeight: 1.5, color: 'rgba(255,255,255,0.42)' }}>{s.desc}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
-          {/* Main area — empty workspace */}
-          <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
-            <div className="empty-icon">📐</div>
-            <p className="empty-h">No measurements yet</p>
-            <p className="empty-p">
-              Connect a measurement source or open a project drawing to start building
-              a takeoff. Measurements you capture will appear in this workspace.
-            </p>
-            <button className="btn btn-outline btn-pill" disabled style={{ opacity: 0.45, cursor: 'not-allowed' }}>
-              Connect a source — coming soon
-            </button>
-          </div>
+          {/* Main area — measurement grid once imported, otherwise empty workspace */}
+          {measurements ? (
+            <MeasurementGrid key={importId} rows={measurements} meta={activeMeta} />
+          ) : (
+            <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
+              <div className="empty-icon">📐</div>
+              <p className="empty-h">No measurements yet</p>
+              <p className="empty-p">
+                Import a Bluebeam CSV/XLSX or an Excel takeoff from the panel on the
+                left. Parsed measurements will appear here in a sortable, searchable grid.
+              </p>
+              {importError && (
+                <p style={{ fontSize: '13px', color: 'var(--red, #e26d5c)', marginTop: '4px' }}>{importError}</p>
+              )}
+            </div>
+          )}
 
           {/* Right panel — Details */}
           <div className="scard vd-rise mhub-details" style={{ marginBottom: 0, animationDelay: '0.16s' }}>
