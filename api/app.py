@@ -88,6 +88,32 @@ _SB_KEY = os.environ.get('SUPABASE_ANON_KEY', '')
 # create_client returns None-safe — we guard every usage with `if not _supabase` below
 _supabase = create_client(_SB_URL, _SB_KEY) if (_SB_URL and _SB_KEY) else None
 
+# Optional service-role key for table operations. The anon role typically has no
+# privileges on application tables (Postgres 42501 "permission denied"), so data
+# access must run as either service_role or the authenticated user. Every query in
+# this file filters by user_id, so the service client never leaks across users.
+_SB_SERVICE_KEY = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+                   or os.environ.get('SUPABASE_SERVICE_KEY', ''))
+_supabase_admin = create_client(_SB_URL, _SB_SERVICE_KEY) if (_SB_URL and _SB_SERVICE_KEY) else None
+
+
+def _db_client(token=None):
+    """Supabase client for table reads/writes.
+
+    Prefers the service-role client when SUPABASE_SERVICE_ROLE_KEY is set.
+    Otherwise builds a per-request client that forwards the caller's JWT, so
+    PostgREST executes as the `authenticated` role and RLS policies keyed on
+    auth.uid() apply. A fresh client per request keeps tokens from leaking
+    between concurrent requests.
+    """
+    if _supabase_admin:
+        return _supabase_admin
+    if not (_SB_URL and _SB_KEY):
+        return None
+    client = create_client(_SB_URL, _SB_KEY)
+    client.postgrest.auth(token or _get_bearer_token())
+    return client
+
 
 def _auth_error_msg(exc: Exception) -> str:
     """Extract a readable sentence from a supabase-py / gotrue exception.
@@ -135,7 +161,7 @@ _PROJECT_EXTRA_FIELDS = {"client_name", "contract_type", "location_factor",
                          "notes_for_ai", "auto_delete_days", "description"}
 
 
-def _insert_project(user_id, name, page_count, estimated_value, boq_data, status, extra=None):
+def _insert_project(db, user_id, name, page_count, estimated_value, boq_data, status, extra=None):
     """Insert a single project row owned by user_id and return the created row dict.
 
     Shared by POST /projects and the auto-save step in /process so both write the
@@ -152,7 +178,7 @@ def _insert_project(user_id, name, page_count, estimated_value, boq_data, status
     }
     if extra:
         row.update({k: v for k, v in extra.items() if k in _PROJECT_EXTRA_FIELDS})
-    res = _supabase.table("projects").insert(row).execute()
+    res = db.table("projects").insert(row).execute()
     # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
     return res.data[0] if getattr(res, "data", None) else None
 
@@ -954,9 +980,11 @@ def get_projects():
     if err:
         return err
 
+    db = _db_client()
+
     # Auto-delete expired projects
     try:
-        _supabase.rpc("delete_expired_projects", {"uid": user.id}).execute()
+        db.rpc("delete_expired_projects", {"uid": user.id}).execute()
     except Exception:
         pass  # non-fatal — list still returns normally
 
@@ -964,7 +992,7 @@ def get_projects():
         # Select every column except boq_data — the BoQ JSON is too large for a list view.
         # order(..., desc=True) gives newest-first, like .OrderByDescending(p => p.CreatedAt) in C#.
         res = (
-            _supabase.table("projects")
+            db.table("projects")
             .select("id, user_id, name, page_count, estimated_value, status, created_at")
             .eq("user_id", user.id)
             .order("created_at", desc=True)
@@ -986,6 +1014,7 @@ def create_project():
 
     try:
         row = _insert_project(
+            _db_client(),
             user_id=user.id,                                  # force ownership to the authenticated user
             name=body.get("name"),
             page_count=body.get("page_count"),
@@ -1010,7 +1039,7 @@ def delete_project(project_id):
         # The user_id filter guarantees a user can only delete their own project —
         # a row owned by someone else simply matches nothing and yields a 404 below.
         res = (
-            _supabase.table("projects")
+            _db_client().table("projects")
             .delete()
             .eq("id", project_id)
             .eq("user_id", user.id)
@@ -1032,7 +1061,7 @@ def get_project(project_id):
         return err
     try:
         res = (
-            _supabase.table("projects")
+            _db_client().table("projects")
             .select("*")
             .eq("id", project_id)
             .eq("user_id", user.id)
@@ -1059,7 +1088,7 @@ def update_project(project_id):
         return jsonify({"error": "No valid fields to update."}), 400
     try:
         res = (
-            _supabase.table("projects")
+            _db_client().table("projects")
             .update(updates)
             .eq("id", project_id)
             .eq("user_id", user.id)
@@ -1077,7 +1106,7 @@ def get_chat(project_id):
         return err
     try:
         res = (
-            _supabase.table("chat_messages")
+            _db_client().table("chat_messages")
             .select("id, role, content, created_at")
             .eq("project_id", project_id)
             .eq("user_id", user.id)
@@ -1103,7 +1132,7 @@ def post_chat(project_id):
     # Load project for boq_data and notes_for_ai
     try:
         proj_res = (
-            _supabase.table("projects")
+            _db_client().table("projects")
             .select("boq_data, notes_for_ai, name, client_name, contract_type, location_factor")
             .eq("id", project_id)
             .eq("user_id", user.id)
@@ -1118,7 +1147,7 @@ def post_chat(project_id):
     # Load last 20 messages for context
     try:
         hist_res = (
-            _supabase.table("chat_messages")
+            _db_client().table("chat_messages")
             .select("role, content")
             .eq("project_id", project_id)
             .eq("user_id", user.id)
@@ -1165,7 +1194,7 @@ Be concise and professional. Give specific figures from the BoQ where relevant.
 
     # Persist both turns — non-fatal if this fails
     try:
-        _supabase.table("chat_messages").insert([
+        _db_client().table("chat_messages").insert([
             {"project_id": project_id, "user_id": user.id, "role": "user",      "content": user_message},
             {"project_id": project_id, "user_id": user.id, "role": "assistant", "content": assistant_reply},
         ]).execute()
@@ -1270,11 +1299,12 @@ def process_pdf():                         # Flask calls this function when a ma
         user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
         user     = getattr(user_res, "user", None) if user_res else None
         if user:
+            db = _db_client()
             project_id = (request.form.get("project_id") or "").strip()
             if project_id:
                 # The upload belongs to an existing project (workspace flow) —
                 # attach the BoQ to that row instead of creating a duplicate.
-                _supabase.table("projects").update({
+                db.table("projects").update({
                     "page_count":      len(pages_text),
                     "estimated_value": _sum_line_totals(boq_data),
                     "boq_data":        boq_data,
@@ -1283,6 +1313,7 @@ def process_pdf():                         # Flask calls this function when a ma
             else:
                 project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
                 _insert_project(
+                    db,
                     user_id=user.id,
                     name=project_name,
                     page_count=len(pages_text),                # one entry in pages_text per PDF page
