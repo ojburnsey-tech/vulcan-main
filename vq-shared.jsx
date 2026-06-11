@@ -46,6 +46,84 @@ function AnnouncementBar({ go }) {
   return null;
 }
 
+// ─── ARCHITECTURAL PARTICLE FIELD ───────────────────────────────────────────────────
+// A fixed SVG layer behind app content: faint topographic contour lines with small
+// amber data-points travelling along them — construction data moving through a
+// network, not a starfield. Pure SMIL animation (no rAF loop, no blur filters) so
+// it composites cheaply and holds 60fps on low-end devices. Hidden entirely for
+// prefers-reduced-motion users (static contours remain).
+const VQ_FLOW_PATHS = [
+  // Long survey contours sweeping across the centre and lower half of the viewport.
+  { d: 'M-80,640 C180,560 360,690 640,620 C920,550 1080,680 1300,610 C1400,580 1480,600 1540,590', op: 0.075, dur: 17 },
+  { d: 'M-80,720 C240,660 420,770 700,700 C980,630 1160,760 1380,690 C1460,665 1500,680 1540,672', op: 0.06,  dur: 21 },
+  { d: 'M-80,810 C200,760 440,850 720,790 C1000,730 1200,840 1420,780 C1480,765 1520,772 1540,768', op: 0.05,  dur: 24 },
+  { d: 'M-80,470 C260,420 460,520 760,460 C1060,400 1220,500 1440,450 C1490,440 1520,445 1540,442', op: 0.06,  dur: 19 },
+  { d: 'M-80,300 C300,260 520,350 820,300 C1120,250 1280,330 1480,290 C1510,284 1530,287 1540,286', op: 0.05,  dur: 23 },
+];
+
+// Static intermediate contours (never animated) — fill out the topographic texture.
+const VQ_STATIC_CONTOURS = [
+  { d: 'M-80,680 C210,615 390,730 670,660 C950,590 1120,720 1340,650 C1440,620 1500,640 1540,630', op: 0.05 },
+  { d: 'M-80,765 C220,710 430,810 710,745 C990,680 1180,800 1400,735 C1470,715 1510,726 1540,720', op: 0.04 },
+  { d: 'M-80,545 C240,495 450,590 740,535 C1030,480 1200,575 1430,520 C1485,508 1520,514 1540,511', op: 0.045 },
+  { d: 'M-80,385 C280,340 490,435 790,380 C1090,325 1250,415 1460,370 C1505,360 1528,364 1540,362', op: 0.04 },
+];
+
+function VQParticleField() {
+  const [reduceMotion] = useState(() =>
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false);
+
+  return (
+    <svg className="vq-particle-field" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+      <defs>
+        {/* Soft glow without a filter: radial gradient discs are far cheaper than feGaussianBlur */}
+        <radialGradient id="vq-pt-glow">
+          <stop offset="0%"  stopColor="#D9855B" stopOpacity="0.55" />
+          <stop offset="45%" stopColor="#D9855B" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="#D9855B" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+
+      {/* Topographic contour lines */}
+      {VQ_STATIC_CONTOURS.map((c, i) => (
+        <path key={`s${i}`} d={c.d} fill="none" stroke="#D9855B" strokeOpacity={c.op} strokeWidth="0.8" />
+      ))}
+      {VQ_FLOW_PATHS.map((p, i) => (
+        <path key={`f${i}`} id={`vq-flow-${i}`} d={p.d} fill="none" stroke="#D9855B" strokeOpacity={p.op} strokeWidth="1" />
+      ))}
+
+      {/* Data points travelling along the contours */}
+      {!reduceMotion && VQ_FLOW_PATHS.map((p, i) => {
+        const begin = -(i * 3.7);
+        return (
+          <g key={`pt${i}`}>
+            {/* glow halo */}
+            <circle r="7" fill="url(#vq-pt-glow)" opacity="0.25">
+              <animateMotion dur={`${p.dur}s`} begin={`${begin}s`} repeatCount="indefinite" rotate="0">
+                <mpath href={`#vq-flow-${i}`} xlinkHref={`#vq-flow-${i}`} />
+              </animateMotion>
+            </circle>
+            {/* short trail node, slightly behind the lead particle */}
+            <circle r="1.2" fill="#D9855B" opacity="0.15">
+              <animateMotion dur={`${p.dur}s`} begin={`${begin - 0.55}s`} repeatCount="indefinite" rotate="0">
+                <mpath href={`#vq-flow-${i}`} xlinkHref={`#vq-flow-${i}`} />
+              </animateMotion>
+            </circle>
+            {/* lead particle with a slow brightness pulse */}
+            <circle r="2" fill="#D9855B" opacity="0.3">
+              <animateMotion dur={`${p.dur}s`} begin={`${begin}s`} repeatCount="indefinite" rotate="0">
+                <mpath href={`#vq-flow-${i}`} xlinkHref={`#vq-flow-${i}`} />
+              </animateMotion>
+              <animate attributeName="opacity" values="0.18;0.35;0.22;0.35;0.18"
+                dur={`${Math.max(5, p.dur / 3)}s`} begin={`${begin}s`} repeatCount="indefinite" />
+            </circle>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
 function Header({ page, go, toast, user }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [logoOk, setLogoOk] = useState(true);
@@ -248,21 +326,17 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
   };
 
   // `match` drives the active highlight; `target` is where the item navigates.
-  // Items without a target are placeholders for sections not yet built.
   const navItems = [
     { label: 'Dashboard', icon: VQ_NAV_ICONS.dashboard, target: 'dashboard', match: 'dashboard' },
-    { label: 'Projects',  icon: VQ_NAV_ICONS.projects,  target: 'dashboard', match: 'projects'  },
+    { label: 'Projects',  icon: VQ_NAV_ICONS.projects,  target: 'projects',  match: 'projects'  },
     { label: 'Uploads',   icon: VQ_NAV_ICONS.uploads,   target: 'upload',    match: 'upload'     },
-    { label: 'Reports',   icon: VQ_NAV_ICONS.reports,   target: null,        match: 'reports'    },
-    { label: 'Exports',   icon: VQ_NAV_ICONS.exports,   target: null,        match: 'exports'    },
-    { label: 'History',   icon: VQ_NAV_ICONS.history,   target: null,        match: 'history'    },
+    { label: 'Reports',   icon: VQ_NAV_ICONS.reports,   target: 'reports',   match: 'reports'    },
+    { label: 'Exports',   icon: VQ_NAV_ICONS.exports,   target: 'exports',   match: 'exports'    },
+    { label: 'History',   icon: VQ_NAV_ICONS.history,   target: 'history',   match: 'history'    },
     { label: 'Settings',  icon: VQ_NAV_ICONS.settings,  target: 'settings',  match: 'settings'   },
   ];
 
-  const handleNav = (item) => {
-    if (item.target) go(item.target);
-    else if (toast) toast(`${item.label} — coming soon.`, 'info');
-  };
+  const handleNav = (item) => { if (item.target) go(item.target); };
 
   const email     = user?.email || '';
   const meta      = user?.user_metadata || {};
@@ -333,4 +407,4 @@ function ToastContainer({ toasts }) {
   );
 }
 
-Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer, AppSidebar });
+Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer, AppSidebar, VQParticleField });
