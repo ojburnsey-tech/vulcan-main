@@ -2146,7 +2146,7 @@ function SettingsPage({ go, toast, user: userProp }) {
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
                 Permanently delete your account and all project data. Cannot be undone.
               </p>
-              <button className="btn btn-pill"
+              <button className="btn btn-danger btn-pill"
                 style={{ background: confirmDelete ? 'var(--red)' : 'transparent', color: confirmDelete ? 'white' : 'var(--red)', border: '1px solid var(--red)', padding: '10px 24px' }}
                 onClick={handleDeleteAccount}>
                 {confirmDelete ? 'Confirm — send deletion request' : 'Delete account'}
