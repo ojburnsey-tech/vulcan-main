@@ -14,6 +14,7 @@ from rates import RATES_DB         # our local dict of 2025-2026 UK construction
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
 from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
+from classification import classify_measurements, classification_options, MeasurementClassificationError  # deterministic NRM2/rate classifier
 import time, statistics
 _processing_times = []
 _start_time = time.time()
@@ -1592,6 +1593,35 @@ def measurement_import():
         return jsonify({"error": f"Could not parse the file: {exc}"}), 422
 
     return jsonify({"measurements": measurements}), 200
+
+
+_CLASSIFY_MAX_ROWS = 5000
+
+
+@app.route("/measurement/classify", methods=["POST"])
+def measurement_classify():
+    """Classify parsed measurements through the deterministic pipeline.
+
+    measurement -> normalisation -> NRM2 section -> rate key, with a confidence
+    score per row. No AI, no pricing — classification only. Separate from
+    /process and /measurement/import; neither is affected.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    measurements = body.get("measurements")
+    if not isinstance(measurements, list):
+        return jsonify({"error": "Request body must be {\"measurements\": [...]}."}), 400
+    if len(measurements) > _CLASSIFY_MAX_ROWS:
+        return jsonify({"error": f"Too many measurements; {_CLASSIFY_MAX_ROWS} max per request."}), 413
+
+    try:
+        classified = classify_measurements(measurements)
+    except MeasurementClassificationError as exc:
+        return jsonify({"error": exc.message}), exc.status
+    except Exception as exc:
+        app.logger.exception("Measurement classification failed unexpectedly")
+        return jsonify({"error": f"Classification failed: {exc}"}), 422
+
+    return jsonify({"classified": classified, "options": classification_options()}), 200
 
 
 if __name__ == "__main__":                         # only runs when executed directly (python app.py), not when imported by a WSGI server — like a Program.Main guard in C#
