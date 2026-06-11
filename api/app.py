@@ -13,6 +13,7 @@ from supabase import create_client # supabase-py v2 — wraps the Supabase REST 
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
+from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
 import time, statistics
 _processing_times = []
 _start_time = time.time()
@@ -1553,6 +1554,44 @@ def export_excel():
         as_attachment=True,
         download_name="bill-of-quantities.xlsx",
     )
+
+
+# Reject measurement uploads larger than this before reading them into memory.
+_MEASUREMENT_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
+
+
+@app.route("/measurement/import", methods=["POST"])
+def measurement_import():
+    """Parse an uploaded CSV/XLSX of measurements into rows.
+
+    Phase-1 infrastructure: reads description/quantity/unit from the file and
+    returns them as-is. No AI, no pricing, no NRM2, no persistence. Completely
+    separate from /process — that route and its pipeline are untouched.
+    """
+    if "file" not in request.files:        # request.files keyed by form field name
+        return jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400
+
+    uploaded = request.files["file"]
+    if uploaded.filename == "":
+        return jsonify({"error": "Empty filename — no file was selected."}), 400
+
+    name = uploaded.filename.lower()
+    if not (name.endswith(".csv") or name.endswith(".xlsx")):
+        return jsonify({"error": "Unsupported file type. Upload a .csv or .xlsx file."}), 415
+
+    file_bytes = uploaded.read()
+    if len(file_bytes) > _MEASUREMENT_MAX_BYTES:
+        return jsonify({"error": "File too large. Maximum size is 10 MB."}), 413
+
+    try:
+        measurements = parse_measurements(uploaded.filename, file_bytes)
+    except MeasurementImportError as exc:          # expected, user-facing failures
+        return jsonify({"error": exc.message}), exc.status
+    except Exception as exc:                        # never leak a stack trace to the client
+        app.logger.exception("Measurement import failed unexpectedly")
+        return jsonify({"error": f"Could not parse the file: {exc}"}), 422
+
+    return jsonify({"measurements": measurements}), 200
 
 
 if __name__ == "__main__":                         # only runs when executed directly (python app.py), not when imported by a WSGI server — like a Program.Main guard in C#
