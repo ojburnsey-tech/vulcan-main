@@ -1453,6 +1453,49 @@ def demo_process():
     return jsonify(demo_boq), 200
 
 
+def _load_user_branding():
+    """Best-effort load of the signed-in user's white-label branding.
+
+    Returns a branding dict for the PDF pipeline, or {} when the caller is
+    unauthenticated, has no branding row, or anything goes wrong. Never raises —
+    a branding lookup must never break PDF export, so every failure path falls
+    back to an empty dict (which reproduces the default Vulcan Quanta output).
+    """
+    try:
+        token = _get_bearer_token()
+        if not token or not _supabase:
+            return {}
+        user_res = _supabase.auth.get_user(token)
+        user     = getattr(user_res, "user", None)
+        if not user:
+            return {}
+        db = _db_client(token)
+        if not db:
+            return {}
+        res = (
+            db.table("branding")
+            .select("company_name, company_address, company_phone, company_email, logo")
+            .eq("user_id", user.id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(res, "data", None) or []
+        row  = rows[0] if rows else {}
+        if not row:
+            return {}
+        # Map the DB `logo` column (a data URL) onto the pipeline's logo_url key.
+        return {
+            "company_name":    row.get("company_name")    or "",
+            "company_address": row.get("company_address") or "",
+            "company_phone":   row.get("company_phone")   or "",
+            "company_email":   row.get("company_email")   or "",
+            "logo_url":        row.get("logo")            or "",
+        }
+    except Exception as exc:
+        app.logger.warning("Branding load failed (continuing without branding): %s", exc)
+        return {}
+
+
 @app.route("/export",   methods=["POST"])   # original route kept for backward compatibility
 @app.route("/download", methods=["POST"])   # new route used by the frontend Download PDF button
 def export_pdf():                           # Flask calls this for both URLs; stacking decorators is supported and idiomatic
@@ -1466,8 +1509,10 @@ def export_pdf():                           # Flask calls this for both URLs; st
     if not boq_json:                       # guard: body was empty or not valid JSON
         return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
 
+    branding = _load_user_branding()        # best-effort; {} when none configured
+
     try:
-        pdf_bytes = generate_boq_pdf(boq_json)   # build the PDF; returns raw bytes
+        pdf_bytes = generate_boq_pdf(boq_json, branding=branding)   # build the PDF; returns raw bytes
     except ValueError as exc:             # raised by generate_boq_pdf if JSON has no trade groups
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:              # catch any unexpected ReportLab error
