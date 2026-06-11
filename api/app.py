@@ -58,7 +58,7 @@ def add_cors_headers(response):
     if origin in _ALLOWED_ORIGINS:
         response.headers['Access-Control-Allow-Origin']      = origin
         response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, DELETE, OPTIONS'
+        response.headers['Access-Control-Allow-Methods']     = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age']           = '86400'
     return response
@@ -130,20 +130,29 @@ def _authenticated_user():
     return user, None
 
 
-def _insert_project(user_id, name, page_count, estimated_value, boq_data, status):
+# Optional project columns accepted from the client on create/update.
+_PROJECT_EXTRA_FIELDS = {"client_name", "contract_type", "location_factor",
+                         "notes_for_ai", "auto_delete_days", "description"}
+
+
+def _insert_project(user_id, name, page_count, estimated_value, boq_data, status, extra=None):
     """Insert a single project row owned by user_id and return the created row dict.
 
     Shared by POST /projects and the auto-save step in /process so both write the
     same shape. Raises on failure — callers decide whether that is fatal.
+    `extra` may carry the optional setup fields (client, contract type, etc.).
     """
-    res = _supabase.table("projects").insert({
+    row = {
         "user_id":         user_id,
         "name":            name,
         "page_count":      page_count,
         "estimated_value": estimated_value,
         "boq_data":        boq_data,
         "status":          status,
-    }).execute()
+    }
+    if extra:
+        row.update({k: v for k, v in extra.items() if k in _PROJECT_EXTRA_FIELDS})
+    res = _supabase.table("projects").insert(row).execute()
     # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
     return res.data[0] if getattr(res, "data", None) else None
 
@@ -983,6 +992,7 @@ def create_project():
             estimated_value=body.get("estimated_value"),
             boq_data=body.get("boq_data"),
             status=body.get("status"),
+            extra=body,
         )
     except Exception as exc:
         return jsonify({"error": f"Failed to create project: {exc}"}), 500
@@ -1260,15 +1270,26 @@ def process_pdf():                         # Flask calls this function when a ma
         user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
         user     = getattr(user_res, "user", None) if user_res else None
         if user:
-            project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
-            _insert_project(
-                user_id=user.id,
-                name=project_name,
-                page_count=len(pages_text),                # one entry in pages_text per PDF page
-                estimated_value=_sum_line_totals(boq_data),  # total of every line_total in the enriched BoQ
-                boq_data=boq_data,
-                status='completed',
-            )
+            project_id = (request.form.get("project_id") or "").strip()
+            if project_id:
+                # The upload belongs to an existing project (workspace flow) —
+                # attach the BoQ to that row instead of creating a duplicate.
+                _supabase.table("projects").update({
+                    "page_count":      len(pages_text),
+                    "estimated_value": _sum_line_totals(boq_data),
+                    "boq_data":        boq_data,
+                    "status":          "completed",
+                }).eq("id", project_id).eq("user_id", user.id).execute()
+            else:
+                project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
+                _insert_project(
+                    user_id=user.id,
+                    name=project_name,
+                    page_count=len(pages_text),                # one entry in pages_text per PDF page
+                    estimated_value=_sum_line_totals(boq_data),  # total of every line_total in the enriched BoQ
+                    boq_data=boq_data,
+                    status='completed',
+                )
     except Exception as exc:
         app.logger.warning("Failed to auto-save project from /process: %s", exc)
 

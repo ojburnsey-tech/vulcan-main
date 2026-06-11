@@ -1278,6 +1278,81 @@
     .vd-legend-name { color: rgba(255,255,255,0.78); }
     .vd-legend-val { margin-left: auto; color: #8b92a0; }
 
+    /* ── Architectural particle field (behind app content) ─────────────── */
+    .vq-particle-field {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      z-index: 0; pointer-events: none;
+    }
+    .vd-main, .dash-main, .upload-page { position: relative; }
+    .vd-main > *, .dash-main > *, .upload-page > * { position: relative; z-index: 1; }
+    .vd-main > .vq-particle-field,
+    .dash-main > .vq-particle-field,
+    .upload-page > .vq-particle-field { z-index: 0; }
+
+    /* ── Staggered panel entrance ─────────────────────────────────────────── */
+    @keyframes vdRise {
+      from { opacity: 0; transform: translateY(14px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .vd-rise { opacity: 0; animation: vdRise 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
+    @media (prefers-reduced-motion: reduce) {
+      .vd-rise { animation: none; opacity: 1; }
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Stat cards: gentle lift + accent edge on hover */
+    .vd-stat { transition: transform 0.25s var(--ease), border-color 0.25s var(--ease), box-shadow 0.25s var(--ease); }
+    .vd-stat:hover { transform: translateY(-3px); border-color: rgba(217,133,91,0.35); box-shadow: 0 12px 32px rgba(0,0,0,0.35); }
+
+    /* Project rows are clickable */
+    .vd-proj-row.clickable { cursor: pointer; margin: 0 -12px; padding-left: 12px; padding-right: 12px; border-radius: 8px; transition: background 0.18s ease; }
+    .vd-proj-row.clickable:hover { background: rgba(255,255,255,0.04); }
+
+    /* Workspace / setup top bar */
+    .vd-topbar {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 16px; padding: 18px 24px;
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+    }
+
+    /* ── Hero banner — "Construction Intelligence Ready" ─────────────────── */
+    .vd-banner {
+      position: relative; overflow: hidden; padding: 36px 32px;
+      text-align: center; border-radius: 12px;
+      background: linear-gradient(160deg, rgba(33,28,25,0.85), rgba(29,33,39,0.7));
+      border: 1px solid rgba(217,133,91,0.14);
+    }
+    .vd-banner-art { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+    .vd-banner > .vd-banner-inner { position: relative; z-index: 1; }
+    .vd-banner-h { font-family: 'Inter', system-ui, sans-serif; font-size: 20px; font-weight: 700; color: #fff; letter-spacing: -0.3px; margin-bottom: 8px; }
+    .vd-banner-p { font-size: 13.5px; color: #9aa3b2; max-width: 420px; margin: 0 auto 20px; line-height: 1.6; }
+    @keyframes vdDraw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+    .vd-draw { stroke-dasharray: 1; stroke-dashoffset: 1; animation: vdDraw 2.4s ease forwards; }
+    @keyframes vdScan {
+      0%   { transform: translateX(-30%); opacity: 0; }
+      12%  { opacity: 1; }
+      88%  { opacity: 1; }
+      100% { transform: translateX(130%); opacity: 0; }
+    }
+    .vd-scan { animation: vdScan 7s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .vd-draw { animation: none; stroke-dashoffset: 0; }
+      .vd-scan { animation: none; opacity: 0; }
+    }
+
+    /* ── Projects / Reports / Exports / History pages ────────────────────── */
+    .vq-list-row { display: flex; align-items: center; gap: 16px; padding: 15px 18px; border-top: 1px solid rgba(255,255,255,0.06); transition: background 0.18s ease; }
+    .vq-list-row:first-of-type { border-top: none; }
+    .vq-list-row.clickable { cursor: pointer; }
+    .vq-list-row.clickable:hover { background: rgba(255,255,255,0.04); }
+    .vq-bar-track { height: 8px; background: rgba(255,255,255,0.07); border-radius: 4px; overflow: hidden; flex: 1; }
+    .vq-bar-fill { height: 100%; border-radius: 4px; width: 0; transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+    .vq-timeline { position: relative; padding-left: 26px; }
+    .vq-timeline::before { content: ''; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1px; background: rgba(255,255,255,0.1); }
+    .vq-tl-item { position: relative; padding: 12px 0 12px 8px; }
+    .vq-tl-dot { position: absolute; left: -23px; top: 17px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid #1d2127; }
+
     @media (max-width: 1100px) {
       .vd-grid { grid-template-columns: 1fr; }
       .vd-charts { grid-template-columns: 1fr; }
@@ -1301,6 +1376,7 @@ const { AnnouncementBar, Header, Footer, ToastContainer } = window;
 const {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
   ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
+  ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
 } = window;
@@ -1314,10 +1390,13 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 // Pages that have no Header/Footer chrome
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
                          'forgotpassword','checkemail','resetpassword','landing',
-                         'projectsetup','workspace','projectsettings'];
+                         'projectsetup','workspace','projectsettings',
+                         'projects','reports','exports','history'];
 
 // Pages that require an authenticated session
-const PROTECTED = ['dashboard','settings','results','upload'];
+const PROTECTED = ['dashboard','settings','results','upload',
+                   'projectsetup','workspace','projectsettings',
+                   'projects','reports','exports','history'];
 
 function App() {
   const [page, setPage]               = useState('signin');
@@ -1448,7 +1527,11 @@ function App() {
     results:        <ResultsPage        go={go} toast={toast} boqData={boqData} />,
     dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
-    settings:       <SettingsPage       go={go} toast={toast} />,
+    settings:       <SettingsPage       go={go} toast={toast} user={user} />,
+    projects:       <ProjectsPage       go={go} toast={toast} onBoqReady={setBoqData} />,
+    reports:        <ReportsPage        go={go} toast={toast} />,
+    exports:        <ExportsPage        go={go} toast={toast} />,
+    history:        <HistoryPage        go={go} toast={toast} />,
     projectsetup:    <ProjectSetupPage    go={go} toast={toast} />,
     workspace:       <ProjectWorkspacePage go={go} toast={toast} projectId={projectId} onBoqReady={setBoqData} />,
     projectsettings: <ProjectSettingsPage  go={go} toast={toast} projectId={projectId} />,

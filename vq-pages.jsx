@@ -1,6 +1,6 @@
 // vq-pages.jsx — all page components
 const { useState, useEffect, useRef } = React;
-const { BoQMockup, AppSidebar } = window;
+const { BoQMockup, AppSidebar, VQParticleField } = window;
 
 // ─── LANDING ────────────────────────────────────────────────────────────────────────
 function LandingPage({ go, tweaks = {}, toast }) {
@@ -487,7 +487,7 @@ function normaliseBoq(raw) {
 
 // ─── RESULTS ───────────────────────────────────────────────────────────────────────
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
-function ResultsPage({ go, toast, boqData }) {
+function ResultsPage({ go, toast, boqData, embedded }) {
   const [pdfState, setPdfState] = useState('idle');
   const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
@@ -649,13 +649,10 @@ function ResultsPage({ go, toast, boqData }) {
     }
   };
 
-  return (
-    <div className="app-wrap">
-      <AppSidebar currentPage="results" go={go} toast={toast} />
-      <div className="app-main">
-      <div className="res-wrap">
-      <div className="res-pad">
-        <span className="res-back" onClick={() => go('dashboard')}>← Back to dashboard</span>
+  const inner = (
+      <div className="res-wrap" style={embedded ? { minHeight: 'auto' } : undefined}>
+      <div className="res-pad" style={embedded ? { padding: '8px 0' } : undefined}>
+        {!embedded && <span className="res-back" onClick={() => go('dashboard')}>← Back to dashboard</span>}
         <h1 className="res-title">Bill of Quantities</h1>
         <div className="res-meta">
           <span><strong>Drawing:</strong> Commercial Unit — Main Floor Plan</span>
@@ -747,7 +744,14 @@ function ResultsPage({ go, toast, boqData }) {
         </p>
       </div>
       </div>
-      </div>
+  );
+
+  if (embedded) return inner;
+
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="results" go={go} toast={toast} />
+      <div className="app-main">{inner}</div>
     </div>
   );
 }
@@ -820,12 +824,115 @@ const VQ_STAT_ICONS = {
   pound: <span style={{ fontSize: '18px', fontWeight: 700, lineHeight: 1 }}>£</span>,
 };
 
-function DashboardPage({ go, toast, user, onBoqReady }) {
+// Animate a number from 0 to target with an ease-out curve. Skipped entirely for
+// reduced-motion users (value snaps to target).
+function useCountUp(target, duration = 900) {
+  const [val, setVal] = useState(0);
+  useEffect(() => {
+    const n = Number(target) || 0;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) { setVal(n); return; }
+    let raf;
+    const t0 = performance.now();
+    const tick = now => {
+      const p = Math.min(1, (now - t0) / duration);
+      setVal(n * (1 - Math.pow(1 - p, 3)));
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return val;
+}
+
+// Fetch + cache the signed-in user's project list. Shared by Dashboard, Projects,
+// Reports, Exports and History so they all read the same real data.
+function useProjects() {
   const [projects, setProjects] = useState([]);
   const [loading, setLoading]   = useState(true);
+
+  const reload = async () => {
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('request failed');
+      const data = await res.json();
+      setProjects(Array.isArray(data) ? data : []);
+    } catch {
+      setProjects([]);   // on failure show empty state — never fabricate data
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { reload(); }, []);
+  return { projects, loading, reload };
+}
+
+// Derive a chronological activity feed from real project rows — one event per
+// project creation, plus a completion event for projects with a generated BoQ.
+function vqProjectEvents(projects) {
+  const events = [];
+  projects.forEach(p => {
+    events.push({
+      key: `${p.id}-created`, kind: 'created', at: p.created_at,
+      title: 'Project created', sub: p.name || 'Untitled project', projectId: p.id,
+    });
+    if (p.status === 'completed') {
+      events.push({
+        key: `${p.id}-boq`, kind: 'completed', at: p.created_at,
+        title: 'BoQ generated', sub: p.name || 'Untitled project', projectId: p.id,
+      });
+    }
+  });
+  return events.sort((a, b) => new Date(b.at) - new Date(a.at));
+}
+
+// Download a server-generated file (PDF / Excel) for a project's BoQ data.
+async function vqExportBoq(boqData, kind, toast) {
+  const route = kind === 'excel' ? '/export-excel' : '/download';
+  const fname = kind === 'excel' ? 'bill-of-quantities.xlsx' : 'bill-of-quantities.pdf';
+  const token = await vqToken();
+  const res = await fetch(`${VQ_API}${route}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify(boqData),
+    credentials: 'include',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || 'Export failed');
+  }
+  const blob = await res.blob();
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = fname;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Animated stat value — counts up from zero on mount.
+function VDStatValue({ value, money }) {
+  const v = useCountUp(value);
+  return <div className="vd-stat-value">{money ? vqMoney(v) : Math.round(v)}</div>;
+}
+
+function DashboardPage({ go, toast, user, onBoqReady }) {
+  const { projects, loading, reload } = useProjects();
   const [openMenu, setOpenMenu] = useState(null);   // id of the row whose ⋯ menu is open
+  const [chartsIn, setChartsIn] = useState(false);  // triggers chart entrance transitions
+  const importRef = useRef(null);
 
   const [healthStatus, setHealthStatus] = useState(null); // null = checking
+
+  useEffect(() => {
+    const t = setTimeout(() => setChartsIn(true), 180);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -848,27 +955,6 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
     return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // ── Fetch the signed-in user's projects ──────────────────────────────────────
-  const loadProjects = async () => {
-    try {
-      const token = await vqToken();
-      const res = await fetch(`${VQ_API}/projects`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('request failed');
-      const data = await res.json();
-      setProjects(Array.isArray(data) ? data : []);
-    } catch (err) {
-      // On any failure show zeros / empty state — never fabricate data.
-      setProjects([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => { loadProjects(); }, []);
-
   // Close the row menu on any outside click.
   useEffect(() => {
     if (openMenu === null) return;
@@ -878,11 +964,20 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   }, [openMenu]);
 
   // ── Row actions ──────────────────────────────────────────────────────────────
-  const handleViewBoq = (p) => {
+  const handleViewBoq = async (p) => {
     setOpenMenu(null);
-    // The list endpoint omits boq_data; pass whatever the project carries (else null,
-    // which ResultsPage renders as its demo BoQ).
-    if (onBoqReady) onBoqReady(p.boq_data || null);
+    // The list endpoint omits boq_data — fetch the full project row for the real BoQ.
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects/${p.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      const data = res.ok ? await res.json() : null;
+      if (onBoqReady) onBoqReady(data?.boq_data || null);
+    } catch {
+      if (onBoqReady) onBoqReady(null);
+    }
     go('results');
   };
 
@@ -897,13 +992,41 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
       });
       if (res.ok || res.status === 204) {
         toast('Project deleted.', 'success');
-        loadProjects();
+        reload();
       } else {
         toast('Could not delete project. Please try again.', 'error');
       }
     } catch (err) {
       toast('Network error — could not delete project.', 'error');
     }
+  };
+
+  // ── Quick actions ────────────────────────────────────────────────────────────
+  // Demo project: ResultsPage renders its built-in sample BoQ when boqData is null.
+  const handleDemo = () => {
+    if (onBoqReady) onBoqReady(null);
+    go('results');
+  };
+
+  // Import an existing BoQ from a JSON export and open it in the results view.
+  const handleImportFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        if (!normaliseBoq(data).length) {
+          toast('No BoQ line items found in that file.', 'error');
+          return;
+        }
+        if (onBoqReady) onBoqReady(data);
+        toast('BoQ imported.', 'success');
+        go('results');
+      } catch {
+        toast('Invalid file — expected a BoQ JSON export.', 'error');
+      }
+    };
+    reader.readAsText(file);
   };
 
   // ── Derived figures (all client-side from the real response) ─────────────────
@@ -915,6 +1038,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
 
   const recent    = projects.slice(0, 5);
   const completed = projects.filter(p => p.status === 'completed');
+  const events    = vqProjectEvents(projects);
 
   // Status breakdown for the donut.
   const cCompleted  = boqsGenerated;
@@ -930,6 +1054,15 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   // ── Processing-volume line chart (completed BoQs per day, current month) ──────
   const now = new Date();
   const year = now.getFullYear(), month = now.getMonth();
+
+  // Real "this month" figures for the stat-card subtitles — no canned strings.
+  const isThisMonth = iso => {
+    const d = new Date(iso);
+    return !isNaN(d) && d.getFullYear() === year && d.getMonth() === month;
+  };
+  const drawingsThisMonth = projects.filter(p => isThisMonth(p.created_at))
+    .reduce((s, p) => s + (Number(p.page_count) || 0), 0);
+  const boqsThisMonth = completed.filter(p => isThisMonth(p.created_at)).length;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const perDay = new Array(daysInMonth + 1).fill(0);   // 1-indexed by day
   completed.forEach(p => {
@@ -964,12 +1097,12 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
     <div className="app-wrap">
       <AppSidebar currentPage="dashboard" go={go} user={user} toast={toast} />
       <main className="app-main vd-main">
+        <VQParticleField />
         {/* ── Top bar ── */}
-        <div className="vd-top">
+        <div className="vd-top vd-rise">
           <div>
-            <h1 className="vd-h1">Dashboard</h1>
-            <p className="vd-welcome">Welcome back, {welcomeName}</p>
-            <p className="vd-subtitle">Create and manage AI-generated Bills of Quantities</p>
+            <h1 className="vd-h1">Welcome back, {welcomeName}</h1>
+            <p className="vd-subtitle">Create and manage a draft AI generated Bill of Quantities</p>
           </div>
           <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>+ New Project</button>
         </div>
@@ -977,16 +1110,20 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
         {/* ── Four stat cards ── */}
         <div className="vd-stats">
           {[
-            { icon: 'folder', bg: '#d77555', label: 'Projects',        value: totalProjects,        sub: `${activeCount} active` },
-            { icon: 'doc',    bg: '#3b82f6', label: 'Drawings',        value: totalDrawings,        sub: 'This month' },
-            { icon: 'check',  bg: '#22c55e', label: 'BOQs Generated',  value: boqsGenerated,        sub: 'This month' },
-            { icon: 'pound',  bg: '#8b5cf6', label: 'Estimated Value', value: vqMoney(totalValue),  sub: 'Across all projects' },
+            { icon: 'folder', bg: '#d77555', label: 'Projects',        value: totalProjects, money: false,
+              sub: totalProjects === 0 ? 'None yet' : `${activeCount} active` },
+            { icon: 'doc',    bg: '#3b82f6', label: 'Drawings',        value: totalDrawings, money: false,
+              sub: totalDrawings === 0 ? 'None uploaded' : `${drawingsThisMonth} this month` },
+            { icon: 'check',  bg: '#22c55e', label: 'BOQs Generated',  value: boqsGenerated, money: false,
+              sub: boqsGenerated === 0 ? 'None completed' : `${boqsThisMonth} this month` },
+            { icon: 'pound',  bg: '#8b5cf6', label: 'Estimated Value', value: totalValue, money: true,
+              sub: totalValue === 0 ? 'No estimates yet' : 'Across all projects' },
           ].map((c, i) => (
-            <div key={i} className="vd-card vd-stat">
+            <div key={i} className="vd-card vd-stat vd-rise" style={{ animationDelay: `${0.06 * (i + 1)}s` }}>
               <div className="vd-stat-ico" style={{ background: c.bg }}>{VQ_STAT_ICONS[c.icon]}</div>
               <div style={{ minWidth: 0 }}>
                 <div className="vd-stat-label">{c.label}</div>
-                <div className="vd-stat-value">{c.value}</div>
+                <VDStatValue value={c.value} money={c.money} />
                 <div className="vd-stat-sub">{c.sub}</div>
               </div>
             </div>
@@ -995,93 +1132,136 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
 
         {/* ── Recent projects + right rail ── */}
         <div className="vd-grid">
-          {/* Recent projects */}
-          <div className="vd-card vd-panel">
-            <div className="vd-section-hd">
-              <span className="vd-section-title">Recent Projects</span>
-              <span className="vd-link" onClick={() => go('upload')}>View all projects →</span>
-            </div>
-
-            {recent.length === 0 ? (
-              <div className="vd-empty">
-                <p className="vd-empty-p">No projects yet — upload your first drawing</p>
-                <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+          {/* Left column: recent projects + hero banner */}
+          <div className="vd-col">
+            <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.18s' }}>
+              <div className="vd-section-hd">
+                <span className="vd-section-title">Recent Projects</span>
+                <span className="vd-link" onClick={() => go('projects')}>View all projects →</span>
               </div>
-            ) : (
-              recent.map(p => {
-                const badge = vqBadge(p.status);
-                return (
-                  <div key={p.id} className="vd-proj-row">
-                    <div className="vd-thumb" />
-                    <div className="vd-proj-main">
-                      <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
-                      <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
-                    </div>
-                    <div className="vd-proj-right">
-                      <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
-                      {p.page_count != null && (
-                        <span className="vd-proj-meta">{p.page_count} page{p.page_count !== 1 ? 's' : ''}</span>
-                      )}
-                      {p.estimated_value != null && Number(p.estimated_value) > 0 && (
-                        <span className="vd-proj-meta">{vqMoney(p.estimated_value)} estimate</span>
-                      )}
-                      <div style={{ position: 'relative' }}>
-                        <button
-                          className="vd-dots"
-                          onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id); }}
-                        >⋯</button>
-                        {openMenu === p.id && (
-                          <div className="vd-menu" onClick={(e) => e.stopPropagation()}>
-                            <div className="vd-menu-item" onClick={() => handleViewBoq(p)}>View BoQ</div>
-                            <div className="vd-menu-item danger" onClick={() => handleDelete(p.id)}>Delete</div>
-                          </div>
+
+              {loading ? (
+                <p className="vd-muted">Loading projects…</p>
+              ) : recent.length === 0 ? (
+                <div className="vd-empty">
+                  <p className="vd-empty-p">No projects yet — upload your first drawing</p>
+                  <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+                </div>
+              ) : (
+                recent.map(p => {
+                  const badge = vqBadge(p.status);
+                  return (
+                    <div key={p.id} className="vd-proj-row clickable" onClick={() => go('workspace', { projectId: p.id })}>
+                      <div className="vd-thumb" />
+                      <div className="vd-proj-main">
+                        <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
+                        <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
+                      </div>
+                      <div className="vd-proj-right">
+                        <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
+                        {p.page_count != null && (
+                          <span className="vd-proj-meta">{p.page_count} page{p.page_count !== 1 ? 's' : ''}</span>
                         )}
+                        {p.estimated_value != null && Number(p.estimated_value) > 0 && (
+                          <span className="vd-proj-meta">{vqMoney(p.estimated_value)} estimate</span>
+                        )}
+                        <div style={{ position: 'relative' }}>
+                          <button
+                            className="vd-dots"
+                            onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id); }}
+                          >⋯</button>
+                          {openMenu === p.id && (
+                            <div className="vd-menu" onClick={(e) => e.stopPropagation()}>
+                              <div className="vd-menu-item" onClick={() => go('workspace', { projectId: p.id })}>Open project</div>
+                              <div className="vd-menu-item" onClick={() => handleViewBoq(p)}>View BoQ</div>
+                              <div className="vd-menu-item danger" onClick={() => handleDelete(p.id)}>Delete</div>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
+
+            {/* Hero banner — animated wireframe skyline */}
+            <div className="vd-banner vd-rise" style={{ animationDelay: '0.26s' }}>
+              <svg className="vd-banner-art" viewBox="0 0 600 170" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                <defs>
+                  <linearGradient id="vdScanGrad" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0%" stopColor="#D9855B" stopOpacity="0" />
+                    <stop offset="50%" stopColor="#D9855B" stopOpacity="0.06" />
+                    <stop offset="100%" stopColor="#D9855B" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <g fill="none" stroke="#D9855B" strokeWidth="1">
+                  {/* wireframe skyline, drawn in as the panel appears */}
+                  <path className="vd-draw" pathLength="1" strokeOpacity="0.16"
+                    d="M0,150 L40,150 L40,96 L86,96 L86,150 L120,150 L120,70 L150,52 L180,70 L180,150 L228,150 L228,108 L270,108 L270,150" />
+                  <path className="vd-draw" pathLength="1" strokeOpacity="0.16" style={{ animationDelay: '0.45s' }}
+                    d="M270,150 L300,150 L300,40 L348,40 L348,150 L392,150 L392,84 L436,84 L436,150 L600,150" />
+                  {/* isometric block */}
+                  <path className="vd-draw" pathLength="1" strokeOpacity="0.2" style={{ animationDelay: '0.9s' }}
+                    d="M470,150 L470,92 L510,72 L550,92 L550,150 M470,92 L510,112 L550,92 M510,112 L510,150" />
+                  {/* floor lines */}
+                  <path strokeOpacity="0.07" d="M300,60 L348,60 M300,80 L348,80 M300,100 L348,100 M300,120 L348,120" />
+                  <path strokeOpacity="0.07" d="M120,90 L180,90 M120,110 L180,110 M120,130 L180,130" />
+                </g>
+                <rect className="vd-scan" x="0" y="0" width="220" height="170" fill="url(#vdScanGrad)" />
+              </svg>
+              <div className="vd-banner-inner">
+                <p className="vd-banner-h">Construction Intelligence Ready</p>
+                <p className="vd-banner-p">Upload a drawing to begin automated measurement and BoQ generation.</p>
+                <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+              </div>
+            </div>
           </div>
 
           {/* Right rail */}
           <div className="vd-col">
             {/* Quick actions */}
-            <div className="vd-card vd-panel">
+            <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.22s' }}>
               <div className="vd-section-hd"><span className="vd-section-title">Quick Actions</span></div>
               <div className="vd-qa">
                 <button className="vd-qa-btn vd-qa-primary" onClick={() => go('upload')}>↑ Upload Drawing</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>View Demo Project</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => {}}>Import Existing BOQ</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={handleDemo}>View Demo Project</button>
+                <button className="vd-qa-btn vd-qa-dark" onClick={() => importRef.current?.click()}>Import Existing BOQ</button>
                 <button className="vd-qa-btn vd-qa-dark" onClick={() => go('projectsetup')}>＋ Create Project</button>
-                <button className="vd-qa-btn vd-qa-dark" onClick={() => go('upload')}>＋ Create Project</button>
+                <input ref={importRef} type="file" accept=".json,application/json" style={{ display: 'none' }}
+                  onChange={e => { handleImportFile(e.target.files[0]); e.target.value = ''; }} />
               </div>
             </div>
 
             {/* Recent activity */}
-            <div className="vd-card vd-panel">
+            <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.3s' }}>
               <div className="vd-section-hd">
                 <span className="vd-section-title">Recent Activity</span>
-                <span className="vd-link" onClick={() => {}}>View all activity →</span>
+                <span className="vd-link" onClick={() => go('history')}>View all activity →</span>
               </div>
-              {completed.length === 0 ? (
+              {loading ? (
+                <p className="vd-muted">Loading…</p>
+              ) : events.length === 0 ? (
                 <p className="vd-muted">No recent activity.</p>
               ) : (
-                completed.slice(0, 5).map(p => (
-                  <div key={p.id} className="vd-act">
-                    <div className="vd-act-dot">✓</div>
-                    <div className="vd-act-body">
-                      <div className="vd-act-title">BOQ generated successfully</div>
-                      <div className="vd-act-sub">{p.name || 'Untitled project'}</div>
+                events.slice(0, 5).map(ev => (
+                  <div key={ev.key} className="vd-act">
+                    <div className="vd-act-dot" style={ev.kind === 'created'
+                      ? { background: 'rgba(47,111,237,0.16)', color: '#6f9bf5' } : undefined}>
+                      {ev.kind === 'created' ? '+' : '✓'}
                     </div>
-                    <span className="vd-act-time">{vqTimeAgo(p.created_at)}</span>
+                    <div className="vd-act-body">
+                      <div className="vd-act-title">{ev.title}</div>
+                      <div className="vd-act-sub">{ev.sub}</div>
+                    </div>
+                    <span className="vd-act-time">{vqTimeAgo(ev.at)}</span>
                   </div>
                 ))
               )}
             </div>
 
             {/* System status */}
-            <div className="vd-card vd-panel">
+            <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.38s' }}>
               <div className="vd-section-hd"><span className="vd-section-title">System Status</span></div>
               <div className="vd-status-row">
                 <span className="vd-status-label">AI Engine</span>
@@ -1128,10 +1308,10 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
         {/* ── Charts row ── */}
         <div className="vd-charts">
           {/* Processing volume */}
-          <div className="vd-card vd-panel">
+          <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.34s' }}>
             <div className="vd-section-hd">
               <span className="vd-section-title">Processing Volume <span style={{ fontSize: '13px', color: '#8b92a0', fontWeight: 400 }}>(This Month)</span></span>
-              <span className="vd-chart-pill">This month ▾</span>
+              <span className="vd-chart-pill">{boqsThisMonth} BoQ{boqsThisMonth !== 1 ? 's' : ''} this month</span>
             </div>
             <svg viewBox={`0 0 ${CW} ${CH}`} width="100%" style={{ display: 'block', height: 'auto' }}>
               <defs>
@@ -1147,9 +1327,11 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
               })}
               <text x={padL - 8} y={padT + 4} fill="#6b7280" fontSize="11" textAnchor="end">{maxCount}</text>
               <text x={padL - 8} y={padT + plotH + 4} fill="#6b7280" fontSize="11" textAnchor="end">0</text>
-              {/* area + line */}
-              <polygon points={areaStr} fill="url(#vdAreaFill)" />
-              <polyline points={lineStr} fill="none" stroke="#d77555" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+              {/* area + line — line draws itself in, area fades up behind it */}
+              <polygon points={areaStr} fill="url(#vdAreaFill)"
+                style={{ opacity: chartsIn ? 1 : 0, transition: 'opacity 1.2s ease 0.5s' }} />
+              <polyline className="vd-draw" pathLength="1" points={lineStr} fill="none"
+                stroke="#d77555" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
               {/* x labels */}
               {dayLabels.map(d => (
                 <text key={d} x={xFor(d)} y={CH - 6} fill="#6b7280" fontSize="11" textAnchor="middle">{d} {monthName}</text>
@@ -1158,7 +1340,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
           </div>
 
           {/* Projects by status donut */}
-          <div className="vd-card vd-panel">
+          <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.4s' }}>
             <div className="vd-section-hd"><span className="vd-section-title">Projects by Status</span></div>
             <div className="vd-donut-wrap">
               <div className="vd-donut">
@@ -1168,8 +1350,9 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
                     const len = DC * (s.v / statusTotal);
                     const el = (
                       <circle key={i} cx="75" cy="75" r={R} fill="none" stroke={s.color} strokeWidth="16"
-                        strokeDasharray={`${len.toFixed(2)} ${(DC - len).toFixed(2)}`}
+                        strokeDasharray={chartsIn ? `${len.toFixed(2)} ${(DC - len).toFixed(2)}` : `0 ${DC.toFixed(2)}`}
                         strokeDashoffset={(-acc).toFixed(2)}
+                        style={{ transition: `stroke-dasharray 0.9s cubic-bezier(0.22,1,0.36,1) ${0.3 + i * 0.15}s` }}
                         transform="rotate(-90 75 75)" />
                     );
                     acc += len;
@@ -1196,6 +1379,371 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
               </div>
             </div>
           </div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── PROJECTS ──────────────────────────────────────────────────────────────────────
+// Full project list — every project is viewable and selectable from here.
+function ProjectsPage({ go, toast, onBoqReady }) {
+  const { projects, loading, reload } = useProjects();
+  const [openMenu, setOpenMenu] = useState(null);
+
+  useEffect(() => {
+    if (openMenu === null) return;
+    const close = () => setOpenMenu(null);
+    window.addEventListener('click', close);
+    return () => window.removeEventListener('click', close);
+  }, [openMenu]);
+
+  const handleViewBoq = async (p) => {
+    setOpenMenu(null);
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects/${p.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      const data = res.ok ? await res.json() : null;
+      if (onBoqReady) onBoqReady(data?.boq_data || null);
+    } catch {
+      if (onBoqReady) onBoqReady(null);
+    }
+    go('results');
+  };
+
+  const handleDelete = async (id) => {
+    setOpenMenu(null);
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (res.ok || res.status === 204) { toast('Project deleted.', 'success'); reload(); }
+      else toast('Could not delete project. Please try again.', 'error');
+    } catch {
+      toast('Network error — could not delete project.', 'error');
+    }
+  };
+
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <main className="app-main vd-main">
+        <VQParticleField />
+        <div className="vd-top vd-rise">
+          <div>
+            <h1 className="vd-h1">Projects</h1>
+            <p className="vd-subtitle">
+              {loading ? 'Loading…'
+                : projects.length === 0 ? 'No projects yet'
+                : `${projects.length} project${projects.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+          <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>+ New Project</button>
+        </div>
+
+        <div className="vd-card vd-rise" style={{ animationDelay: '0.1s' }}>
+          {loading ? (
+            <p className="vd-muted" style={{ padding: '18px' }}>Loading projects…</p>
+          ) : projects.length === 0 ? (
+            <div className="vd-empty">
+              <p className="vd-empty-p">No projects yet — create your first project to get started.</p>
+              <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>＋ Create Project</button>
+            </div>
+          ) : (
+            projects.map(p => {
+              const badge = vqBadge(p.status);
+              return (
+                <div key={p.id} className="vq-list-row clickable" onClick={() => go('workspace', { projectId: p.id })}>
+                  <div className="vd-thumb" />
+                  <div className="vd-proj-main">
+                    <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
+                    <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
+                  </div>
+                  <div className="vd-proj-right">
+                    <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
+                    {p.page_count != null && (
+                      <span className="vd-proj-meta">{p.page_count} page{p.page_count !== 1 ? 's' : ''}</span>
+                    )}
+                    {p.estimated_value != null && Number(p.estimated_value) > 0 && (
+                      <span className="vd-proj-meta">{vqMoney(p.estimated_value)} estimate</span>
+                    )}
+                    <div style={{ position: 'relative' }}>
+                      <button className="vd-dots"
+                        onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === p.id ? null : p.id); }}>⋯</button>
+                      {openMenu === p.id && (
+                        <div className="vd-menu" onClick={(e) => e.stopPropagation()}>
+                          <div className="vd-menu-item" onClick={() => go('workspace', { projectId: p.id })}>Open project</div>
+                          <div className="vd-menu-item" onClick={() => handleViewBoq(p)}>View BoQ</div>
+                          <div className="vd-menu-item" onClick={() => go('projectsettings', { projectId: p.id })}>Settings</div>
+                          <div className="vd-menu-item danger" onClick={() => handleDelete(p.id)}>Delete</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── REPORTS ───────────────────────────────────────────────────────────────────────
+// Portfolio summary computed entirely from the user's real project data.
+function ReportsPage({ go, toast }) {
+  const { projects, loading } = useProjects();
+  const [barsIn, setBarsIn] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setBarsIn(true), 250);
+    return () => clearTimeout(t);
+  }, []);
+
+  const total      = projects.length;
+  const completed  = projects.filter(p => p.status === 'completed').length;
+  const processing = projects.filter(p => p.status === 'processing').length;
+  const preparing  = total - completed - processing;
+  const totalValue = projects.reduce((s, p) => s + (Number(p.estimated_value) || 0), 0);
+  const valued     = projects.filter(p => Number(p.estimated_value) > 0);
+  const avgValue   = valued.length ? totalValue / valued.length : 0;
+
+  const rows = [
+    { name: 'Completed',   v: completed,  color: '#1ea672' },
+    { name: 'In Progress', v: processing, color: '#f0a020' },
+    { name: 'Preparing',   v: preparing,  color: '#2f6fed' },
+  ];
+
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="reports" go={go} toast={toast} />
+      <main className="app-main vd-main">
+        <VQParticleField />
+        <div className="vd-top vd-rise">
+          <div>
+            <h1 className="vd-h1">Reports</h1>
+            <p className="vd-subtitle">Portfolio summary across all your projects</p>
+          </div>
+        </div>
+
+        <div className="vd-stats">
+          {[
+            { icon: 'folder', bg: '#d77555', label: 'Total Projects',  value: total, money: false,
+              sub: total === 0 ? 'None yet' : 'All time' },
+            { icon: 'check',  bg: '#22c55e', label: 'Completed BoQs',  value: completed, money: false,
+              sub: completed === 0 ? 'None completed' : `${Math.round(completed / Math.max(1, total) * 100)}% of projects` },
+            { icon: 'pound',  bg: '#8b5cf6', label: 'Total Estimated', value: totalValue, money: true,
+              sub: totalValue === 0 ? 'No estimates yet' : 'Across all projects' },
+            { icon: 'doc',    bg: '#3b82f6', label: 'Average Estimate', value: avgValue, money: true,
+              sub: valued.length === 0 ? 'No priced projects yet' : `Across ${valued.length} priced project${valued.length !== 1 ? 's' : ''}` },
+          ].map((c, i) => (
+            <div key={i} className="vd-card vd-stat vd-rise" style={{ animationDelay: `${0.06 * (i + 1)}s` }}>
+              <div className="vd-stat-ico" style={{ background: c.bg }}>{VQ_STAT_ICONS[c.icon]}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="vd-stat-label">{c.label}</div>
+                <VDStatValue value={c.value} money={c.money} />
+                <div className="vd-stat-sub">{c.sub}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.24s', marginBottom: '24px' }}>
+          <div className="vd-section-hd"><span className="vd-section-title">Status Breakdown</span></div>
+          {loading ? (
+            <p className="vd-muted">Loading…</p>
+          ) : total === 0 ? (
+            <p className="vd-muted">No projects to report on yet.</p>
+          ) : (
+            rows.map((r, i) => (
+              <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '9px 0' }}>
+                <span style={{ width: '92px', fontSize: '13px', color: 'rgba(255,255,255,0.78)', flexShrink: 0 }}>{r.name}</span>
+                <div className="vq-bar-track">
+                  <div className="vq-bar-fill" style={{
+                    background: r.color,
+                    width: barsIn ? `${(r.v / total) * 100}%` : 0,
+                    transitionDelay: `${i * 0.12}s`,
+                  }} />
+                </div>
+                <span style={{ width: '70px', textAlign: 'right', fontSize: '13px', color: '#8b92a0', flexShrink: 0 }}>
+                  {r.v} ({Math.round(r.v / total * 100)}%)
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.32s' }}>
+          <div className="vd-section-hd"><span className="vd-section-title">Project Values</span></div>
+          {loading ? (
+            <p className="vd-muted">Loading…</p>
+          ) : valued.length === 0 ? (
+            <p className="vd-muted">No priced projects yet — generate a BoQ to see estimated values here.</p>
+          ) : (
+            valued.map(p => {
+              const maxVal = Math.max(...valued.map(x => Number(x.estimated_value) || 0), 1);
+              return (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '9px 0' }}>
+                  <span style={{ width: '180px', fontSize: '13px', color: 'rgba(255,255,255,0.78)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 }}>
+                    {p.name || 'Untitled project'}
+                  </span>
+                  <div className="vq-bar-track">
+                    <div className="vq-bar-fill" style={{
+                      background: '#d77555',
+                      width: barsIn ? `${(Number(p.estimated_value) / maxVal) * 100}%` : 0,
+                    }} />
+                  </div>
+                  <span style={{ width: '80px', textAlign: 'right', fontSize: '13px', color: '#8b92a0', flexShrink: 0 }}>
+                    {vqMoney(p.estimated_value)}
+                  </span>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── EXPORTS ───────────────────────────────────────────────────────────────────────
+// Download any completed BoQ as PDF or Excel via the existing export endpoints.
+function ExportsPage({ go, toast }) {
+  const { projects, loading } = useProjects();
+  const [busy, setBusy] = useState(null);   // `${projectId}-${kind}` while generating
+
+  const completed = projects.filter(p => p.status === 'completed');
+
+  const handleExport = async (p, kind) => {
+    const key = `${p.id}-${kind}`;
+    if (busy) return;
+    setBusy(key);
+    toast(`Generating ${kind === 'excel' ? 'Excel' : 'PDF'}…`, 'info');
+    try {
+      const token = await vqToken();
+      const res = await fetch(`${VQ_API}/projects/${p.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Could not load project BoQ.');
+      const data = await res.json();
+      if (!data.boq_data) throw new Error('This project has no BoQ data yet.');
+      await vqExportBoq(data.boq_data, kind, toast);
+      toast(`${kind === 'excel' ? 'Excel' : 'PDF'} downloaded.`, 'success');
+    } catch (e) {
+      toast(e.message || 'Export failed — please try again.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="exports" go={go} toast={toast} />
+      <main className="app-main vd-main">
+        <VQParticleField />
+        <div className="vd-top vd-rise">
+          <div>
+            <h1 className="vd-h1">Exports</h1>
+            <p className="vd-subtitle">Download completed BoQs as PDF or Excel</p>
+          </div>
+        </div>
+
+        <div className="vd-card vd-rise" style={{ animationDelay: '0.1s' }}>
+          {loading ? (
+            <p className="vd-muted" style={{ padding: '18px' }}>Loading…</p>
+          ) : completed.length === 0 ? (
+            <div className="vd-empty">
+              <p className="vd-empty-p">No completed BoQs to export yet — upload a drawing to generate one.</p>
+              <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+            </div>
+          ) : (
+            completed.map(p => (
+              <div key={p.id} className="vq-list-row">
+                <div className="vd-thumb" />
+                <div className="vd-proj-main">
+                  <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
+                  <div className="vd-proj-time">
+                    {vqTimeAgo(p.created_at)}
+                    {Number(p.estimated_value) > 0 && ` · ${vqMoney(p.estimated_value)} estimate`}
+                  </div>
+                </div>
+                <div className="vd-proj-right">
+                  <button className="btn btn-outline btn-pill btn-sm"
+                    style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.75)' }}
+                    disabled={busy !== null}
+                    onClick={() => handleExport(p, 'pdf')}>
+                    {busy === `${p.id}-pdf` ? 'Generating…' : '↓ PDF'}
+                  </button>
+                  <button className="btn btn-outline btn-pill btn-sm"
+                    style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.75)' }}
+                    disabled={busy !== null}
+                    onClick={() => handleExport(p, 'excel')}>
+                    {busy === `${p.id}-excel` ? 'Generating…' : '↓ Excel'}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── HISTORY ───────────────────────────────────────────────────────────────────────
+// Chronological activity timeline derived from real project data.
+function HistoryPage({ go, toast }) {
+  const { projects, loading } = useProjects();
+  const events = vqProjectEvents(projects);
+
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="history" go={go} toast={toast} />
+      <main className="app-main vd-main">
+        <VQParticleField />
+        <div className="vd-top vd-rise">
+          <div>
+            <h1 className="vd-h1">History</h1>
+            <p className="vd-subtitle">
+              {loading ? 'Loading…'
+                : events.length === 0 ? 'No activity yet'
+                : `${events.length} event${events.length !== 1 ? 's' : ''}`}
+            </p>
+          </div>
+        </div>
+
+        <div className="vd-card vd-panel vd-rise" style={{ animationDelay: '0.1s' }}>
+          {loading ? (
+            <p className="vd-muted">Loading…</p>
+          ) : events.length === 0 ? (
+            <p className="vd-muted">No activity yet — your project events will appear here.</p>
+          ) : (
+            <div className="vq-timeline">
+              {events.map((ev, i) => (
+                <div key={ev.key} className="vq-tl-item vd-rise" style={{ animationDelay: `${Math.min(i * 0.05, 0.6)}s` }}>
+                  <span className="vq-tl-dot" style={{ background: ev.kind === 'completed' ? '#2bd496' : '#6f9bf5' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', alignItems: 'baseline' }}>
+                    <div>
+                      <div className="vd-act-title">{ev.title}</div>
+                      <div className="vd-act-sub" style={{ cursor: 'pointer' }}
+                        onClick={() => go('workspace', { projectId: ev.projectId })}>
+                        {ev.sub} →
+                      </div>
+                    </div>
+                    <span className="vd-act-time">{vqTimeAgo(ev.at)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
     </div>
@@ -1285,6 +1833,7 @@ function UploadPage({ go, toast, onBoqReady }) {
     <div className="app-wrap">
       <AppSidebar currentPage="upload" go={go} toast={toast} />
       <div className="app-main upload-page">
+        <VQParticleField />
         <div className="upload-wrap">
           <div style={{ textAlign: 'center', marginBottom: '40px', paddingTop: '40px' }}>
             <h2 className="display-md" style={{ marginBottom: '8px', color: 'white' }}>Upload a drawing</h2>
@@ -1325,22 +1874,217 @@ function UploadPage({ go, toast, onBoqReady }) {
 }
 
 // ─── SETTINGS ───────────────────────────────────────────────────────────────────────
-function SettingsPage({ go, toast }) {
+const VQ_RATE_TRADES = [
+  ['Brickwork (stretcher bond)', '£0.65/No'],
+  ['Blockwork (common)', '£0.45/No'],
+  ['Clay tile roof covering', '£38.50/m²'],
+  ['Internal plaster', '£7.50/m²'],
+  ['Emulsion paint (2 coats)', '£2.10/m²'],
+];
+const VQ_REGIONS = ['North West England','London','South East','Yorkshire','East Midlands','West Midlands','Scotland','Wales','Northern Ireland'];
+
+function SettingsPage({ go, toast, user: userProp }) {
   const [tab, setTab] = useState('account');
-  const [saved, setSaved] = useState({});
-  const save = key => { setSaved(p => ({ ...p, [key]: true })); toast('Changes saved.', 'success'); setTimeout(() => setSaved(p => ({ ...p, [key]: false })), 2000); };
+  const [user, setUser] = useState(userProp || null);
+
+  // Resolve the session user when the prop isn't supplied.
+  useEffect(() => {
+    if (userProp) { setUser(userProp); return; }
+    let active = true;
+    if (window.VQAuth) {
+      window.VQAuth.getSession()
+        .then(({ data }) => { if (active && data && data.session) setUser(data.session.user); })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [userProp]);
+
+  const meta = user?.user_metadata || {};
+
+  // ── Account — initialised from the real signed-in user, saved to Supabase ──────
+  const [acct, setAcct] = useState({ first: '', last: '', email: '', phone: '' });
+  const [acctSaving, setAcctSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const m = user.user_metadata || {};
+    const parts = (m.full_name || '').trim().split(/\s+/).filter(Boolean);
+    setAcct({
+      first: m.first_name || parts[0] || '',
+      last:  m.last_name  || parts.slice(1).join(' ') || '',
+      email: user.email || '',
+      phone: m.phone || '',
+    });
+  }, [user]);
+
+  const setA = (k, v) => setAcct(f => ({ ...f, [k]: v }));
+
+  const saveAccount = async () => {
+    if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    if (!acct.first.trim()) { toast('First name is required.', 'error'); return; }
+    setAcctSaving(true);
+    try {
+      const fullName = `${acct.first.trim()} ${acct.last.trim()}`.trim();
+      const { error } = await window.VQAuth.updateUserMeta({
+        first_name: acct.first.trim(),
+        last_name:  acct.last.trim(),
+        full_name:  fullName,
+        phone:      acct.phone.trim(),
+      });
+      if (error) throw error;
+      // Mirror to the profiles table — best-effort, the metadata is canonical.
+      try { await window.VQAuth.updateProfile(user.id, { full_name: fullName }); } catch (e) {}
+
+      const newEmail = acct.email.trim();
+      if (newEmail && newEmail.toLowerCase() !== (user.email || '').toLowerCase()) {
+        const { error: emailErr } = await window.VQAuth.updateEmail(newEmail);
+        if (emailErr) throw emailErr;
+        toast('Profile saved — check your new email for a confirmation link.', 'success');
+      } else {
+        toast('Profile saved.', 'success');
+      }
+    } catch (e) {
+      toast(e.message || 'Could not save profile.', 'error');
+    } finally {
+      setAcctSaving(false);
+    }
+  };
+
+  // ── Password change — verifies the current password before updating ────────────
+  const [pw, setPw] = useState({ current: '', next: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+
+  const changePassword = async () => {
+    if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    if (!pw.current) { toast('Enter your current password.', 'error'); return; }
+    if (pw.next.length < 8) { toast('New password must be at least 8 characters.', 'error'); return; }
+    setPwSaving(true);
+    try {
+      const { error: authErr } = await window.VQAuth.signIn(user.email, pw.current);
+      if (authErr) throw new Error('Current password is incorrect.');
+      const { error } = await window.VQAuth.updatePassword(pw.next);
+      if (error) throw error;
+      setPw({ current: '', next: '' });
+      toast('Password updated.', 'success');
+    } catch (e) {
+      toast(e.message || 'Could not update password.', 'error');
+    } finally {
+      setPwSaving(false);
+    }
+  };
+
+  // ── Danger zone ─────────────────────────────────────────────────────────────────
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const handleDeleteAccount = () => {
+    if (!confirmDelete) { setConfirmDelete(true); return; }
+    // Account deletion requires a server-side check — open a pre-filled request.
+    window.location.href = 'mailto:hello@vulcanquanta.com'
+      + '?subject=' + encodeURIComponent('Account deletion request')
+      + '&body=' + encodeURIComponent(`Please permanently delete my Vulcan Quanta account: ${user?.email || ''}`);
+    setConfirmDelete(false);
+  };
+
+  // ── Branding — persisted in user metadata so it survives sign-out ───────────────
+  const [brand, setBrand] = useState({ company: '', website: '', address: '', city: '', primary: '#d77555', secondary: '#0F172A' });
+  const [brandSaving, setBrandSaving] = useState(false);
+  const [logoPreview, setLogoPreview] = useState(() => {
+    try { return localStorage.getItem('vq_brand_logo') || ''; } catch { return ''; }
+  });
+  const logoRef = useRef(null);
+
+  useEffect(() => {
+    if (!user) return;
+    const b = (user.user_metadata || {}).branding || {};
+    setBrand({
+      company: b.company || '', website: b.website || '',
+      address: b.address || '', city: b.city || '',
+      primary: b.primary || '#d77555', secondary: b.secondary || '#0F172A',
+    });
+  }, [user]);
+
+  const setB = (k, v) => setBrand(f => ({ ...f, [k]: v }));
+
+  const saveBranding = async () => {
+    if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    setBrandSaving(true);
+    try {
+      const { error } = await window.VQAuth.updateUserMeta({ branding: brand });
+      if (error) throw error;
+      toast('Branding saved.', 'success');
+    } catch (e) {
+      toast(e.message || 'Could not save branding.', 'error');
+    } finally {
+      setBrandSaving(false);
+    }
+  };
+
+  const handleLogoFile = (file) => {
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('Logo must be under 2 MB.', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      try { localStorage.setItem('vq_brand_logo', reader.result); } catch (e) {}
+      setLogoPreview(reader.result);
+      toast('Logo saved.', 'success');
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // ── Rates — region, uplift and per-trade overrides persisted in metadata ────────
+  const [rates, setRates] = useState({ region: VQ_REGIONS[0], uplift: '0', overrides: {} });
+  const [ratesSaving, setRatesSaving] = useState(false);
+
+  useEffect(() => {
+    if (!user) return;
+    const r = (user.user_metadata || {}).rates || {};
+    setRates({
+      region: r.region || VQ_REGIONS[0],
+      uplift: r.uplift != null ? String(r.uplift) : '0',
+      overrides: r.overrides || {},
+    });
+  }, [user]);
+
+  const saveRates = async () => {
+    if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    setRatesSaving(true);
+    try {
+      const { error } = await window.VQAuth.updateUserMeta({
+        rates: {
+          region: rates.region,
+          uplift: Number(rates.uplift) || 0,
+          overrides: rates.overrides,
+        },
+      });
+      if (error) throw error;
+      toast('Rate overrides saved.', 'success');
+    } catch (e) {
+      toast(e.message || 'Could not save rates.', 'error');
+    } finally {
+      setRatesSaving(false);
+    }
+  };
+
+  // ── Billing — real plan from the account; nothing fabricated ────────────────────
+  const planCode = ((meta.plan || 'free') + '').toLowerCase();
+  const planInfo = planCode === 'pro'    ? { name: 'Pro',    price: '£39/month' }
+                 : planCode === 'studio' ? { name: 'Studio', price: '£99/month' }
+                 : { name: 'Free', price: '£0/month' };
+  const memberSince = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
 
   const tabs = [
-    { id: 'account',  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>, label: 'Account' },
-    { id: 'branding', icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/><circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/><path d="M12 20a8 8 0 100-16"/></svg>, label: 'Branding' },
-    { id: 'rates',    icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>, label: 'Rates' },
-    { id: 'billing',  icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>, label: 'Billing' },
+    { id: 'account',  label: 'Account' },
+    { id: 'branding', label: 'Branding' },
+    { id: 'rates',    label: 'Rates' },
+    { id: 'billing',  label: 'Billing' },
   ];
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="settings" go={go} toast={toast} />
+      <AppSidebar currentPage="settings" go={go} user={user} toast={toast} />
       <main className="app-main dash-main">
+        <VQParticleField />
         {/* Horizontal tab bar */}
         <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '28px', paddingTop: '8px' }}>
           {tabs.map(t => (
@@ -1358,133 +2102,190 @@ function SettingsPage({ go, toast }) {
             </button>
           ))}
         </div>
+
         {tab === 'account' && (
           <>
             <div className="dash-hd"><h1 className="dash-h1">Account</h1></div>
-            <div className="scard">
+            <div className="scard vd-rise">
               <p className="scard-title">Personal details</p>
               <div className="form-grid">
-                <div className="fld"><label className="flbl">First name</label><input className="finp" defaultValue="James" /></div>
-                <div className="fld"><label className="flbl">Last name</label><input className="finp" defaultValue="Henderson" /></div>
-                <div className="fld"><label className="flbl">Email address</label><input className="finp" type="email" defaultValue="james@henderson-qs.co.uk" /></div>
-                <div className="fld"><label className="flbl">Phone</label><input className="finp" type="tel" defaultValue="+44 7700 900000" /></div>
+                <div className="fld"><label className="flbl">First name</label>
+                  <input className="finp" value={acct.first} onChange={e => setA('first', e.target.value)} placeholder="Your first name" /></div>
+                <div className="fld"><label className="flbl">Last name</label>
+                  <input className="finp" value={acct.last} onChange={e => setA('last', e.target.value)} placeholder="Your last name" /></div>
+                <div className="fld"><label className="flbl">Email address</label>
+                  <input className="finp" type="email" value={acct.email} onChange={e => setA('email', e.target.value)} placeholder="you@example.com" /></div>
+                <div className="fld"><label className="flbl">Phone</label>
+                  <input className="finp" type="tel" value={acct.phone} onChange={e => setA('phone', e.target.value)} placeholder="Optional" /></div>
               </div>
-              <button className="btn btn-amber btn-pill" onClick={() => save('account')}>{saved.account ? '✓ Saved' : 'Save changes'}</button>
+              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', marginBottom: '16px' }}>
+                Changing your email sends a confirmation link to the new address before it takes effect.
+              </p>
+              <button className="btn btn-amber btn-pill" onClick={saveAccount} disabled={acctSaving}>
+                {acctSaving ? 'Saving…' : 'Save changes'}
+              </button>
             </div>
-            <div className="scard">
+
+            <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Change password</p>
               <div className="form-grid">
-                <div className="fld"><label className="flbl">Current password</label><input className="finp" type="password" placeholder="••••••••" /></div>
-                <div className="fld"><label className="flbl">New password</label><input className="finp" type="password" placeholder="••••••••" /></div>
+                <div className="fld"><label className="flbl">Current password</label>
+                  <input className="finp" type="password" placeholder="••••••••" autoComplete="current-password"
+                    value={pw.current} onChange={e => setPw(f => ({ ...f, current: e.target.value }))} /></div>
+                <div className="fld"><label className="flbl">New password</label>
+                  <input className="finp" type="password" placeholder="8+ characters" autoComplete="new-password"
+                    value={pw.next} onChange={e => setPw(f => ({ ...f, next: e.target.value }))} /></div>
               </div>
-              <button className="btn btn-outline btn-pill" onClick={() => save('password')}>{saved.password ? '✓ Updated' : 'Update password'}</button>
+              <button className="btn btn-outline btn-pill" onClick={changePassword} disabled={pwSaving}>
+                {pwSaving ? 'Updating…' : 'Update password'}
+              </button>
             </div>
-            <div className="scard">
+
+            <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
               <p className="scard-title" style={{ color: 'var(--red)' }}>Danger zone</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>Permanently delete your account. Cannot be undone.</p>
-              <button className="btn btn-pill" style={{ background: 'var(--red)', color: 'white' }} onClick={() => toast('Contact support to delete your account.', 'info')}>Delete account</button>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
+                Permanently delete your account and all project data. Cannot be undone.
+              </p>
+              <button className="btn btn-pill"
+                style={{ background: confirmDelete ? 'var(--red)' : 'transparent', color: confirmDelete ? 'white' : 'var(--red)', border: '1px solid var(--red)', padding: '10px 24px' }}
+                onClick={handleDeleteAccount}>
+                {confirmDelete ? 'Confirm — send deletion request' : 'Delete account'}
+              </button>
+              {confirmDelete && (
+                <button className="btn btn-ghost btn-pill" style={{ marginLeft: '12px' }} onClick={() => setConfirmDelete(false)}>
+                  Cancel
+                </button>
+              )}
             </div>
           </>
         )}
+
         {tab === 'branding' && (
           <>
             <div className="dash-hd"><h1 className="dash-h1">Branding</h1></div>
-            <div className="scard">
+            <div className="scard vd-rise">
               <p className="scard-title">Company identity</p>
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
               <div className="form-grid">
-                <div className="fld"><label className="flbl">Company name</label><input className="finp" defaultValue="Henderson QS Ltd" /></div>
-                <div className="fld"><label className="flbl">Website</label><input className="finp" defaultValue="www.henderson-qs.co.uk" /></div>
-                <div className="fld"><label className="flbl">Address</label><input className="finp" defaultValue="12 Victoria Street" /></div>
-                <div className="fld"><label className="flbl">City / Postcode</label><input className="finp" defaultValue="Manchester, M1 2EX" /></div>
+                <div className="fld"><label className="flbl">Company name</label>
+                  <input className="finp" value={brand.company} onChange={e => setB('company', e.target.value)} placeholder="Your company name" /></div>
+                <div className="fld"><label className="flbl">Website</label>
+                  <input className="finp" value={brand.website} onChange={e => setB('website', e.target.value)} placeholder="www.example.co.uk" /></div>
+                <div className="fld"><label className="flbl">Address</label>
+                  <input className="finp" value={brand.address} onChange={e => setB('address', e.target.value)} placeholder="Street address" /></div>
+                <div className="fld"><label className="flbl">City / Postcode</label>
+                  <input className="finp" value={brand.city} onChange={e => setB('city', e.target.value)} placeholder="City, Postcode" /></div>
               </div>
             </div>
-            <div className="scard">
+            <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Logo</p>
-              <div className="upload-zone" style={{ padding: '32px' }} onClick={() => toast('Logo upload coming soon.', 'info')}>
+              {logoPreview && (
+                <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+                  <img src={logoPreview} alt="Company logo"
+                    style={{ height: '56px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', padding: '6px' }} />
+                  <button className="btn btn-ghost btn-sm"
+                    onClick={() => { try { localStorage.removeItem('vq_brand_logo'); } catch (e) {} setLogoPreview(''); toast('Logo removed.', 'info'); }}>
+                    Remove
+                  </button>
+                </div>
+              )}
+              <div className="upload-zone" style={{ padding: '32px' }}
+                onClick={() => logoRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); handleLogoFile(e.dataTransfer.files[0]); }}>
                 <p style={{ fontSize: '14px', color: 'var(--c-400)' }}>Drop your logo here or click to upload. PNG or SVG, max 2 MB.</p>
               </div>
+              <input ref={logoRef} type="file" accept=".png,.svg,.jpg,.jpeg,.webp" style={{ display: 'none' }}
+                onChange={e => { handleLogoFile(e.target.files[0]); e.target.value = ''; }} />
             </div>
-            <div className="scard">
+            <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
               <p className="scard-title">Brand colours</p>
               <div className="form-grid">
-                <div className="fld"><label className="flbl">Primary colour</label><input className="finp" defaultValue="#d77555" /></div>
-                <div className="fld"><label className="flbl">Secondary / footer</label><input className="finp" defaultValue="#0F172A" /></div>
+                <div className="fld"><label className="flbl">Primary colour</label>
+                  <input className="finp" value={brand.primary} onChange={e => setB('primary', e.target.value)} /></div>
+                <div className="fld"><label className="flbl">Secondary / footer</label>
+                  <input className="finp" value={brand.secondary} onChange={e => setB('secondary', e.target.value)} /></div>
               </div>
-              <button className="btn btn-amber btn-pill" onClick={() => save('branding')}>{saved.branding ? '✓ Saved' : 'Save branding'}</button>
+              <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>
+                {brandSaving ? 'Saving…' : 'Save branding'}
+              </button>
             </div>
           </>
         )}
+
         {tab === 'rates' && (
           <>
             <div className="dash-hd"><h1 className="dash-h1">Rate overrides</h1></div>
-            <div className="scard">
+            <div className="scard vd-rise">
               <p className="scard-title">Regional settings</p>
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Base rates follow BCIS Q2 2026. Override individual trades below. Leave blank to use BCIS defaults.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Region</label>
-                  <select className="finp">{['North West England','London','South East','Yorkshire','East Midlands','West Midlands','Scotland','Wales'].map(r => <option key={r}>{r}</option>)}</select>
+                  <select className="finp" value={rates.region} onChange={e => setRates(f => ({ ...f, region: e.target.value }))}>
+                    {VQ_REGIONS.map(r => <option key={r}>{r}</option>)}
+                  </select>
                 </div>
-                <div className="fld"><label className="flbl">Regional uplift (%)</label><input className="finp" type="number" defaultValue="0" /></div>
+                <div className="fld"><label className="flbl">Regional uplift (%)</label>
+                  <input className="finp" type="number" value={rates.uplift}
+                    onChange={e => setRates(f => ({ ...f, uplift: e.target.value }))} /></div>
               </div>
             </div>
-            <div className="scard">
+            <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Trade overrides (£/unit)</p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
                 <thead><tr style={{ background: 'rgba(15,20,28,0.7)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
                   {['Trade','BCIS default','Your override'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.45)', fontSize: '13px' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
-                  {[['Brickwork (stretcher bond)','£0.65/No'],['Blockwork (common)','£0.45/No'],['Clay tile roof covering','£38.50/m²'],['Internal plaster','£7.50/m²'],['Emulsion paint (2 coats)','£2.10/m²']].map(([trade, bcis], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  {VQ_RATE_TRADES.map(([trade, bcis]) => (
+                    <tr key={trade} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
                       <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{trade}</td>
                       <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.38)' }}>{bcis}</td>
-                      <td style={{ padding: '12px 16px' }}><input type="text" placeholder="e.g. 0.70" className="finp" style={{ width: '120px' }} /></td>
+                      <td style={{ padding: '12px 16px' }}>
+                        <input type="text" placeholder="e.g. 0.70" className="finp" style={{ width: '120px' }}
+                          value={rates.overrides[trade] || ''}
+                          onChange={e => setRates(f => ({ ...f, overrides: { ...f.overrides, [trade]: e.target.value } }))} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <div style={{ marginTop: '24px' }}>
-                <button className="btn btn-amber btn-pill" onClick={() => save('rates')}>{saved.rates ? '✓ Saved' : 'Save rate overrides'}</button>
+                <button className="btn btn-amber btn-pill" onClick={saveRates} disabled={ratesSaving}>
+                  {ratesSaving ? 'Saving…' : 'Save rate overrides'}
+                </button>
               </div>
             </div>
           </>
         )}
+
         {tab === 'billing' && (
           <>
             <div className="dash-hd"><h1 className="dash-h1">Billing</h1></div>
-            <div className="scard">
+            <div className="scard vd-rise">
               <p className="scard-title">Current plan</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', marginBottom: '16px' }}>
-                <div><p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px', color: 'white' }}>Pro — £39/month</p><p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)' }}>Renews 4 July 2026</p></div>
+                <div>
+                  <p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px', color: 'white' }}>{planInfo.name} — {planInfo.price}</p>
+                  <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)' }}>
+                    {memberSince ? `Member since ${memberSince}` : 'Active plan on this account'}
+                  </p>
+                </div>
                 <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('pricing')}>Change plan</button>
               </div>
             </div>
-            <div className="scard">
+            <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Payment method</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px', marginBottom: '12px' }}>
-                <span style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>Visa ···· 4242 · Exp 12/28</span>
-                <button className="btn btn-ghost btn-sm" onClick={() => toast('Payment management coming soon.', 'info')}>Replace</button>
-              </div>
-              <button className="btn btn-outline btn-pill btn-sm" onClick={() => toast('Payment management coming soon.', 'info')}>+ Add payment method</button>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
+                No payment method on file. Payment details are collected when you upgrade to a paid plan.
+              </p>
+              <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('pricing')}>View plans →</button>
             </div>
-            <div className="scard">
+            <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
               <p className="scard-title">Invoices</p>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead><tr style={{ background: 'rgba(15,20,28,0.7)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                  {['Date','Amount','Status',''].map((h, i) => <th key={i} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.45)', fontSize: '13px' }}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {[['4 Jun 2026','£39.00'],['4 May 2026','£39.00'],['4 Apr 2026','£39.00']].map(([date, amount], i) => (
-                    <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{date}</td>
-                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{amount}</td>
-                      <td style={{ padding: '12px 16px' }}><span style={{ color: 'var(--green)', fontWeight: 600 }}>Paid</span></td>
-                      <td style={{ padding: '12px 16px' }}><button className="btn btn-ghost btn-sm" onClick={() => toast('Invoice PDF download coming soon.', 'info')}>Download</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)' }}>
+                No invoices yet — they will appear here once billing starts on a paid plan.
+              </p>
             </div>
           </>
         )}
@@ -1747,7 +2548,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
         </div>
 
         {/* Tab bar */}
-        <div style={{ display:'flex', gap:0, borderBottom:'1px solid var(--c-200)', padding:'0 24px', background:'var(--c-50)' }}>
+        <div style={{ display:'flex', gap:0, borderBottom:'1px solid rgba(255,255,255,0.08)', padding:'0 24px' }}>
           {[
             { id:'generate', label:'Generate BoQ' },
             { id:'results',  label:'Results' },
@@ -1780,14 +2581,14 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
                     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
                     <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
                   </svg>
-                  <p style={{ fontWeight:600, color:'var(--c-700)', marginBottom:4 }}>Drop PDF here or click to upload</p>
+                  <p style={{ fontWeight:600, color:'rgba(255,255,255,0.82)', marginBottom:4 }}>Drop PDF here or click to upload</p>
                   <p style={{ fontSize:12, color:'var(--c-400)' }}>NRM2-compliant BoQ generated automatically</p>
                 </label>
               </>
             ) : (
               <div style={{ textAlign:'center', padding:'48px 0' }}>
                 <div style={{ width:48, height:48, border:'3px solid var(--amber)', borderTopColor:'transparent', borderRadius:'50%', margin:'0 auto 24px', animation:'spin 0.8s linear infinite' }} />
-                <p style={{ fontWeight:600, color:'var(--c-700)' }}>
+                <p style={{ fontWeight:600, color:'rgba(255,255,255,0.82)' }}>
                   {uploadStatus === 'uploading' ? 'Uploading drawing…' : 'AI reading your drawing…'}
                 </p>
                 <p style={{ fontSize:13, color:'var(--c-400)', marginTop:8 }}>This takes 30–90 seconds for a typical drawing set.</p>
@@ -1839,7 +2640,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
               )}
               <div ref={chatEndRef} />
             </div>
-            <div style={{ padding:'16px 24px', borderTop:'1px solid var(--c-200)', display:'flex', gap:12 }}>
+            <div style={{ padding:'16px 24px', borderTop:'1px solid rgba(255,255,255,0.08)', display:'flex', gap:12 }}>
               <input
                 className="finp"
                 style={{ flex:1 }}
@@ -2026,8 +2827,8 @@ function ProjectSettingsPage({ go, toast, projectId }) {
           </div>
 
           {/* Danger zone */}
-          <div style={{ borderTop:'1px solid var(--c-200)', paddingTop:32 }}>
-            <p style={{ fontSize:13, fontWeight:600, color:'var(--c-700)', marginBottom:8 }}>Danger zone</p>
+          <div style={{ borderTop:'1px solid rgba(255,255,255,0.1)', paddingTop:32 }}>
+            <p style={{ fontSize:13, fontWeight:600, color:'rgba(255,255,255,0.75)', marginBottom:8 }}>Danger zone</p>
             <p style={{ fontSize:13, color:'var(--c-400)', marginBottom:16 }}>
               Permanently deletes this project, all uploaded drawings, the generated BoQ, and all chat history. This cannot be undone.
             </p>
@@ -2680,6 +3481,8 @@ function PricingPage({ go, toast }) {
 
 Object.assign(window, {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
+  ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
+  ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
 });
