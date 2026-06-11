@@ -31,6 +31,17 @@ var SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...';
 
 Run the following SQL in **Supabase Dashboard → SQL Editor → New query**:
 
+> **Also required:** run the contents of [`supabase_schema.sql`](supabase_schema.sql)
+> (repo root) in the SQL Editor. It creates the `projects` and `chat_messages`
+> tables, grants the API roles access, and adds row-level security policies.
+> Without it, creating or listing projects fails with Postgres error 42501
+> ("permission denied for table projects").
+>
+> Alternatively (or additionally), set `SUPABASE_SERVICE_ROLE_KEY` in the
+> backend environment (Railway → service → Variables) using the service_role
+> key from **Project Settings → API**. The backend prefers it for table
+> operations; never expose this key in frontend code.
+
 ```sql
 -- 1. Profiles table (mirrors auth.users)
 create table public.profiles (
