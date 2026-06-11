@@ -1999,31 +1999,56 @@ function SettingsPage({ go, toast, user: userProp }) {
     setConfirmDelete(false);
   };
 
-  // ── Branding — persisted in user metadata so it survives sign-out ───────────────
-  const [brand, setBrand] = useState({ company: '', website: '', address: '', city: '', primary: '#d77555', secondary: '#0F172A' });
+  // ── Branding — one row per user in the Supabase `branding` table ────────────────
+  const [brand, setBrand] = useState({ company_name: '', company_address: '', company_phone: '', company_email: '' });
   const [brandSaving, setBrandSaving] = useState(false);
-  const [logoPreview, setLogoPreview] = useState(() => {
-    try { return localStorage.getItem('vq_brand_logo') || ''; } catch { return ''; }
-  });
+  const [logoPreview, setLogoPreview] = useState('');
   const logoRef = useRef(null);
 
   useEffect(() => {
     if (!user) return;
-    const b = (user.user_metadata || {}).branding || {};
-    setBrand({
-      company: b.company || '', website: b.website || '',
-      address: b.address || '', city: b.city || '',
-      primary: b.primary || '#d77555', secondary: b.secondary || '#0F172A',
-    });
+    let active = true;
+    (async () => {
+      let row = null;
+      if (window.VQAuth?.getBranding) {
+        try {
+          const { data } = await window.VQAuth.getBranding(user.id);
+          row = data;
+        } catch (e) {}
+      }
+      if (!active) return;
+      // Fall back to the legacy user-metadata copy so accounts that saved
+      // branding before the table existed keep their values pre-filled.
+      const legacy = (user.user_metadata || {}).branding || {};
+      setBrand({
+        company_name:    row?.company_name    ?? legacy.company ?? '',
+        company_address: row?.company_address ?? legacy.address ?? '',
+        company_phone:   row?.company_phone   ?? '',
+        company_email:   row?.company_email   ?? '',
+      });
+      let legacyLogo = '';
+      try { legacyLogo = localStorage.getItem('vq_brand_logo') || ''; } catch (e) {}
+      setLogoPreview(row?.logo || legacyLogo);
+    })();
+    return () => { active = false; };
   }, [user]);
 
   const setB = (k, v) => setBrand(f => ({ ...f, [k]: v }));
 
   const saveBranding = async () => {
     if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    if (!brand.company_name.trim()) { toast('Company name is required.', 'error'); return; }
+    const companyEmail = brand.company_email.trim();
+    if (companyEmail && !/^\S+@\S+\.\S+$/.test(companyEmail)) { toast('Enter a valid company email.', 'error'); return; }
     setBrandSaving(true);
     try {
-      const { error } = await window.VQAuth.updateUserMeta({ branding: brand });
+      const { error } = await window.VQAuth.saveBranding(user.id, {
+        company_name:    brand.company_name.trim(),
+        company_address: brand.company_address.trim(),
+        company_phone:   brand.company_phone.trim(),
+        company_email:   companyEmail,
+        logo:            logoPreview || null,
+      });
       if (error) throw error;
       toast('Branding saved.', 'success');
     } catch (e) {
@@ -2038,9 +2063,8 @@ function SettingsPage({ go, toast, user: userProp }) {
     if (file.size > 2 * 1024 * 1024) { toast('Logo must be under 2 MB.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = () => {
-      try { localStorage.setItem('vq_brand_logo', reader.result); } catch (e) {}
       setLogoPreview(reader.result);
-      toast('Logo saved.', 'success');
+      toast('Logo added — click Save Branding to store it.', 'info');
     };
     reader.readAsDataURL(file);
   };
@@ -2183,13 +2207,13 @@ function SettingsPage({ go, toast, user: userProp }) {
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Company name</label>
-                  <input className="finp" value={brand.company} onChange={e => setB('company', e.target.value)} placeholder="Your company name" /></div>
-                <div className="fld"><label className="flbl">Website</label>
-                  <input className="finp" value={brand.website} onChange={e => setB('website', e.target.value)} placeholder="www.example.co.uk" /></div>
-                <div className="fld"><label className="flbl">Address</label>
-                  <input className="finp" value={brand.address} onChange={e => setB('address', e.target.value)} placeholder="Street address" /></div>
-                <div className="fld"><label className="flbl">City / Postcode</label>
-                  <input className="finp" value={brand.city} onChange={e => setB('city', e.target.value)} placeholder="City, Postcode" /></div>
+                  <input className="finp" value={brand.company_name} onChange={e => setB('company_name', e.target.value)} placeholder="Your company name" /></div>
+                <div className="fld"><label className="flbl">Company address</label>
+                  <input className="finp" value={brand.company_address} onChange={e => setB('company_address', e.target.value)} placeholder="Street, City, Postcode" /></div>
+                <div className="fld"><label className="flbl">Company phone</label>
+                  <input className="finp" type="tel" value={brand.company_phone} onChange={e => setB('company_phone', e.target.value)} placeholder="e.g. 028 9012 3456" /></div>
+                <div className="fld"><label className="flbl">Company email</label>
+                  <input className="finp" type="email" value={brand.company_email} onChange={e => setB('company_email', e.target.value)} placeholder="office@example.co.uk" /></div>
               </div>
             </div>
             <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
@@ -2199,7 +2223,7 @@ function SettingsPage({ go, toast, user: userProp }) {
                   <img src={logoPreview} alt="Company logo"
                     style={{ height: '56px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', padding: '6px' }} />
                   <button className="btn btn-ghost btn-sm"
-                    onClick={() => { try { localStorage.removeItem('vq_brand_logo'); } catch (e) {} setLogoPreview(''); toast('Logo removed.', 'info'); }}>
+                    onClick={() => { setLogoPreview(''); toast('Logo removed — click Save Branding to confirm.', 'info'); }}>
                     Remove
                   </button>
                 </div>
@@ -2212,18 +2236,11 @@ function SettingsPage({ go, toast, user: userProp }) {
               </div>
               <input ref={logoRef} type="file" accept=".png,.svg,.jpg,.jpeg,.webp" style={{ display: 'none' }}
                 onChange={e => { handleLogoFile(e.target.files[0]); e.target.value = ''; }} />
-            </div>
-            <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
-              <p className="scard-title">Brand colours</p>
-              <div className="form-grid">
-                <div className="fld"><label className="flbl">Primary colour</label>
-                  <input className="finp" value={brand.primary} onChange={e => setB('primary', e.target.value)} /></div>
-                <div className="fld"><label className="flbl">Secondary / footer</label>
-                  <input className="finp" value={brand.secondary} onChange={e => setB('secondary', e.target.value)} /></div>
+              <div style={{ marginTop: '24px' }}>
+                <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>
+                  {brandSaving ? 'Saving…' : 'Save Branding'}
+                </button>
               </div>
-              <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>
-                {brandSaving ? 'Saving…' : 'Save branding'}
-              </button>
             </div>
           </>
         )}

@@ -50,6 +50,19 @@ create table if not exists public.chat_messages (
   created_at timestamptz not null default now()
 );
 
+-- ── Branding ────────────────────────────────────────────────────────────────
+-- One row per user: company identity shown on exported BoQs, managed from the
+-- Settings → Branding tab. The logo is stored as a data URL (max 2 MB file).
+create table if not exists public.branding (
+  user_id         uuid primary key references auth.users(id) on delete cascade,
+  company_name    text,
+  company_address text,
+  company_phone   text,
+  company_email   text,
+  logo            text,
+  updated_at      timestamptz not null default now()
+);
+
 -- ── Privileges ──────────────────────────────────────────────────────────────
 -- Deliberately nothing for `anon`: the anon key is public in the frontend, so
 -- granting it table access would expose every user's data. The backend now
@@ -58,6 +71,7 @@ create table if not exists public.chat_messages (
 grant usage on schema public to authenticated, service_role;
 grant select, insert, update, delete on public.projects      to authenticated, service_role;
 grant select, insert, update, delete on public.chat_messages to authenticated, service_role;
+grant select, insert, update, delete on public.branding      to authenticated, service_role;
 
 -- profiles is created by SUPABASE_SETUP.md §3 — grant only if it exists so this
 -- script never aborts halfway.
@@ -71,6 +85,7 @@ end $$;
 -- ── Row-level security ──────────────────────────────────────────────────────
 alter table public.projects      enable row level security;
 alter table public.chat_messages enable row level security;
+alter table public.branding      enable row level security;
 
 drop policy if exists "Users manage own projects" on public.projects;
 create policy "Users manage own projects"
@@ -81,6 +96,12 @@ create policy "Users manage own projects"
 drop policy if exists "Users manage own chat messages" on public.chat_messages;
 create policy "Users manage own chat messages"
   on public.chat_messages for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+drop policy if exists "Users manage own branding" on public.branding;
+create policy "Users manage own branding"
+  on public.branding for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
