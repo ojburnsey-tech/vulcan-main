@@ -1270,6 +1270,21 @@ def process_pdf():                         # Flask calls this function when a ma
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
     _log_claude_response("structured", response)
 
+    # ── Persist token usage to Supabase (best-effort — never fails the request) ──
+    try:
+        _usage = getattr(response, "usage", None)
+        if _usage and _supabase:
+            _usage_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _usage_user     = getattr(_usage_user_res, "user", None) if _usage_user_res else None
+            if _usage_user:
+                _db_client().table("usage_events").insert({
+                    "user_id":       _usage_user.id,
+                    "input_tokens":  getattr(_usage, "input_tokens",  0) or 0,
+                    "output_tokens": getattr(_usage, "output_tokens", 0) or 0,
+                }).execute()
+    except Exception as _ue:
+        app.logger.warning("Failed to persist usage event: %s", _ue)
+
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "max_tokens":
         return jsonify({"error": "Claude structured output was truncated before completion."}), 502
