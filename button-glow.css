@@ -1,0 +1,161 @@
+/* ============================================================================
+   VULCAN QUANTA — BUTTON GLOW
+   ----------------------------------------------------------------------------
+   A cursor-aware edge illumination for the existing button primitives.
+
+   Design intent: buttons look completely normal at rest. On hover a single,
+   thin accent edge-light follows the cursor and illuminates only the nearest
+   border, with a soft directional bloom. It reads as "something premium is
+   happening", not a demo effect.
+
+   Implementation notes:
+   - Layers entirely on top via ONE ::before pseudo-element. It never affects
+     padding, typography, spacing, sizing or the radius system.
+   - The bright border ring + the soft outer glow are produced by the SAME
+     element (masked radial gradient + a tiny drop-shadow), so there is one
+     paint layer per button — no mesh gradients, no gradient stacks, no large
+     blur fills, no animated background.
+   - Colours come exclusively from existing Vulcan Quanta tokens
+     (--amber / --blue / --red). The accent (--amber) is theme-driven by the
+     tweaks panel, so the glow re-tints automatically.
+
+   Driven by button-glow.js, which writes four custom properties on the
+   hovered element:
+     --bgw-gx / --bgw-gy : cursor position (%)        — follows the cursor
+     --bgw-edge          : edge proximity (0..1)      — nearest-edge intensity
+     --bgw-angle         : cursor angle (deg)         — retained from reference
+   ========================================================================== */
+
+/* Selector group = the shared button primitive + the two standalone variants. */
+.btn,
+.vd-qa-btn,
+.btn-ghost-lt {
+  position: relative;          /* anchor for the glow layer — no layout change */
+
+  /* Glow contract (overridden per-variant below). Defaults are conservative. */
+  --bgw-color: var(--amber);
+  --bgw-strength: 0.5;         /* peak opacity multiplier for this variant     */
+  --bgw-gx: 50%;               /* cursor x — defaults to centre (focus/static) */
+  --bgw-gy: 50%;               /* cursor y                                     */
+  --bgw-edge: 0;               /* 0 at centre, 1 at the nearest edge           */
+  --bgw-angle: 0deg;           /* cursor angle, kept from the reference logic  */
+}
+
+/* ── Per-variant intensity & colour (existing tokens only) ─────────────────── */
+
+/* Primary actions — strongest glow. */
+.btn-amber,
+.vd-qa-primary      { --bgw-color: var(--amber); --bgw-strength: 0.9; }
+.btn-blue           { --bgw-color: var(--blue);  --bgw-strength: 0.9; }
+
+/* Secondary actions — weaker glow. */
+.btn-outline        { --bgw-color: var(--amber); --bgw-strength: 0.5; }
+.btn-nav-pill       { --bgw-color: var(--amber); --bgw-strength: 0.45; }
+
+/* Ghost actions — minimal glow. */
+.btn-ghost,
+.btn-ghost-dim,
+.btn-ghost-lt,
+.vd-qa-dark         { --bgw-strength: 0.28; }
+
+/* Danger actions — existing danger colour. */
+.btn-danger         { --bgw-color: var(--red); --bgw-strength: 0.9; }
+
+/* ── The glow layer ──────────────────────────────────────────────────────────
+   One pseudo-element does both jobs:
+     1. A masked radial gradient confined to a 1px border ring  → edge light.
+     2. A tiny drop-shadow of that same ring                    → soft outer glow.
+   The radial is positioned at the cursor, so only the nearest edge lights up
+   and the highlight tracks the pointer.                                        */
+.btn::before,
+.vd-qa-btn::before,
+.btn-ghost-lt::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;       /* matches 8px / 9px / pill automatically */
+  padding: 1px;                 /* ring thickness */
+  pointer-events: none;
+  z-index: 0;                   /* edge-only ring; centred text stays above */
+  opacity: 0;
+  transition: opacity 0.28s var(--ease, cubic-bezier(0.4, 0, 0.2, 1));
+
+  background: radial-gradient(
+    65% 90% at var(--bgw-gx) var(--bgw-gy),
+    var(--bgw-color) 0%,
+    color-mix(in srgb, var(--bgw-color) 32%, transparent) 38%,
+    transparent 72%
+  );
+
+  /* Confine the gradient to the border band only. */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+          mask-composite: exclude;
+
+  /* Soft, constrained outer bloom — single small blur, not a glow fill. */
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--bgw-color) 55%, transparent));
+}
+
+/* Reveal on hover. Intensity scales with proximity to the nearest edge,
+   so the light feels physically attached to the border under the cursor.
+   Gated to hover-capable pointers so touch taps never flash the effect. */
+@media (hover: hover) {
+  .btn:hover::before,
+  .vd-qa-btn:hover::before,
+  .btn-ghost-lt:hover::before {
+    opacity: calc(var(--bgw-strength) * (0.45 + 0.55 * var(--bgw-edge)));
+  }
+}
+
+/* Keyboard focus — show a calm, static centred glow (gx/gy stay at 50%). */
+.btn:focus-visible::before,
+.vd-qa-btn:focus-visible::before,
+.btn-ghost-lt:focus-visible::before {
+  opacity: calc(var(--bgw-strength) * 0.7);
+}
+
+/* Accessible focus ring, tinted to the variant. outline-offset keeps it
+   clear of the glow and causes no layout shift. */
+.btn:focus-visible,
+.vd-qa-btn:focus-visible,
+.btn-ghost-lt:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--bgw-color) 65%, transparent);
+  outline-offset: 2px;
+}
+
+/* Never glow when disabled. */
+.btn:disabled::before,
+.btn[aria-disabled="true"]::before,
+.vd-qa-btn:disabled::before,
+.vd-qa-btn[aria-disabled="true"]::before,
+.btn-ghost-lt:disabled::before {
+  opacity: 0 !important;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────────────
+   No cursor tracking (button-glow.js bails out). Show a single static edge
+   glow seated along the top of the border instead of a moving highlight. */
+@media (prefers-reduced-motion: reduce) {
+  .btn::before,
+  .vd-qa-btn::before,
+  .btn-ghost-lt::before {
+    background: radial-gradient(
+      120% 130% at 50% 0%,
+      var(--bgw-color) 0%,
+      color-mix(in srgb, var(--bgw-color) 30%, transparent) 40%,
+      transparent 75%
+    );
+    transition: opacity 0.2s ease;
+  }
+
+  .btn:hover::before,
+  .vd-qa-btn:hover::before,
+  .btn-ghost-lt:hover::before {
+    opacity: calc(var(--bgw-strength) * 0.6);   /* static — no edge factor */
+  }
+}
