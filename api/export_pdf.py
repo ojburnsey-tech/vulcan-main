@@ -1,10 +1,13 @@
 # api/export_pdf.py
 # Generates a professional NRM2-compliant A4 Bill of Quantities PDF using ReportLab Platypus.
 
+import base64
 import html
 import io
 import re
 import unicodedata
+import urllib.parse
+import urllib.request
 from datetime import date
 
 from reportlab.platypus import (
@@ -15,11 +18,13 @@ from reportlab.platypus import (
     Spacer,
     HRFlowable,
     PageBreak,
+    Image,
 )
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.lib import colors
+from reportlab.lib.utils import ImageReader
 from reportlab.lib.enums import TA_RIGHT, TA_CENTER, TA_LEFT
 
 # ── Page geometry ──────────────────────────────────────────────────────────────
@@ -334,6 +339,132 @@ def _section_heading(title: str) -> list:
         HRFlowable(width=CONTENT_W, thickness=1.2, color=colors.black),
         Spacer(1, 4 * mm),
     ]
+
+
+# ── White-label branding ────────────────────────────────────────────────────────
+# Branding is supplied by the caller (the export route loads it for the signed-in
+# user). It flows through generate_boq_pdf as an argument — never a global, never
+# hardcoded. A missing/empty branding dict reproduces the default Vulcan Quanta
+# output exactly.
+
+DEFAULT_DOCUMENT_TITLE = 'Vulcan Quanta'   # used when no company_name is configured
+
+_BRANDING_FIELDS = ('company_name', 'company_address', 'company_phone', 'company_email', 'logo_url')
+
+# Letterhead styles — kept local to branding so they never affect existing sections.
+S_BRAND_NAME = _style('BoqBrandName', bold=True, size=13, leading=16)
+S_BRAND_LINE = _style('BoqBrandLine', size=8.5, leading=12,
+                      color=colors.Color(0.25, 0.25, 0.25))
+
+_LOGO_MAX_H = 18 * mm   # max logo height in the letterhead (within the 15-20mm spec)
+_LOGO_MAX_W = 55 * mm   # cap width so a wide logo can't crowd the company details
+
+
+def _normalise_branding(branding) -> dict:
+    """Return a branding dict with all expected keys present as plain strings.
+
+    Accepts None or a partial dict and never raises, so callers can pass whatever
+    they loaded (or nothing) and the pipeline degrades cleanly to the default
+    Vulcan Quanta presentation.
+    """
+    src = branding if isinstance(branding, dict) else {}
+    out = {}
+    for key in _BRANDING_FIELDS:
+        val = src.get(key)
+        out[key] = str(val).strip() if val else ''
+    return out
+
+
+def _logo_image_bytes(logo_url: str):
+    """Fetch the raw bytes for a branding logo, or None on any problem.
+
+    Supports data: URLs (base64 or percent-encoded), http(s) URLs (short timeout),
+    and local filesystem paths. Every failure mode returns None so logo issues can
+    never crash PDF generation.
+    """
+    if not logo_url or not isinstance(logo_url, str):
+        return None
+    src = logo_url.strip()
+    try:
+        if src.startswith('data:'):
+            header, _, payload = src.partition(',')
+            if not payload:
+                return None
+            if 'base64' in header:
+                return base64.b64decode(payload)
+            return urllib.parse.unquote_to_bytes(payload)
+        if src.startswith('http://') or src.startswith('https://'):
+            # Bounded fetch — guarded so a slow/broken URL never blocks the export.
+            with urllib.request.urlopen(src, timeout=5) as resp:
+                return resp.read()
+        with open(src, 'rb') as fh:        # treat anything else as a local path
+            return fh.read()
+    except Exception:
+        return None
+
+
+def _build_logo_flowable(logo_url: str):
+    """Return a ReportLab Image flowable for the logo (aspect-ratio preserved,
+    height capped to _LOGO_MAX_H), or None if there is no usable image."""
+    raw = _logo_image_bytes(logo_url)
+    if not raw:
+        return None
+    try:
+        iw, ih = ImageReader(io.BytesIO(raw)).getSize()
+        if not iw or not ih:
+            return None
+        scale = min(_LOGO_MAX_H / ih, _LOGO_MAX_W / iw)
+        return Image(io.BytesIO(raw), width=iw * scale, height=ih * scale)
+    except Exception:
+        return None
+
+
+def _build_branding_header(branding: dict) -> list:
+    """Page-1 letterhead built from configured branding.
+
+    Renders the logo (if any) alongside the company name and only those contact
+    lines that are populated — no blank rows. Returns [] when nothing is
+    configured, so the default document is byte-for-byte unchanged.
+    """
+    name = branding.get('company_name', '')
+    detail_lines = [branding.get(k, '') for k in ('company_address', 'company_phone', 'company_email')]
+    detail_lines = [ln for ln in detail_lines if ln]
+    logo = _build_logo_flowable(branding.get('logo_url', ''))
+
+    if not name and not detail_lines and logo is None:
+        return []                          # no branding → no letterhead at all
+
+    text_flow = []
+    if name:
+        text_flow.append(Paragraph(html.escape(name), S_BRAND_NAME))
+    for line in detail_lines:
+        text_flow.append(Paragraph(html.escape(line), S_BRAND_LINE))
+
+    story = [Spacer(1, 2 * mm)]
+    if logo is not None:
+        # Logo left, company details right — a balanced letterhead band. The two
+        # cells sit in their own columns so the logo can never overlap the text.
+        logo_w = min(_LOGO_MAX_W, getattr(logo, 'drawWidth', _LOGO_MAX_W))
+        header = Table(
+            [[logo, text_flow or '']],
+            colWidths=[logo_w + 4 * mm, CONTENT_W - logo_w - 4 * mm],
+        )
+        header.setStyle(TableStyle([
+            ('VALIGN',       (0, 0), (-1, -1), 'MIDDLE'),
+            ('ALIGN',        (0, 0), (0, 0), 'LEFT'),
+            ('ALIGN',        (1, 0), (1, 0), 'RIGHT'),
+            ('LEFTPADDING',  (0, 0), (-1, -1), 0),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 0),
+            ('TOPPADDING',   (0, 0), (-1, -1), 0),
+            ('BOTTOMPADDING',(0, 0), (-1, -1), 0),
+        ]))
+        story.append(header)
+    else:
+        story.extend(text_flow)
+
+    story.append(Spacer(1, 4 * mm))
+    story.append(HRFlowable(width=CONTENT_W, thickness=0.5, color=colors.black))
+    return story
 
 
 # ── Section builders ──────────────────────────────────────────────────────────
@@ -1129,11 +1260,14 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
 
 # ── Main function ──────────────────────────────────────────────────────────────
 
-def generate_boq_pdf(boq_json: dict) -> bytes:
+def generate_boq_pdf(boq_json: dict, branding=None) -> bytes:
     """Generate a professional NRM2-compliant Bill of Quantities PDF and return raw bytes.
 
     Args:
         boq_json: priced BoQ dict returned by /process.  Accepts all common shapes.
+        branding: optional white-label dict with company_name, company_address,
+            company_phone, company_email and logo_url. When omitted or empty the
+            PDF is identical to the default Vulcan Quanta output.
 
     Returns:
         Raw PDF bytes.  Raises ValueError if boq_json contains no trade data.
@@ -1141,6 +1275,11 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     trade_groups = _normalise_boq(boq_json)
     if not trade_groups:
         raise ValueError("boq_json contains no recognisable trade groups.")
+
+    brand = _normalise_branding(branding)
+    # Title source: configured company name, else the default. Only the title text
+    # changes — every other element of the page chrome stays exactly as before.
+    document_title = brand['company_name'] or DEFAULT_DOCUMENT_TITLE
 
     buf = io.BytesIO()
     d   = date.today()
@@ -1152,7 +1291,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         y_title = PAGE_H - TOP_M + 13 * mm
         canvas.setFont('Helvetica-Bold', 16)
         canvas.setFillColor(colors.black)
-        canvas.drawString(LEFT_M, y_title, 'Vulcan Quanta')
+        canvas.drawString(LEFT_M, y_title, document_title)
 
         canvas.setFont('Helvetica', 8.5)
         canvas.drawRightString(PAGE_W - RIGHT_M, y_title, today_str)
@@ -1180,7 +1319,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
         topMargin=TOP_M,
         bottomMargin=BOT_M,
         title='Bill of Quantities',
-        author='Vulcan Quanta',
+        author=document_title,
     )
 
     prelim_flowables,   prelim_total   = _build_preliminaries()
@@ -1188,6 +1327,7 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     prov_flowables,     prov_total     = _build_provisional_sums()
 
     story = []
+    story += _build_branding_header(brand)   # [] when no branding → unchanged output
     story += _build_form_of_tender(boq_json, today_str)
     story.append(PageBreak())
     story += _build_preambles()
