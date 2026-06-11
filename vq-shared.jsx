@@ -74,7 +74,8 @@ function VQParticleField() {
     window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false);
 
   return (
-    <svg className="vq-particle-field" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+    <svg className="vq-particle-field" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true"
+      style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', zIndex: 0, pointerEvents: 'none' }}>
       <defs>
         {/* Soft glow without a filter: radial gradient discs are far cheaper than feGaussianBlur */}
         <radialGradient id="vq-pt-glow">

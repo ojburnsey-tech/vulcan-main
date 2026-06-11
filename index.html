@@ -1285,9 +1285,12 @@
     }
     .vd-main, .dash-main, .upload-page { position: relative; }
     .vd-main > *, .dash-main > *, .upload-page > * { position: relative; z-index: 1; }
+    /* Must re-assert fixed positioning: the `> *` rule above ties on specificity
+       and comes later in the sheet, which would flip the field to relative and
+       push all page content below the fold. */
     .vd-main > .vq-particle-field,
     .dash-main > .vq-particle-field,
-    .upload-page > .vq-particle-field { z-index: 0; }
+    .upload-page > .vq-particle-field { position: fixed; z-index: 0; }
 
     /* ── Staggered panel entrance ─────────────────────────────────────────── */
     @keyframes vdRise {
