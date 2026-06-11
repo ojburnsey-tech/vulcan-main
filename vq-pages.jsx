@@ -487,7 +487,8 @@ function normaliseBoq(raw) {
 
 // ─── RESULTS ───────────────────────────────────────────────────────────────────────
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
-function ResultsPage({ go, toast, boqData, embedded }) {
+// demo=true renders the restricted public preview: exports disabled, no grand summary
+function ResultsPage({ go, toast, boqData, embedded, demo }) {
   const [pdfState, setPdfState] = useState('idle');
   const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
@@ -667,6 +668,14 @@ function ResultsPage({ go, toast, boqData, embedded }) {
         </div>
         <p className="res-disclaimer">AI-generated draft — professional review required before issue to client. Edit inline, then export.</p>
         <div className="res-controls">
+          {demo ? (
+            <>
+              <button className="btn btn-amber btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Download PDF</button>
+              <button className="btn btn-outline btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Excel</button>
+              <span style={{ alignSelf: 'center', fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>Exports are unavailable in the demo.</span>
+            </>
+          ) : (
+            <>
           <button className="btn btn-amber btn-pill" onClick={handleDownload} disabled={pdfState !== 'idle'}>
             {pdfState === 'idle'       && '↓ Download PDF'}
             {pdfState === 'generating' && '⏳ Generating PDF…'}
@@ -677,6 +686,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
   {excelState === 'generating' && '⏳ Generating…'}
   {excelState === 'done'       && '✓ Downloaded'}
 </button>          <button className="btn btn-outline btn-pill" onClick={() => { navigator.clipboard?.writeText?.(window.location.href); toast('Share link copied to clipboard!', 'success'); }}>🔗 Share</button>
+            </>
+          )}
         </div>
 
         <table className="rboq">
@@ -719,6 +730,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
                 </React.Fragment>
               );
             })}
+            {!demo && (
+              <>
             <tr className="rboq-sub rboq-sub-main">
               <td colSpan="4" style={{ textAlign: 'right' }}>Works subtotal</td>
               <td className="r">{fmt(subtotal)}</td>
@@ -737,6 +750,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
               <td colSpan="4" style={{ textAlign: 'right' }}>Grand Total (ex. VAT)</td>
               <td className="r">{fmt(grandTotal)}</td>
             </tr>
+              </>
+            )}
           </tbody>
         </table>
         <p style={{ marginTop: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.32)', fontStyle: 'italic' }}>
@@ -3479,10 +3494,158 @@ function PricingPage({ go, toast }) {
   );
 }
 
+// ─── PUBLIC DEMO ──────────────────────────────────────────────────────────────────
+// Interactive demo at /demo — no account required. Posts to the unauthenticated
+// /demo-process endpoint and renders the restricted preview via ResultsPage demo mode.
+const VQ_DEMO_SAMPLES = [
+  { name: 'Domestic Extension',  desc: 'Single-storey rear extension with new kitchen, wetroom and pitched roof.' },
+  { name: 'Commercial Fit-Out',  desc: 'Office unit fit-out: partitions, suspended ceilings, M&E and finishes.' },
+  { name: 'Groundworks Package', desc: 'Reduced-level dig, foundations, drainage runs and external paving.' },
+];
+
+function DemoPage({ go, toast }) {
+  const [sample, setSample]     = useState(VQ_DEMO_SAMPLES[0].name);
+  const [file, setFile]         = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [status, setStatus]     = useState('idle');   // idle | processing | done
+  const [demoBoq, setDemoBoq]   = useState(null);
+
+  const acceptFile = f => {
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.pdf')) { toast('Only PDF files are accepted.', 'error'); return; }
+    setFile(f);
+    setDemoBoq(null);
+    setStatus('idle');
+  };
+
+  const handleGenerate = async () => {
+    if (status === 'processing') return;
+    if (!file) { toast('Select a PDF drawing package first.', 'error'); return; }
+
+    console.log('Demo started');
+    setStatus('processing');
+    setDemoBoq(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);                 // same field name Flask expects in /demo-process
+      formData.append('sample_project', sample);     // which sample card the visitor picked
+
+      const res = await fetch(`${VQ_API}/demo-process`, { method: 'POST', body: formData });
+
+      if (res.status === 429) {
+        const err = await res.json().catch(() => ({}));
+        console.log('Demo blocked by rate limit');
+        toast(err.error || 'Demo limit reached. Please create a free account to continue.', 'error');
+        setStatus('idle');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        toast(err.error || 'Demo failed — please try again.', 'error');
+        setStatus('idle');
+        return;
+      }
+
+      const data = await res.json();
+      console.log('Demo completed');
+      setDemoBoq(data);
+      setStatus('done');
+    } catch (err) {
+      toast('Network error — could not reach the server.', 'error');
+      setStatus('idle');
+    }
+  };
+
+  return (
+    <div style={{ background: '#1d2127', minHeight: '100vh', paddingBottom: '120px' }}>
+      <VQParticleField />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+
+        {/* Hero */}
+        <div style={{ padding: '120px 0 48px' }}>
+          <div className="inner" style={{ textAlign: 'center' }}>
+            <h1 className="display-xl" style={{ color: 'white', marginBottom: '20px' }}>Try Vulcan Quanta</h1>
+            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '19px', maxWidth: '520px', margin: '0 auto' }}>
+              Upload a sample drawing package and receive a preview of a Bill of Quantities.
+            </p>
+          </div>
+        </div>
+
+        <div className="inner" style={{ maxWidth: '960px' }}>
+
+          {/* Sample project cards */}
+          <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>1 · Choose a sample project type</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '40px' }}>
+            {VQ_DEMO_SAMPLES.map(s => {
+              const active = sample === s.name;
+              return (
+                <div key={s.name} onClick={() => setSample(s.name)}
+                  style={{
+                    cursor: 'pointer', borderRadius: '12px', padding: '24px',
+                    background: active ? 'rgba(215,117,85,0.10)' : 'rgba(29,33,39,0.6)',
+                    border: `1px solid ${active ? 'var(--amber)' : 'rgba(255,255,255,0.08)'}`,
+                    transition: 'border-color var(--t), background var(--t)',
+                  }}>
+                  <p style={{ fontFamily: 'var(--font-d)', fontSize: '17px', fontWeight: 700, color: 'white', marginBottom: '8px' }}>{s.name}</p>
+                  <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'rgba(255,255,255,0.45)' }}>{s.desc}</p>
+                  {active && <p style={{ marginTop: '12px', fontSize: '12px', fontWeight: 600, color: 'var(--amber)' }}>✓ Selected</p>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Upload area */}
+          <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>2 · Upload a drawing package (PDF)</p>
+          <div
+            className={`upload-zone${dragOver ? ' drag' : ''}`}
+            style={{ padding: '48px 40px', marginBottom: '24px' }}
+            onDrop={e => { e.preventDefault(); setDragOver(false); acceptFile(e.dataTransfer.files[0]); }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onClick={() => document.getElementById('vq-demo-file-input').click()}
+          >
+            <p className="upload-h">{file ? file.name : 'Drop your drawing here'}</p>
+            <p className="upload-sub">{file ? 'Ready to generate — or drop a different PDF' : 'or click to select a PDF file'}</p>
+            <input id="vq-demo-file-input" type="file" accept=".pdf" style={{ display: 'none' }}
+              onChange={e => { acceptFile(e.target.files[0]); e.target.value = ''; }} />
+          </div>
+
+          {/* Generate */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <button className="btn btn-amber btn-pill" onClick={handleGenerate} disabled={status === 'processing'}>
+              {status === 'processing' ? '⏳ Generating preview…' : 'Generate Preview'}
+            </button>
+            {status === 'processing' && <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.45)' }}>AI is reading your drawing — this takes about a minute.</span>}
+          </div>
+
+          {/* Restricted preview */}
+          {demoBoq && (
+            <>
+              <div style={{
+                margin: '48px 0 0', padding: '14px 18px', borderRadius: '10px',
+                border: '1px solid rgba(215,117,85,0.45)', background: 'rgba(215,117,85,0.12)',
+                color: 'white', fontSize: '14px', display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', gap: '16px', flexWrap: 'wrap',
+              }}>
+                <span><strong>Demo Preview</strong> — Create a free account to unlock full NRM2 output and exports.</span>
+                <button className="btn btn-amber btn-pill" onClick={() => go('signup')}>Create free account</button>
+              </div>
+              <ResultsPage embedded demo boqData={demoBoq} go={go} toast={toast} />
+            </>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
   ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
+  DemoPage,
 });

@@ -1386,6 +1386,7 @@ const {
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
+  DemoPage,
 } = window;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -1406,7 +1407,11 @@ const PROTECTED = ['dashboard','settings','results','upload',
                    'projects','reports','exports','history'];
 
 function App() {
-  const [page, setPage]               = useState('signin');
+  // Public deep link: /demo (or #demo) opens the interactive demo without an account.
+  const [page, setPage]               = useState(() => {
+    const path = window.location.pathname.replace(/\/+$/, '');
+    return (path.endsWith('/demo') || window.location.hash === '#demo') ? 'demo' : 'signin';
+  });
   const [toasts, setToasts]           = useState([]);
   const [user, setUser]               = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -1545,6 +1550,7 @@ function App() {
     signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,
+    demo:           <DemoPage           go={go} toast={toast} />,
     forgotpassword: <ForgotPasswordPage go={go} toast={toast} />,
     checkemail:     <CheckEmailPage     go={go} toast={toast} email={pendingEmail} />,
     resetpassword:  <ResetPasswordPage  go={go} toast={toast} />,
@@ -1569,7 +1575,7 @@ function App() {
         <TweakText label="CTA label" value={t.cta} onChange={v => setTweak('cta', v)} />
         <TweakSection label="Navigate" />
         <TweakSelect label="Jump to page" value={page}
-          options={['landing','upload','results','dashboard','settings','pricing',
+          options={['landing','upload','results','dashboard','settings','pricing','demo',
                     'signin','signup','forgotpassword','checkemail','resetpassword']}
           onChange={v => go(v)} />
       </TweaksPanel>

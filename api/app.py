@@ -1204,20 +1204,28 @@ Be concise and professional. Give specific figures from the BoQ where relevant.
     return jsonify({"reply": assistant_reply}), 200
 
 
-@app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
-def process_pdf():                         # Flask calls this function when a matching request arrives
-    if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
-        return jsonify({"error": "Authentication required. Please sign in."}), 401
+def _run_boq_pipeline():
+    """Shared upload → pdfplumber → Claude → validate → enrich pipeline.
+
+    Single home for the BoQ generation business logic, used by both the
+    authenticated /process route and the public /demo-process route so the
+    pipeline is never duplicated.  Reads the uploaded file from the current
+    Flask request context.
+
+    Returns (boq_data, pages_text, uploaded_file, error) where error is a
+    (response, status) tuple ready to return from a view, or None on success.
+    """
+    _fail = (None, None, None)             # prefix for every error return below
 
     if "file" not in request.files:        # request.files is a dict of uploaded files keyed by form field name (like IFormFileCollection in C#)
-        return jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400  # 400 Bad Request
+        return (*_fail, (jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400))  # 400 Bad Request
 
     uploaded_file = request.files["file"]  # retrieve the FileStorage object for the field named "file"
     if uploaded_file.filename == "":       # empty filename means the browser sent the field but no file was selected
-        return jsonify({"error": "Empty filename — no file was selected."}), 400
+        return (*_fail, (jsonify({"error": "Empty filename — no file was selected."}), 400))
 
     if not uploaded_file.filename.lower().endswith(".pdf"):   # validate extension; .lower() normalises casing so "Drawing.PDF" is accepted
-        return jsonify({"error": "Only PDF files are accepted."}), 415            # 415 Unsupported Media Type
+        return (*_fail, (jsonify({"error": "Only PDF files are accepted."}), 415))            # 415 Unsupported Media Type
 
     pdf_bytes = uploaded_file.read()       # read the entire upload into bytes in memory — never written to disk (like reading a Stream into byte[] in C#)
     pdf_buffer = io.BytesIO(pdf_bytes)     # wrap bytes in BytesIO so pdfplumber can treat it like a seekable file (like new MemoryStream(bytes) in C#)
@@ -1227,14 +1235,14 @@ def process_pdf():                         # Flask calls this function when a ma
             pages_text = [page.extract_text() or "" for page in pdf.pages]  # list comprehension: extract text from every page; replace None with "" (like LINQ Select in C#)
         full_text = "\n\n".join(pages_text)               # join all pages with double newline so Claude sees page breaks (like String.Join in C#)
     except Exception as exc:               # catch any pdfplumber error (corrupt file, password-protected PDF, etc.)
-        return jsonify({"error": f"Failed to read PDF: {exc}"}), 422  # 422 Unprocessable Entity; f"..." is Python's interpolated string (like $"..." in C#)
+        return (*_fail, (jsonify({"error": f"Failed to read PDF: {exc}"}), 422))  # 422 Unprocessable Entity; f"..." is Python's interpolated string (like $"..." in C#)
 
     if not full_text.strip():              # .strip() removes whitespace; empty result means a scanned image PDF with no OCR text layer
-        return jsonify({"error": "No text could be extracted. The PDF may be a scanned image without an OCR text layer."}), 422
+        return (*_fail, (jsonify({"error": "No text could be extracted. The PDF may be a scanned image without an OCR text layer."}), 422))
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")  # read the key from the environment — never hard-code secrets in source (like Environment.GetEnvironmentVariable in C#)
     if not api_key:                                 # fail fast with a clear message if the variable is missing
-        return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
+        return (*_fail, (jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500))
 
     client = anthropic.Anthropic(api_key=api_key, timeout=180.0)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
 
@@ -1263,32 +1271,44 @@ def process_pdf():                         # Flask calls this function when a ma
         if len(_processing_times) > 200:
             _processing_times.pop(0)
     except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
-        return jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502  # 502 Bad Gateway — this server got an error from an upstream service
+        return (*_fail, (jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502))  # 502 Bad Gateway — this server got an error from an upstream service
     except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
-        return jsonify({"error": f"Could not reach Claude API: {exc}"}), 503  # 503 Service Unavailable
+        return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))  # 503 Service Unavailable
 
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
     _log_claude_response("structured", response)
 
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "max_tokens":
-        return jsonify({"error": "Claude structured output was truncated before completion."}), 502
+        return (*_fail, (jsonify({"error": "Claude structured output was truncated before completion."}), 502))
     if stop_reason == "refusal":
-        return jsonify({"error": "Claude refused to produce the requested structured output."}), 502
+        return (*_fail, (jsonify({"error": "Claude refused to produce the requested structured output."}), 502))
 
     try:
         boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
     except json.JSONDecodeError as exc:
         app.logger.exception("Claude structured output was not valid JSON: %s", exc)
-        return jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502
+        return (*_fail, (jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502))
 
     try:
         _validate_boq_output(boq_data)
     except ValueError as exc:
         app.logger.warning("Claude structured output failed schema validation: %s", exc)
-        return jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502
+        return (*_fail, (jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502))
 
     boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
+
+    return boq_data, pages_text, uploaded_file, None
+
+
+@app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
+def process_pdf():                         # Flask calls this function when a matching request arrives
+    if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
+        return jsonify({"error": "Authentication required. Please sign in."}), 401
+
+    boq_data, pages_text, uploaded_file, err = _run_boq_pipeline()
+    if err:
+        return err
 
     print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
 
@@ -1325,6 +1345,113 @@ def process_pdf():                         # Flask calls this function when a ma
         app.logger.warning("Failed to auto-save project from /process: %s", exc)
 
     return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
+
+
+# ── Public demo (no account required) ───────────────────────────────────────────────
+# Lightweight in-memory rate limiting: one demo generation per IP per 30 minutes.
+# A plain timestamp dict is deliberate — no Redis, no extra dependencies. State is
+# per-process and resets on restart, which is acceptable for a marketing demo.
+_DEMO_RATE_WINDOW_SECONDS = 30 * 60
+_demo_last_request_at: dict[str, float] = {}   # client IP → unix timestamp of last demo run
+_DEMO_MAX_SECTIONS = 3
+
+_RE_MEASURED_SECTION = re.compile(r'^\s*5\.\d')   # measured works trades are numbered 5.x
+
+
+def _demo_client_ip() -> str:
+    """Resolve the caller's IP, honouring the proxy chain Railway puts in front of Flask."""
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()   # first hop is the original client
+    return request.remote_addr or 'unknown'
+
+
+def _trim_boq_for_demo(boq_data):
+    """Restrict a full enriched BoQ to the public demo preview.
+
+    Keeps only the first 3 measured work sections (5.x trades), drops
+    provisional sum line items, and strips every other top-level section
+    (risk schedule, assumptions register, annexes, document control) so the
+    demo never returns the full NRM2 output. Grand Summary and Dayworks only
+    exist in the PDF/Excel exports, which are disabled for the demo.
+    """
+    if isinstance(boq_data, dict):
+        groups = boq_data.get('bill_of_quantities') or boq_data.get('trades') or []
+    elif isinstance(boq_data, list):
+        groups = boq_data
+    else:
+        groups = []
+
+    def _demo_items(group):
+        return [
+            item for item in (group.get('items') or group.get('line_items') or [])
+            if isinstance(item, dict)
+            and 'provisional sum' not in (item.get('description') or '').lower()
+        ]
+
+    trimmed = []
+    for group in groups:
+        if len(trimmed) >= _DEMO_MAX_SECTIONS:
+            break
+        if not isinstance(group, dict):
+            continue
+        trade = (group.get('trade') or '').strip()
+        if not _RE_MEASURED_SECTION.match(trade):
+            continue                              # measured works only — no prelims etc.
+        items = _demo_items(group)
+        if items:
+            trimmed.append({'trade': trade, 'items': items})
+
+    if not trimmed:
+        # Fallback for outputs with non-standard trade numbering: take the first
+        # sections that have any non-provisional items rather than returning nothing.
+        for group in groups:
+            if len(trimmed) >= _DEMO_MAX_SECTIONS:
+                break
+            if not isinstance(group, dict):
+                continue
+            items = _demo_items(group)
+            if items:
+                trimmed.append({'trade': (group.get('trade') or 'Measured works').strip(), 'items': items})
+
+    return {'demo': True, 'bill_of_quantities': trimmed}
+
+
+@app.route("/demo-process", methods=["POST"])
+def demo_process():
+    """Public, unauthenticated demo endpoint.
+
+    Runs exactly the same pipeline as /process (PDF → Claude → validation →
+    rates enrichment) but never saves anything, and trims the response to the
+    first 3 measured work sections before returning it.
+    """
+    global _demo_last_request_at
+    ip  = _demo_client_ip()
+    now = time.time()
+
+    last = _demo_last_request_at.get(ip)
+    if last and (now - last) < _DEMO_RATE_WINDOW_SECONDS:
+        app.logger.info("Demo blocked by rate limit: ip=%s", ip)
+        return jsonify({"error": "Demo limit reached. Please create a free account to continue."}), 429
+
+    # Stamp before the Claude call so a second request from the same IP can't
+    # run concurrently; the stamp is refunded below if generation fails.
+    _demo_last_request_at[ip] = now
+    if len(_demo_last_request_at) > 1000:          # keep the dict from growing unbounded
+        cutoff = now - _DEMO_RATE_WINDOW_SECONDS
+        _demo_last_request_at = {k: v for k, v in _demo_last_request_at.items() if v >= cutoff}
+
+    app.logger.info("Demo started: ip=%s", ip)
+
+    boq_data, _pages_text, _uploaded_file, err = _run_boq_pipeline()
+    if err:
+        _demo_last_request_at.pop(ip, None)        # don't burn the visitor's slot on a failed upload
+        return err
+
+    demo_boq = _trim_boq_for_demo(boq_data)
+    app.logger.info("Demo completed: ip=%s sections=%s", ip, len(demo_boq["bill_of_quantities"]))
+    return jsonify(demo_boq), 200
+
 
 @app.route("/export",   methods=["POST"])   # original route kept for backward compatibility
 @app.route("/download", methods=["POST"])   # new route used by the frontend Download PDF button
