@@ -1209,6 +1209,56 @@ def process_pdf():                         # Flask calls this function when a ma
     if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
         return jsonify({"error": "Authentication required. Please sign in."}), 401
 
+    # ── Per-user monthly quota check ─────────────────────────────────────────
+    # Free plan: 50,000 tokens/month (~2 small projects).
+    # Pro plan:  2,000,000 tokens/month (effectively unlimited for normal use).
+    # Studio plan: same as Pro.
+    # If Supabase is unavailable we fail open (allow the request) so an infra
+    # blip never hard-blocks a paying user.
+    _PLAN_MONTHLY_TOKEN_LIMITS = {
+        "free":   50_000,
+        "pro":    2_000_000,
+        "studio": 2_000_000,
+    }
+    try:
+        if _supabase:
+            _quota_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _quota_user     = getattr(_quota_user_res, "user", None) if _quota_user_res else None
+            if _quota_user:
+                _plan = (
+                    (_quota_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                _limit = _PLAN_MONTHLY_TOKEN_LIMITS.get(_plan, _PLAN_MONTHLY_TOKEN_LIMITS["free"])
+
+                # Sum tokens used this calendar month
+                from datetime import datetime, timezone
+                _month_start = datetime.now(timezone.utc).replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0
+                ).isoformat()
+                _usage_rows = (
+                    _db_client()
+                    .table("usage_events")
+                    .select("input_tokens, output_tokens")
+                    .eq("user_id", _quota_user.id)
+                    .gte("created_at", _month_start)
+                    .execute()
+                )
+                _tokens_used = sum(
+                    (r.get("input_tokens", 0) or 0) + (r.get("output_tokens", 0) or 0)
+                    for r in (_usage_rows.data or [])
+                )
+                if _tokens_used >= _limit:
+                    return jsonify({
+                        "error": (
+                            f"Monthly usage limit reached for your {_plan.title()} plan "
+                            f"({_tokens_used:,} of {_limit:,} tokens used). "
+                            "Upgrade your plan or wait until next month to continue."
+                        )
+                    }), 429
+    except Exception as _qe:
+        app.logger.warning("Quota check failed (failing open): %s", _qe)
+    # ── End quota check ──────────────────────────────────────────────────────
+
     if "file" not in request.files:        # request.files is a dict of uploaded files keyed by form field name (like IFormFileCollection in C#)
         return jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400  # 400 Bad Request
 
