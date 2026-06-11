@@ -1129,7 +1129,20 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
 
 # ── Main function ──────────────────────────────────────────────────────────────
 
-def generate_boq_pdf(boq_json: dict) -> bytes:
+def _draw_watermark(canvas_obj, doc):
+    """Draw a diagonal grey watermark on every page."""
+    from reportlab.lib.colors import Color
+    from reportlab.lib.units import mm
+    canvas_obj.saveState()
+    canvas_obj.setFont("Helvetica-Bold", 52)
+    canvas_obj.setFillColor(Color(0.75, 0.75, 0.75, alpha=0.30))
+    canvas_obj.translate(doc.pagesize[0] / 2, doc.pagesize[1] / 2)
+    canvas_obj.rotate(45)
+    canvas_obj.drawCentredString(0, 0, "AI MEASUREMENT DRAFT — UNVERIFIED")
+    canvas_obj.restoreState()
+
+
+def generate_boq_pdf(boq_json: dict, watermark: bool = False) -> bytes:
     """Generate a professional NRM2-compliant Bill of Quantities PDF and return raw bytes.
 
     Args:
@@ -1221,5 +1234,15 @@ def generate_boq_pdf(boq_json: dict) -> bytes:
     story.append(PageBreak())
     story += _build_grand_summary(prelim_total, measured_total, prov_total)
 
-    doc.build(story, onFirstPage=_draw_chrome, onLaterPages=_draw_chrome)
+    def _first_page(canvas_obj, doc):
+        _draw_chrome(canvas_obj, doc)
+        if watermark:
+            _draw_watermark(canvas_obj, doc)
+
+    def _later_pages(canvas_obj, doc):
+        _draw_chrome(canvas_obj, doc)
+        if watermark:
+            _draw_watermark(canvas_obj, doc)
+
+    doc.build(story, onFirstPage=_first_page, onLaterPages=_later_pages)
     return buf.getvalue()

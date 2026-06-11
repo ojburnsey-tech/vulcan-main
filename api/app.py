@@ -1404,8 +1404,22 @@ def export_pdf():                           # Flask calls this for both URLs; st
     if not boq_json:                       # guard: body was empty or not valid JSON
         return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
 
+    # Resolve plan for watermark decision
+    _exp_watermark = True  # default to watermarked (safe fallback)
     try:
-        pdf_bytes = generate_boq_pdf(boq_json)   # build the PDF; returns raw bytes
+        if _supabase:
+            _exp_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _exp_user     = getattr(_exp_user_res, "user", None) if _exp_user_res else None
+            if _exp_user:
+                _exp_plan = (
+                    (_exp_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                _exp_watermark = _exp_plan not in ("pro", "studio")
+    except Exception as _we:
+        app.logger.warning("Could not resolve plan for watermark check: %s", _we)
+
+    try:
+        pdf_bytes = generate_boq_pdf(boq_json, watermark=_exp_watermark)   # build the PDF; returns raw bytes
     except ValueError as exc:             # raised by generate_boq_pdf if JSON has no trade groups
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:              # catch any unexpected ReportLab error
