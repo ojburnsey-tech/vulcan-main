@@ -3711,18 +3711,207 @@ function MeasurementGrid({ rows, meta }) {
   );
 }
 
+// Confidence badge: green ≥80%, amber ≥50%, red below; "Manual" once overridden.
+function MhubConfidence({ value, overridden }) {
+  if (overridden) {
+    return (
+      <span style={{
+        fontSize: '11px', fontWeight: 700, color: 'var(--amber)',
+        border: '1px solid rgba(215,117,85,0.4)', borderRadius: '999px', padding: '2px 9px', whiteSpace: 'nowrap',
+      }}>Manual</span>
+    );
+  }
+  const pct = Math.round((Number(value) || 0) * 100);
+  const color = pct >= 80 ? '#3fb950' : pct >= 50 ? 'var(--amber)' : '#e26d5c';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
+      <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />
+      <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', color: 'rgba(255,255,255,0.75)' }}>{pct}%</span>
+    </span>
+  );
+}
+
+// Classification workflow table: Imported → Normalised → NRM2 Section → Rate Key,
+// with a confidence score and per-row manual overrides. Pure display + overrides;
+// no AI, no pricing. Paginated so large takeoffs stay responsive.
+const MHUB_CLS_PAGE = 50;
+
+function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying }) {
+  const [page, setPage] = useState(0);
+  const nrm2Options = (options && options.nrm2_sections) || [];
+  const rateKeys    = (options && options.rate_keys) || [];
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / MHUB_CLS_PAGE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const start     = safePage * MHUB_CLS_PAGE;
+  const visible   = rows.slice(start, start + MHUB_CLS_PAGE);
+
+  const effective = (i, field) => {
+    const o = overrides[i];
+    return (o && o[field] !== undefined) ? o[field] : (rows[i][field] ?? '');
+  };
+  const isOverridden = (i) => {
+    const o = overrides[i];
+    return !!o && (o.nrm2_section !== undefined || o.rate_key !== undefined);
+  };
+
+  const reviewCount = rows.filter((r, i) => !isOverridden(i) && (Number(r.confidence) || 0) < 0.5).length;
+  const selStyle = {
+    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: '6px', color: 'white', fontSize: '12.5px', padding: '5px 7px', maxWidth: '100%', width: '100%',
+  };
+
+  return (
+    <div className="scard vd-rise" style={{ marginBottom: 0, padding: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '8px' }}>
+        <div>
+          <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Classification</p>
+          <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.01em' }}>
+            Imported → Normalised → NRM2 Section → Rate Key
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          {reviewCount > 0 && (
+            <span style={{ fontSize: '12.5px', color: '#e26d5c' }}>{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</span>
+          )}
+          <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying} data-testid="cls-reclassify">
+            {classifying ? 'Classifying…' : 'Re-classify'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="rboq" data-testid="cls-table">
+          <thead>
+            <tr>
+              <th>Imported measurement</th>
+              <th>Normalised</th>
+              <th style={{ minWidth: '180px' }}>NRM2 Section</th>
+              <th style={{ minWidth: '200px' }}>Rate Key</th>
+              <th className="r">Confidence</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {visible.map((r, vi) => {
+              const i = start + vi;
+              const overridden = isOverridden(i);
+              return (
+                <tr key={i} className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`} data-testid={`cls-row-${i}`}>
+                  <td>
+                    <div>{r.description || '—'}</div>
+                    <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.4)' }}>
+                      {r.quantity == null || r.quantity === '' ? '' : `${r.quantity} `}{r.unit || ''}
+                    </div>
+                  </td>
+                  <td>
+                    <div>{r.normalised_description || '—'}</div>
+                    {r.normalised_unit ? <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.4)' }}>{r.normalised_unit}</div> : null}
+                  </td>
+                  <td>
+                    <select style={selStyle} value={effective(i, 'nrm2_section') || ''}
+                      data-testid={`cls-nrm2-${i}`}
+                      onChange={e => onOverride(i, 'nrm2_section', e.target.value || null)}>
+                      <option value="">Unclassified</option>
+                      {nrm2Options.map(o => <option key={o.code} value={o.code}>{o.code} {o.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select style={selStyle} value={effective(i, 'rate_key') || ''}
+                      data-testid={`cls-ratekey-${i}`}
+                      onChange={e => onOverride(i, 'rate_key', e.target.value || null)}>
+                      <option value="">— none —</option>
+                      {rateKeys.map(k => <option key={k} value={k}>{k}</option>)}
+                    </select>
+                  </td>
+                  <td className="r"><MhubConfidence value={r.confidence} overridden={overridden} /></td>
+                  <td className="r">
+                    <button onClick={() => onReset(i)} disabled={!overridden} aria-label="Reset row"
+                      data-testid={`cls-reset-${i}`}
+                      style={{
+                        background: 'none', border: 'none', cursor: overridden ? 'pointer' : 'default',
+                        color: overridden ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.2)', fontSize: '12px', padding: 0,
+                      }}>Reset</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
+        <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="cls-range">
+          Showing {start + 1}–{start + visible.length} of {rows.length.toLocaleString('en-GB')}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0} onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="cls-prev">← Prev</button>
+          <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.6)' }} data-testid="cls-page">Page {safePage + 1} of {pageCount}</span>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} data-testid="cls-next">Next →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MeasurementHubPage({ go, toast }) {
   // Per-source picked File (drives the filename chip). Picking a file also kicks
   // off an import to POST /measurement/import, whose parsed rows populate the grid.
+  const [tab, setTab]             = useState('measurements');
   const [files, setFiles]         = useState({});
   const [measurements, setMeasurements] = useState(null);   // null until first successful import
   const [activeMeta, setActiveMeta]     = useState(null);   // { source, file }
   const [importId, setImportId]   = useState(0);            // bumps to remount the grid (resets sort/search/page)
   const [importing, setImporting] = useState(null);         // source id currently importing
   const [importError, setImportError]   = useState(null);
+
+  // Classification state lives here so it persists across tab switches and only
+  // recomputes when a new dataset is imported (tracked via importId).
+  const [classification, setClassification] = useState({ forImportId: -1, rows: null, options: null });
+  const [classifying, setClassifying]       = useState(false);
+  const [classifyError, setClassifyError]   = useState(null);
+  const [overrides, setOverrides]           = useState({});
   const inputRefs = useRef({});
 
   const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
+
+  const runClassify = async () => {
+    if (!measurements || !measurements.length) return;
+    setClassifying(true);
+    setClassifyError(null);
+    try {
+      const res  = await fetch(`${VQ_API}/measurement/classify`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ measurements }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.error || 'Classification failed — please try again.';
+        setClassifyError(msg); toast(msg, 'error'); return;
+      }
+      setClassification({ forImportId: importId, rows: data.classified || [], options: data.options || { nrm2_sections: [], rate_keys: [] } });
+      setOverrides({});
+    } catch (e) {
+      const msg = 'Network error — could not reach the server.';
+      setClassifyError(msg); toast(msg, 'error');
+    } finally {
+      setClassifying(false);
+    }
+  };
+
+  // Auto-classify when the Classification tab is opened with a dataset that hasn't
+  // been classified yet (or after a fresh import changed importId).
+  useEffect(() => {
+    if (tab === 'classification' && measurements && measurements.length
+        && classification.forImportId !== importId && !classifying) {
+      runClassify();
+    }
+  }, [tab, importId, measurements]);
+
+  const setOverride = (idx, field, value) =>
+    setOverrides(prev => ({ ...prev, [idx]: { ...(prev[idx] || {}), [field]: value } }));
+  const resetOverride = (idx) =>
+    setOverrides(prev => { const next = { ...prev }; delete next[idx]; return next; });
 
   const runImport = async (source, file) => {
     setImporting(source.id);
@@ -3774,10 +3963,25 @@ function MeasurementHubPage({ go, toast }) {
         <div className="dash-hd">
           <h1 className="dash-h1">Bluebeam Measurement Hub</h1>
         </div>
-        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginTop: '-20px', marginBottom: '28px' }}>
+        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginTop: '-20px', marginBottom: '20px' }}>
           Bring measurements from Bluebeam and on-screen takeoff into your Bills of Quantities.
         </p>
 
+        {/* Workspace tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '24px' }}>
+          {[{ id: 'measurements', label: 'Measurements' }, { id: 'classification', label: 'Classification' }].map(tb => (
+            <button key={tb.id} onClick={() => setTab(tb.id)} data-testid={`mhub-tab-${tb.id}`}
+              style={{
+                background: 'none', border: 'none', outline: 'none',
+                borderBottom: `2px solid ${tab === tb.id ? 'var(--amber)' : 'transparent'}`,
+                color: tab === tb.id ? 'white' : 'rgba(255,255,255,0.45)',
+                padding: '8px 20px 14px', fontSize: '14px', fontWeight: tab === tb.id ? 600 : 500,
+                cursor: 'pointer', marginBottom: '-1px', fontFamily: 'var(--font-b)',
+              }}>{tb.label}</button>
+          ))}
+        </div>
+
+        {tab === 'measurements' && (
         <div className="mhub-grid">
 
           {/* Left panel — Measurement Sources (one glass card per source) */}
@@ -3870,6 +4074,47 @@ function MeasurementHubPage({ go, toast }) {
           </div>
 
         </div>
+        )}
+
+        {tab === 'classification' && (
+          (!measurements || !measurements.length) ? (
+            <div className="empty-state vd-rise">
+              <div className="empty-icon">🏷️</div>
+              <p className="empty-h">Nothing to classify yet</p>
+              <p className="empty-p">
+                Import measurements on the Measurements tab first. Each row is then
+                normalised and mapped to an NRM2 section and rate key, with a
+                confidence score you can override.
+              </p>
+              <button className="btn btn-outline btn-pill" onClick={() => setTab('measurements')}>
+                Go to Measurements
+              </button>
+            </div>
+          ) : classifyError && !classification.rows ? (
+            <div className="empty-state vd-rise">
+              <div className="empty-icon">⚠️</div>
+              <p className="empty-h">Classification failed</p>
+              <p className="empty-p">{classifyError}</p>
+              <button className="btn btn-outline btn-pill" onClick={runClassify}>Try again</button>
+            </div>
+          ) : !classification.rows || classification.forImportId !== importId ? (
+            <div className="empty-state vd-rise">
+              <div className="empty-icon">⏳</div>
+              <p className="empty-h">Classifying measurements…</p>
+              <p className="empty-p">Normalising rows and mapping them to NRM2 sections and rate keys.</p>
+            </div>
+          ) : (
+            <ClassificationTable
+              rows={classification.rows}
+              options={classification.options}
+              overrides={overrides}
+              onOverride={setOverride}
+              onReset={resetOverride}
+              onReclassify={runClassify}
+              classifying={classifying}
+            />
+          )
+        )}
       </main>
     </div>
   );
