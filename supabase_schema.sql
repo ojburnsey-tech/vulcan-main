@@ -50,6 +50,14 @@ create table if not exists public.chat_messages (
   created_at timestamptz not null default now()
 );
 
+-- ── Usage events ─────────────────────────────────────────────────────────────
+create table if not exists public.usage_events (
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  project_id    uuid references public.projects(id) on delete set null,
+  input_tokens  integer not null default 0,
+  output_tokens integer not null default 0,
+  created_at    timestamptz not null default now()
 -- ── Branding ────────────────────────────────────────────────────────────────
 -- One row per user: company identity shown on exported BoQs, managed from the
 -- Settings → Branding tab. The logo is stored as a data URL (max 2 MB file).
@@ -71,6 +79,7 @@ create table if not exists public.branding (
 grant usage on schema public to authenticated, service_role;
 grant select, insert, update, delete on public.projects      to authenticated, service_role;
 grant select, insert, update, delete on public.chat_messages to authenticated, service_role;
+grant select, insert on public.usage_events to authenticated, service_role;
 grant select, insert, update, delete on public.branding      to authenticated, service_role;
 
 -- profiles is created by SUPABASE_SETUP.md §3 — grant only if it exists so this
@@ -99,6 +108,17 @@ create policy "Users manage own chat messages"
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 
+alter table public.usage_events enable row level security;
+
+drop policy if exists "Users read own usage" on public.usage_events;
+create policy "Users read own usage"
+  on public.usage_events for select
+  using (auth.uid() = user_id);
+
+drop policy if exists "Service role inserts usage" on public.usage_events;
+create policy "Service role inserts usage"
+  on public.usage_events for insert
+  with check (true);
 drop policy if exists "Users manage own branding" on public.branding;
 create policy "Users manage own branding"
   on public.branding for all

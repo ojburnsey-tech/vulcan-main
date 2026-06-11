@@ -853,6 +853,23 @@ def _enrich_boq(boq_data):
             else:
                 # Fallback: Jaccard fuzzy match on description for legacy or malformed output
                 matched_key, rate_entry = _match_rate(desc)
+                if rate_entry:
+                    best_key = matched_key
+                    app.logger.warning(
+                        "RATE_KEY_FUZZY_MATCH: item description=%r requested rate_key=%r "
+                        "resolved to fuzzy_key=%r — consider adding %r to RATES_DB",
+                        item.get("description", ""),
+                        item.get("rate_key", ""),
+                        best_key,
+                        item.get("rate_key", ""),
+                    )
+                else:
+                    app.logger.warning(
+                        "RATE_KEY_UNRESOLVED: item description=%r rate_key=%r — "
+                        "no direct or fuzzy match in RATES_DB, item will have zero rate",
+                        item.get("description", ""),
+                        item.get("rate_key", ""),
+                    )
 
             if rate_entry:
                 mat   = rate_entry['material_rate']
@@ -1217,6 +1234,92 @@ def _run_boq_pipeline():
     """
     _fail = (None, None, None)             # prefix for every error return below
 
+    # ── Per-user monthly quota check ─────────────────────────────────────────
+    # Free plan: 50,000 tokens/month (~2 small projects).
+    # Pro plan:  2,000,000 tokens/month (effectively unlimited for normal use).
+    # Studio plan: same as Pro.
+    # If Supabase is unavailable we fail open (allow the request) so an infra
+    # blip never hard-blocks a paying user.
+    _PLAN_MONTHLY_TOKEN_LIMITS = {
+        "free":   50_000,
+        "pro":    2_000_000,
+        "studio": 2_000_000,
+    }
+    try:
+        if _supabase:
+            _quota_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _quota_user     = getattr(_quota_user_res, "user", None) if _quota_user_res else None
+            if _quota_user:
+                _plan = (
+                    (_quota_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                _limit = _PLAN_MONTHLY_TOKEN_LIMITS.get(_plan, _PLAN_MONTHLY_TOKEN_LIMITS["free"])
+
+                # Sum tokens used this calendar month
+                from datetime import datetime, timezone
+                _month_start = datetime.now(timezone.utc).replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0
+                ).isoformat()
+                _usage_rows = (
+                    _db_client()
+                    .table("usage_events")
+                    .select("input_tokens, output_tokens")
+                    .eq("user_id", _quota_user.id)
+                    .gte("created_at", _month_start)
+                    .execute()
+                )
+                _tokens_used = sum(
+                    (r.get("input_tokens", 0) or 0) + (r.get("output_tokens", 0) or 0)
+                    for r in (_usage_rows.data or [])
+                )
+                if _tokens_used >= _limit:
+                    return jsonify({
+                        "error": (
+                            f"Monthly usage limit reached for your {_plan.title()} plan "
+                            f"({_tokens_used:,} of {_limit:,} tokens used). "
+                            "Upgrade your plan or wait until next month to continue."
+                        )
+                    }), 429
+    except Exception as _qe:
+        app.logger.warning("Quota check failed (failing open): %s", _qe)
+    # ── End quota check ──────────────────────────────────────────────────────
+
+    # ── Free-tier project count gate (2 completed projects per calendar month) ─
+    try:
+        if _supabase:
+            _pc_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _pc_user     = getattr(_pc_user_res, "user", None) if _pc_user_res else None
+            if _pc_user:
+                _pc_plan = (
+                    (_pc_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                if _pc_plan == "free":
+                    from datetime import datetime, timezone
+                    _pc_month_start = datetime.now(timezone.utc).replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0
+                    ).isoformat()
+                    _pc_rows = (
+                        _db_client()
+                        .table("projects")
+                        .select("id")
+                        .eq("user_id", _pc_user.id)
+                        .eq("status", "completed")
+                        .gte("created_at", _pc_month_start)
+                        .execute()
+                    )
+                    _pc_count = len(_pc_rows.data or [])
+                    if _pc_count >= 2:
+                        return jsonify({
+                            "error": (
+                                "Free plan includes 2 completed projects per month. "
+                                f"You have used {_pc_count} this month. "
+                                "Upgrade to Pro for unlimited projects."
+                            )
+                        }), 429
+    except Exception as _pce:
+        app.logger.warning("Project count gate failed (failing open): %s", _pce)
+    # ── End project count gate ────────────────────────────────────────────────
+
     if "file" not in request.files:        # request.files is a dict of uploaded files keyed by form field name (like IFormFileCollection in C#)
         return (*_fail, (jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400))  # 400 Bad Request
 
@@ -1277,6 +1380,21 @@ def _run_boq_pipeline():
 
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
     _log_claude_response("structured", response)
+
+    # ── Persist token usage to Supabase (best-effort — never fails the request) ──
+    try:
+        _usage = getattr(response, "usage", None)
+        if _usage and _supabase:
+            _usage_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _usage_user     = getattr(_usage_user_res, "user", None) if _usage_user_res else None
+            if _usage_user:
+                _db_client().table("usage_events").insert({
+                    "user_id":       _usage_user.id,
+                    "input_tokens":  getattr(_usage, "input_tokens",  0) or 0,
+                    "output_tokens": getattr(_usage, "output_tokens", 0) or 0,
+                }).execute()
+    except Exception as _ue:
+        app.logger.warning("Failed to persist usage event: %s", _ue)
 
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "max_tokens":
@@ -1509,6 +1627,22 @@ def export_pdf():                           # Flask calls this for both URLs; st
     if not boq_json:                       # guard: body was empty or not valid JSON
         return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
 
+    # Resolve plan for watermark decision
+    _exp_watermark = True  # default to watermarked (safe fallback)
+    try:
+        if _supabase:
+            _exp_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _exp_user     = getattr(_exp_user_res, "user", None) if _exp_user_res else None
+            if _exp_user:
+                _exp_plan = (
+                    (_exp_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                _exp_watermark = _exp_plan not in ("pro", "studio")
+    except Exception as _we:
+        app.logger.warning("Could not resolve plan for watermark check: %s", _we)
+
+    try:
+        pdf_bytes = generate_boq_pdf(boq_json, watermark=_exp_watermark)   # build the PDF; returns raw bytes
     branding = _load_user_branding()        # best-effort; {} when none configured
 
     try:
@@ -1532,6 +1666,23 @@ def export_pdf():                           # Flask calls this for both URLs; st
 def export_excel():
     if not _get_bearer_token():
         return jsonify({"error": "Authentication required. Please sign in."}), 401
+
+    # ── Plan gate: Excel export is Pro and Studio only ────────────────────────
+    try:
+        if _supabase:
+            _xl_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _xl_user     = getattr(_xl_user_res, "user", None) if _xl_user_res else None
+            if _xl_user:
+                _xl_plan = (
+                    (_xl_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                if _xl_plan not in ("pro", "studio"):
+                    return jsonify({
+                        "error": "Excel export is available on Pro and Studio plans. Upgrade to download in Excel format."
+                    }), 403
+    except Exception as _xlge:
+        app.logger.warning("Plan gate check failed for Excel export: %s", _xlge)
+    # ── End plan gate ─────────────────────────────────────────────────────────
 
     boq_json = request.get_json(force=True, silent=True)
     if not boq_json:

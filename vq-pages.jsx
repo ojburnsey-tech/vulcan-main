@@ -1813,7 +1813,14 @@ function UploadPage({ go, toast, onBoqReady }) {
       if (!res.ok) {
         // Try to read a JSON error body from Flask, fall back to the HTTP status text
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        toast(err.error || 'Upload failed. Please try again.', 'error');
+        const msg = err.error || 'Upload failed. Please try again.';
+        if (res.status === 429 || res.status === 403) {
+          toast(msg + ' See Pricing to upgrade.', 'error');
+          // Navigate to pricing after a short delay so the user reads the message
+          setTimeout(() => go('pricing'), 3500);
+        } else {
+          toast(msg, 'error');
+        }
         setStatus('idle');     // reset the UI so the user can try again
         setFileName(null);
         setProgress(0);
@@ -2519,7 +2526,18 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
         body: fd,
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Processing failed');
+      if (!res.ok) {
+        const msg = data.error || 'Processing failed';
+        if (res.status === 429 || res.status === 403) {
+          toast(msg + ' See Pricing to upgrade.', 'error');
+          // Navigate to pricing after a short delay so the user reads the message
+          setTimeout(() => go('pricing'), 3500);
+        } else {
+          toast(msg, 'error');
+        }
+        setUploadStatus('idle');
+        return;
+      }
       setBoqData(data);
       onBoqReady?.(data);
       setUploadStatus('done');
