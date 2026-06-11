@@ -34,6 +34,7 @@ function VQIcon(props) {
 const VQ_NAV_ICONS = {
   dashboard: <VQIcon><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /></VQIcon>,
   projects:  <VQIcon><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" /></VQIcon>,
+  measure:   <VQIcon><path d="M21.3 8.7l-6-6a1 1 0 00-1.4 0L2.7 13.9a1 1 0 000 1.4l6 6a1 1 0 001.4 0L21.3 10.1a1 1 0 000-1.4z" /><line x1="7.5" y1="10.5" x2="9" y2="12" /><line x1="10.5" y1="7.5" x2="12" y2="9" /><line x1="13.5" y1="4.5" x2="15" y2="6" /></VQIcon>,
   uploads:   <VQIcon><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></VQIcon>,
   reports:   <VQIcon><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" /></VQIcon>,
   exports:   <VQIcon><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></VQIcon>,
@@ -330,6 +331,7 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
   const navItems = [
     { label: 'Dashboard', icon: VQ_NAV_ICONS.dashboard, target: 'dashboard', match: 'dashboard' },
     { label: 'Projects',  icon: VQ_NAV_ICONS.projects,  target: 'projects',  match: 'projects'  },
+    { label: 'Measurement Hub', icon: VQ_NAV_ICONS.measure, target: 'measurehub', match: 'measurehub' },
     { label: 'Uploads',   icon: VQ_NAV_ICONS.uploads,   target: 'upload',    match: 'upload'     },
     { label: 'Reports',   icon: VQ_NAV_ICONS.reports,   target: 'reports',   match: 'reports'    },
     { label: 'Exports',   icon: VQ_NAV_ICONS.exports,   target: 'exports',   match: 'exports'    },

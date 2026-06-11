@@ -487,7 +487,8 @@ function normaliseBoq(raw) {
 
 // ─── RESULTS ───────────────────────────────────────────────────────────────────────
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
-function ResultsPage({ go, toast, boqData, embedded }) {
+// demo=true renders the restricted public preview: exports disabled, no grand summary
+function ResultsPage({ go, toast, boqData, embedded, demo }) {
   const [pdfState, setPdfState] = useState('idle');
   const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
@@ -667,6 +668,14 @@ function ResultsPage({ go, toast, boqData, embedded }) {
         </div>
         <p className="res-disclaimer">AI-generated draft — professional review required before issue to client. Edit inline, then export.</p>
         <div className="res-controls">
+          {demo ? (
+            <>
+              <button className="btn btn-amber btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Download PDF</button>
+              <button className="btn btn-outline btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Excel</button>
+              <span style={{ alignSelf: 'center', fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>Exports are unavailable in the demo.</span>
+            </>
+          ) : (
+            <>
           <button className="btn btn-amber btn-pill" onClick={handleDownload} disabled={pdfState !== 'idle'}>
             {pdfState === 'idle'       && '↓ Download PDF'}
             {pdfState === 'generating' && '⏳ Generating PDF…'}
@@ -677,6 +686,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
   {excelState === 'generating' && '⏳ Generating…'}
   {excelState === 'done'       && '✓ Downloaded'}
 </button>          <button className="btn btn-outline btn-pill" onClick={() => { navigator.clipboard?.writeText?.(window.location.href); toast('Share link copied to clipboard!', 'success'); }}>🔗 Share</button>
+            </>
+          )}
         </div>
 
         <table className="rboq">
@@ -719,6 +730,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
                 </React.Fragment>
               );
             })}
+            {!demo && (
+              <>
             <tr className="rboq-sub rboq-sub-main">
               <td colSpan="4" style={{ textAlign: 'right' }}>Works subtotal</td>
               <td className="r">{fmt(subtotal)}</td>
@@ -737,6 +750,8 @@ function ResultsPage({ go, toast, boqData, embedded }) {
               <td colSpan="4" style={{ textAlign: 'right' }}>Grand Total (ex. VAT)</td>
               <td className="r">{fmt(grandTotal)}</td>
             </tr>
+              </>
+            )}
           </tbody>
         </table>
         <p style={{ marginTop: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.32)', fontStyle: 'italic' }}>
@@ -1991,31 +2006,56 @@ function SettingsPage({ go, toast, user: userProp }) {
     setConfirmDelete(false);
   };
 
-  // ── Branding — persisted in user metadata so it survives sign-out ───────────────
-  const [brand, setBrand] = useState({ company: '', website: '', address: '', city: '', primary: '#d77555', secondary: '#0F172A' });
+  // ── Branding — one row per user in the Supabase `branding` table ────────────────
+  const [brand, setBrand] = useState({ company_name: '', company_address: '', company_phone: '', company_email: '' });
   const [brandSaving, setBrandSaving] = useState(false);
-  const [logoPreview, setLogoPreview] = useState(() => {
-    try { return localStorage.getItem('vq_brand_logo') || ''; } catch { return ''; }
-  });
+  const [logoPreview, setLogoPreview] = useState('');
   const logoRef = useRef(null);
 
   useEffect(() => {
     if (!user) return;
-    const b = (user.user_metadata || {}).branding || {};
-    setBrand({
-      company: b.company || '', website: b.website || '',
-      address: b.address || '', city: b.city || '',
-      primary: b.primary || '#d77555', secondary: b.secondary || '#0F172A',
-    });
+    let active = true;
+    (async () => {
+      let row = null;
+      if (window.VQAuth?.getBranding) {
+        try {
+          const { data } = await window.VQAuth.getBranding(user.id);
+          row = data;
+        } catch (e) {}
+      }
+      if (!active) return;
+      // Fall back to the legacy user-metadata copy so accounts that saved
+      // branding before the table existed keep their values pre-filled.
+      const legacy = (user.user_metadata || {}).branding || {};
+      setBrand({
+        company_name:    row?.company_name    ?? legacy.company ?? '',
+        company_address: row?.company_address ?? legacy.address ?? '',
+        company_phone:   row?.company_phone   ?? '',
+        company_email:   row?.company_email   ?? '',
+      });
+      let legacyLogo = '';
+      try { legacyLogo = localStorage.getItem('vq_brand_logo') || ''; } catch (e) {}
+      setLogoPreview(row?.logo || legacyLogo);
+    })();
+    return () => { active = false; };
   }, [user]);
 
   const setB = (k, v) => setBrand(f => ({ ...f, [k]: v }));
 
   const saveBranding = async () => {
     if (!window.VQAuth || !user) { toast('You need to be signed in.', 'error'); return; }
+    if (!brand.company_name.trim()) { toast('Company name is required.', 'error'); return; }
+    const companyEmail = brand.company_email.trim();
+    if (companyEmail && !/^\S+@\S+\.\S+$/.test(companyEmail)) { toast('Enter a valid company email.', 'error'); return; }
     setBrandSaving(true);
     try {
-      const { error } = await window.VQAuth.updateUserMeta({ branding: brand });
+      const { error } = await window.VQAuth.saveBranding(user.id, {
+        company_name:    brand.company_name.trim(),
+        company_address: brand.company_address.trim(),
+        company_phone:   brand.company_phone.trim(),
+        company_email:   companyEmail,
+        logo:            logoPreview || null,
+      });
       if (error) throw error;
       toast('Branding saved.', 'success');
     } catch (e) {
@@ -2030,9 +2070,8 @@ function SettingsPage({ go, toast, user: userProp }) {
     if (file.size > 2 * 1024 * 1024) { toast('Logo must be under 2 MB.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = () => {
-      try { localStorage.setItem('vq_brand_logo', reader.result); } catch (e) {}
       setLogoPreview(reader.result);
-      toast('Logo saved.', 'success');
+      toast('Logo added — click Save Branding to store it.', 'info');
     };
     reader.readAsDataURL(file);
   };
@@ -2153,7 +2192,7 @@ function SettingsPage({ go, toast, user: userProp }) {
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
                 Permanently delete your account and all project data. Cannot be undone.
               </p>
-              <button className="btn btn-pill"
+              <button className="btn btn-danger btn-pill"
                 style={{ background: confirmDelete ? 'var(--red)' : 'transparent', color: confirmDelete ? 'white' : 'var(--red)', border: '1px solid var(--red)', padding: '10px 24px' }}
                 onClick={handleDeleteAccount}>
                 {confirmDelete ? 'Confirm — send deletion request' : 'Delete account'}
@@ -2175,13 +2214,13 @@ function SettingsPage({ go, toast, user: userProp }) {
               <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Company name</label>
-                  <input className="finp" value={brand.company} onChange={e => setB('company', e.target.value)} placeholder="Your company name" /></div>
-                <div className="fld"><label className="flbl">Website</label>
-                  <input className="finp" value={brand.website} onChange={e => setB('website', e.target.value)} placeholder="www.example.co.uk" /></div>
-                <div className="fld"><label className="flbl">Address</label>
-                  <input className="finp" value={brand.address} onChange={e => setB('address', e.target.value)} placeholder="Street address" /></div>
-                <div className="fld"><label className="flbl">City / Postcode</label>
-                  <input className="finp" value={brand.city} onChange={e => setB('city', e.target.value)} placeholder="City, Postcode" /></div>
+                  <input className="finp" value={brand.company_name} onChange={e => setB('company_name', e.target.value)} placeholder="Your company name" /></div>
+                <div className="fld"><label className="flbl">Company address</label>
+                  <input className="finp" value={brand.company_address} onChange={e => setB('company_address', e.target.value)} placeholder="Street, City, Postcode" /></div>
+                <div className="fld"><label className="flbl">Company phone</label>
+                  <input className="finp" type="tel" value={brand.company_phone} onChange={e => setB('company_phone', e.target.value)} placeholder="e.g. 028 9012 3456" /></div>
+                <div className="fld"><label className="flbl">Company email</label>
+                  <input className="finp" type="email" value={brand.company_email} onChange={e => setB('company_email', e.target.value)} placeholder="office@example.co.uk" /></div>
               </div>
             </div>
             <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
@@ -2191,7 +2230,7 @@ function SettingsPage({ go, toast, user: userProp }) {
                   <img src={logoPreview} alt="Company logo"
                     style={{ height: '56px', borderRadius: '8px', background: 'rgba(255,255,255,0.06)', padding: '6px' }} />
                   <button className="btn btn-ghost btn-sm"
-                    onClick={() => { try { localStorage.removeItem('vq_brand_logo'); } catch (e) {} setLogoPreview(''); toast('Logo removed.', 'info'); }}>
+                    onClick={() => { setLogoPreview(''); toast('Logo removed — click Save Branding to confirm.', 'info'); }}>
                     Remove
                   </button>
                 </div>
@@ -2204,18 +2243,11 @@ function SettingsPage({ go, toast, user: userProp }) {
               </div>
               <input ref={logoRef} type="file" accept=".png,.svg,.jpg,.jpeg,.webp" style={{ display: 'none' }}
                 onChange={e => { handleLogoFile(e.target.files[0]); e.target.value = ''; }} />
-            </div>
-            <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
-              <p className="scard-title">Brand colours</p>
-              <div className="form-grid">
-                <div className="fld"><label className="flbl">Primary colour</label>
-                  <input className="finp" value={brand.primary} onChange={e => setB('primary', e.target.value)} /></div>
-                <div className="fld"><label className="flbl">Secondary / footer</label>
-                  <input className="finp" value={brand.secondary} onChange={e => setB('secondary', e.target.value)} /></div>
+              <div style={{ marginTop: '24px' }}>
+                <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>
+                  {brandSaving ? 'Saving…' : 'Save Branding'}
+                </button>
               </div>
-              <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>
-                {brandSaving ? 'Saving…' : 'Save branding'}
-              </button>
             </div>
           </>
         )}
@@ -3497,10 +3529,247 @@ function PricingPage({ go, toast }) {
   );
 }
 
+// ─── MEASUREMENT HUB ────────────────────────────────────────────────────────────
+// Phase 1: UI shell only — static three-panel workspace, no data wiring, no API
+// calls. Sources listed here are placeholders for the upcoming integrations.
+const MHUB_SOURCES = [
+  { name: 'Bluebeam Revu',   desc: 'Import markups and measurements from Revu sessions.' },
+  { name: 'PDF Takeoff',     desc: 'Measure lengths and areas directly on uploaded drawings.' },
+  { name: 'Manual Entry',    desc: 'Key in dimensions and quantities by hand.' },
+];
+
+const MHUB_DETAIL_ROWS = [
+  ['Source', '—'],
+  ['Quantity', '—'],
+  ['Unit', '—'],
+  ['NRM2 section', '—'],
+  ['Drawing ref', '—'],
+];
+
+function MeasurementHubPage({ go, toast }) {
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="measurehub" go={go} toast={toast} />
+      <main className="app-main dash-main">
+        <VQParticleField />
+        <div className="dash-hd">
+          <h1 className="dash-h1">Bluebeam Measurement Hub</h1>
+        </div>
+        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginTop: '-20px', marginBottom: '28px' }}>
+          Bring measurements from Bluebeam and on-screen takeoff into your Bills of Quantities.
+        </p>
+
+        <div className="mhub-grid">
+
+          {/* Left panel — Measurement Sources */}
+          <div className="scard vd-rise" style={{ marginBottom: 0 }}>
+            <p className="scard-title">Measurement Sources</p>
+            {MHUB_SOURCES.map((s, i) => (
+              <div key={s.name} style={{
+                padding: '14px 0',
+                borderBottom: i < MHUB_SOURCES.length - 1 ? '1px solid rgba(255,255,255,0.07)' : 'none',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>{s.name}</p>
+                  <span style={{
+                    fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                    color: 'var(--amber)', border: '1px solid rgba(215,117,85,0.4)',
+                    borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap',
+                  }}>Soon</span>
+                </div>
+                <p style={{ fontSize: '12.5px', lineHeight: 1.5, color: 'rgba(255,255,255,0.42)' }}>{s.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Main area — empty workspace */}
+          <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
+            <div className="empty-icon">📐</div>
+            <p className="empty-h">No measurements yet</p>
+            <p className="empty-p">
+              Connect a measurement source or open a project drawing to start building
+              a takeoff. Measurements you capture will appear in this workspace.
+            </p>
+            <button className="btn btn-outline btn-pill" disabled style={{ opacity: 0.45, cursor: 'not-allowed' }}>
+              Connect a source — coming soon
+            </button>
+          </div>
+
+          {/* Right panel — Details */}
+          <div className="scard vd-rise mhub-details" style={{ marginBottom: 0, animationDelay: '0.16s' }}>
+            <p className="scard-title">Details</p>
+            <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)', marginBottom: '16px', lineHeight: 1.55 }}>
+              Select a measurement in the workspace to see its properties here.
+            </p>
+            {MHUB_DETAIL_ROWS.map(([label, value]) => (
+              <div key={label} style={{
+                display: 'flex', justifyContent: 'space-between', gap: '12px',
+                padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }}>{label}</span>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>{value}</span>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── PUBLIC DEMO ──────────────────────────────────────────────────────────────────
+// Interactive demo at /demo — no account required. Posts to the unauthenticated
+// /demo-process endpoint and renders the restricted preview via ResultsPage demo mode.
+const VQ_DEMO_SAMPLES = [
+  { name: 'Domestic Extension',  desc: 'Single-storey rear extension with new kitchen, wetroom and pitched roof.' },
+  { name: 'Commercial Fit-Out',  desc: 'Office unit fit-out: partitions, suspended ceilings, M&E and finishes.' },
+  { name: 'Groundworks Package', desc: 'Reduced-level dig, foundations, drainage runs and external paving.' },
+];
+
+function DemoPage({ go, toast }) {
+  const [sample, setSample]     = useState(VQ_DEMO_SAMPLES[0].name);
+  const [file, setFile]         = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [status, setStatus]     = useState('idle');   // idle | processing | done
+  const [demoBoq, setDemoBoq]   = useState(null);
+
+  const acceptFile = f => {
+    if (!f) return;
+    if (!f.name.toLowerCase().endsWith('.pdf')) { toast('Only PDF files are accepted.', 'error'); return; }
+    setFile(f);
+    setDemoBoq(null);
+    setStatus('idle');
+  };
+
+  const handleGenerate = async () => {
+    if (status === 'processing') return;
+    if (!file) { toast('Select a PDF drawing package first.', 'error'); return; }
+
+    console.log('Demo started');
+    setStatus('processing');
+    setDemoBoq(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);                 // same field name Flask expects in /demo-process
+      formData.append('sample_project', sample);     // which sample card the visitor picked
+
+      const res = await fetch(`${VQ_API}/demo-process`, { method: 'POST', body: formData });
+
+      if (res.status === 429) {
+        const err = await res.json().catch(() => ({}));
+        console.log('Demo blocked by rate limit');
+        toast(err.error || 'Demo limit reached. Please create a free account to continue.', 'error');
+        setStatus('idle');
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        toast(err.error || 'Demo failed — please try again.', 'error');
+        setStatus('idle');
+        return;
+      }
+
+      const data = await res.json();
+      console.log('Demo completed');
+      setDemoBoq(data);
+      setStatus('done');
+    } catch (err) {
+      toast('Network error — could not reach the server.', 'error');
+      setStatus('idle');
+    }
+  };
+
+  return (
+    <div style={{ background: '#1d2127', minHeight: '100vh', paddingBottom: '120px' }}>
+      <VQParticleField />
+      <div style={{ position: 'relative', zIndex: 1 }}>
+
+        {/* Hero */}
+        <div style={{ padding: '120px 0 48px' }}>
+          <div className="inner" style={{ textAlign: 'center' }}>
+            <h1 className="display-xl" style={{ color: 'white', marginBottom: '20px' }}>Try Vulcan Quanta</h1>
+            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '19px', maxWidth: '520px', margin: '0 auto' }}>
+              Upload a sample drawing package and receive a preview of a Bill of Quantities.
+            </p>
+          </div>
+        </div>
+
+        <div className="inner" style={{ maxWidth: '960px' }}>
+
+          {/* Sample project cards */}
+          <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>1 · Choose a sample project type</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '40px' }}>
+            {VQ_DEMO_SAMPLES.map(s => {
+              const active = sample === s.name;
+              return (
+                <div key={s.name} onClick={() => setSample(s.name)}
+                  style={{
+                    cursor: 'pointer', borderRadius: '12px', padding: '24px',
+                    background: active ? 'rgba(215,117,85,0.10)' : 'rgba(29,33,39,0.6)',
+                    border: `1px solid ${active ? 'var(--amber)' : 'rgba(255,255,255,0.08)'}`,
+                    transition: 'border-color var(--t), background var(--t)',
+                  }}>
+                  <p style={{ fontFamily: 'var(--font-d)', fontSize: '17px', fontWeight: 700, color: 'white', marginBottom: '8px' }}>{s.name}</p>
+                  <p style={{ fontSize: '13px', lineHeight: 1.5, color: 'rgba(255,255,255,0.45)' }}>{s.desc}</p>
+                  {active && <p style={{ marginTop: '12px', fontSize: '12px', fontWeight: 600, color: 'var(--amber)' }}>✓ Selected</p>}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Upload area */}
+          <p style={{ fontSize: '12px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.4)', marginBottom: '14px' }}>2 · Upload a drawing package (PDF)</p>
+          <div
+            className={`upload-zone${dragOver ? ' drag' : ''}`}
+            style={{ padding: '48px 40px', marginBottom: '24px' }}
+            onDrop={e => { e.preventDefault(); setDragOver(false); acceptFile(e.dataTransfer.files[0]); }}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onClick={() => document.getElementById('vq-demo-file-input').click()}
+          >
+            <p className="upload-h">{file ? file.name : 'Drop your drawing here'}</p>
+            <p className="upload-sub">{file ? 'Ready to generate — or drop a different PDF' : 'or click to select a PDF file'}</p>
+            <input id="vq-demo-file-input" type="file" accept=".pdf" style={{ display: 'none' }}
+              onChange={e => { acceptFile(e.target.files[0]); e.target.value = ''; }} />
+          </div>
+
+          {/* Generate */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+            <button className="btn btn-amber btn-pill" onClick={handleGenerate} disabled={status === 'processing'}>
+              {status === 'processing' ? '⏳ Generating preview…' : 'Generate Preview'}
+            </button>
+            {status === 'processing' && <span style={{ fontSize: '13px', color: 'rgba(255,255,255,0.45)' }}>AI is reading your drawing — this takes about a minute.</span>}
+          </div>
+
+          {/* Restricted preview */}
+          {demoBoq && (
+            <>
+              <div style={{
+                margin: '48px 0 0', padding: '14px 18px', borderRadius: '10px',
+                border: '1px solid rgba(215,117,85,0.45)', background: 'rgba(215,117,85,0.12)',
+                color: 'white', fontSize: '14px', display: 'flex', justifyContent: 'space-between',
+                alignItems: 'center', gap: '16px', flexWrap: 'wrap',
+              }}>
+                <span><strong>Demo Preview</strong> — Create a free account to unlock full NRM2 output and exports.</span>
+                <button className="btn btn-amber btn-pill" onClick={() => go('signup')}>Create free account</button>
+              </div>
+              <ResultsPage embedded demo boqData={demoBoq} go={go} toast={toast} />
+            </>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
   ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
+  DemoPage, MeasurementHubPage,
 });
