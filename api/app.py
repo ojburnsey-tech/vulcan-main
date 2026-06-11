@@ -1259,6 +1259,42 @@ def process_pdf():                         # Flask calls this function when a ma
         app.logger.warning("Quota check failed (failing open): %s", _qe)
     # ── End quota check ──────────────────────────────────────────────────────
 
+    # ── Free-tier project count gate (2 completed projects per calendar month) ─
+    try:
+        if _supabase:
+            _pc_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _pc_user     = getattr(_pc_user_res, "user", None) if _pc_user_res else None
+            if _pc_user:
+                _pc_plan = (
+                    (_pc_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                if _pc_plan == "free":
+                    from datetime import datetime, timezone
+                    _pc_month_start = datetime.now(timezone.utc).replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0
+                    ).isoformat()
+                    _pc_rows = (
+                        _db_client()
+                        .table("projects")
+                        .select("id")
+                        .eq("user_id", _pc_user.id)
+                        .eq("status", "completed")
+                        .gte("created_at", _pc_month_start)
+                        .execute()
+                    )
+                    _pc_count = len(_pc_rows.data or [])
+                    if _pc_count >= 2:
+                        return jsonify({
+                            "error": (
+                                "Free plan includes 2 completed projects per month. "
+                                f"You have used {_pc_count} this month. "
+                                "Upgrade to Pro for unlimited projects."
+                            )
+                        }), 429
+    except Exception as _pce:
+        app.logger.warning("Project count gate failed (failing open): %s", _pce)
+    # ── End project count gate ────────────────────────────────────────────────
+
     if "file" not in request.files:        # request.files is a dict of uploaded files keyed by form field name (like IFormFileCollection in C#)
         return jsonify({"error": "No 'file' field in request. POST multipart/form-data with field name 'file'."}), 400  # 400 Bad Request
 
