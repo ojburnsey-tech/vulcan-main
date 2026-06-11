@@ -853,6 +853,23 @@ def _enrich_boq(boq_data):
             else:
                 # Fallback: Jaccard fuzzy match on description for legacy or malformed output
                 matched_key, rate_entry = _match_rate(desc)
+                if rate_entry:
+                    best_key = matched_key
+                    app.logger.warning(
+                        "RATE_KEY_FUZZY_MATCH: item description=%r requested rate_key=%r "
+                        "resolved to fuzzy_key=%r — consider adding %r to RATES_DB",
+                        item.get("description", ""),
+                        item.get("rate_key", ""),
+                        best_key,
+                        item.get("rate_key", ""),
+                    )
+                else:
+                    app.logger.warning(
+                        "RATE_KEY_UNRESOLVED: item description=%r rate_key=%r — "
+                        "no direct or fuzzy match in RATES_DB, item will have zero rate",
+                        item.get("description", ""),
+                        item.get("rate_key", ""),
+                    )
 
             if rate_entry:
                 mat   = rate_entry['material_rate']
