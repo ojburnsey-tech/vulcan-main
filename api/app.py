@@ -1440,6 +1440,23 @@ def export_excel():
     if not _get_bearer_token():
         return jsonify({"error": "Authentication required. Please sign in."}), 401
 
+    # ── Plan gate: Excel export is Pro and Studio only ────────────────────────
+    try:
+        if _supabase:
+            _xl_user_res = _supabase.auth.get_user(_get_bearer_token())
+            _xl_user     = getattr(_xl_user_res, "user", None) if _xl_user_res else None
+            if _xl_user:
+                _xl_plan = (
+                    (_xl_user.user_metadata or {}).get("plan", "free") or "free"
+                ).lower().strip()
+                if _xl_plan not in ("pro", "studio"):
+                    return jsonify({
+                        "error": "Excel export is available on Pro and Studio plans. Upgrade to download in Excel format."
+                    }), 403
+    except Exception as _xlge:
+        app.logger.warning("Plan gate check failed for Excel export: %s", _xlge)
+    # ── End plan gate ─────────────────────────────────────────────────────────
+
     boq_json = request.get_json(force=True, silent=True)
     if not boq_json:
         return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
