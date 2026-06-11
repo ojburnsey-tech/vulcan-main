@@ -1369,6 +1369,17 @@
       .vd-stats { grid-template-columns: 1fr 1fr; }
     }
 
+    /* ── Measurement Hub: three-panel workspace ─────────────────────────── */
+    .mhub-grid { display: grid; grid-template-columns: 280px minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+    @media (max-width: 1380px) {
+      .mhub-grid { grid-template-columns: 250px minmax(0, 1fr); }
+      .mhub-grid .mhub-details { grid-column: 1 / -1; }
+    }
+    @media (max-width: 900px) {
+      .mhub-grid { grid-template-columns: 1fr; }
+      .mhub-grid .mhub-details { grid-column: auto; }
+    }
+
     /* ── Mobile: collapse sidebar ────────────────────────────────────────── */
     @media (max-width: 1024px) {
       .app-side { display: none; }
@@ -1386,7 +1397,7 @@ const {
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
-  DemoPage,
+  DemoPage, MeasurementHubPage,
 } = window;
 
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -1399,12 +1410,12 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
                          'forgotpassword','checkemail','resetpassword','landing',
                          'projectsetup','workspace','projectsettings',
-                         'projects','reports','exports','history'];
+                         'projects','reports','exports','history','measurehub'];
 
 // Pages that require an authenticated session
 const PROTECTED = ['dashboard','settings','results','upload',
                    'projectsetup','workspace','projectsettings',
-                   'projects','reports','exports','history'];
+                   'projects','reports','exports','history','measurehub'];
 
 function App() {
   // Public deep link: /demo (or #demo) opens the interactive demo without an account.
@@ -1541,6 +1552,7 @@ function App() {
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} user={user} />,
     projects:       <ProjectsPage       go={go} toast={toast} onBoqReady={setBoqData} />,
+    measurehub:     <MeasurementHubPage go={go} toast={toast} />,
     reports:        <ReportsPage        go={go} toast={toast} />,
     exports:        <ExportsPage        go={go} toast={toast} />,
     history:        <HistoryPage        go={go} toast={toast} />,

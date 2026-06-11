@@ -3511,6 +3511,95 @@ function PricingPage({ go, toast }) {
   );
 }
 
+// ─── MEASUREMENT HUB ────────────────────────────────────────────────────────────
+// Phase 1: UI shell only — static three-panel workspace, no data wiring, no API
+// calls. Sources listed here are placeholders for the upcoming integrations.
+const MHUB_SOURCES = [
+  { name: 'Bluebeam Revu',   desc: 'Import markups and measurements from Revu sessions.' },
+  { name: 'PDF Takeoff',     desc: 'Measure lengths and areas directly on uploaded drawings.' },
+  { name: 'Manual Entry',    desc: 'Key in dimensions and quantities by hand.' },
+];
+
+const MHUB_DETAIL_ROWS = [
+  ['Source', '—'],
+  ['Quantity', '—'],
+  ['Unit', '—'],
+  ['NRM2 section', '—'],
+  ['Drawing ref', '—'],
+];
+
+function MeasurementHubPage({ go, toast }) {
+  return (
+    <div className="app-wrap">
+      <AppSidebar currentPage="measurehub" go={go} toast={toast} />
+      <main className="app-main dash-main">
+        <VQParticleField />
+        <div className="dash-hd">
+          <h1 className="dash-h1">Bluebeam Measurement Hub</h1>
+        </div>
+        <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginTop: '-20px', marginBottom: '28px' }}>
+          Bring measurements from Bluebeam and on-screen takeoff into your Bills of Quantities.
+        </p>
+
+        <div className="mhub-grid">
+
+          {/* Left panel — Measurement Sources */}
+          <div className="scard vd-rise" style={{ marginBottom: 0 }}>
+            <p className="scard-title">Measurement Sources</p>
+            {MHUB_SOURCES.map((s, i) => (
+              <div key={s.name} style={{
+                padding: '14px 0',
+                borderBottom: i < MHUB_SOURCES.length - 1 ? '1px solid rgba(255,255,255,0.07)' : 'none',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <p style={{ fontSize: '14px', fontWeight: 600, color: 'white' }}>{s.name}</p>
+                  <span style={{
+                    fontSize: '10px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em',
+                    color: 'var(--amber)', border: '1px solid rgba(215,117,85,0.4)',
+                    borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap',
+                  }}>Soon</span>
+                </div>
+                <p style={{ fontSize: '12.5px', lineHeight: 1.5, color: 'rgba(255,255,255,0.42)' }}>{s.desc}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Main area — empty workspace */}
+          <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
+            <div className="empty-icon">📐</div>
+            <p className="empty-h">No measurements yet</p>
+            <p className="empty-p">
+              Connect a measurement source or open a project drawing to start building
+              a takeoff. Measurements you capture will appear in this workspace.
+            </p>
+            <button className="btn btn-outline btn-pill" disabled style={{ opacity: 0.45, cursor: 'not-allowed' }}>
+              Connect a source — coming soon
+            </button>
+          </div>
+
+          {/* Right panel — Details */}
+          <div className="scard vd-rise mhub-details" style={{ marginBottom: 0, animationDelay: '0.16s' }}>
+            <p className="scard-title">Details</p>
+            <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)', marginBottom: '16px', lineHeight: 1.55 }}>
+              Select a measurement in the workspace to see its properties here.
+            </p>
+            {MHUB_DETAIL_ROWS.map(([label, value]) => (
+              <div key={label} style={{
+                display: 'flex', justifyContent: 'space-between', gap: '12px',
+                padding: '9px 0', borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }}>{label}</span>
+                <span style={{ fontSize: '12.5px', fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>{value}</span>
+              </div>
+            ))}
+          </div>
+
+        </div>
+      </main>
+    </div>
+  );
+}
+
 // ─── PUBLIC DEMO ──────────────────────────────────────────────────────────────────
 // Interactive demo at /demo — no account required. Posts to the unauthenticated
 // /demo-process endpoint and renders the restricted preview via ResultsPage demo mode.
@@ -3664,5 +3753,5 @@ Object.assign(window, {
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
-  DemoPage,
+  DemoPage, MeasurementHubPage,
 });
