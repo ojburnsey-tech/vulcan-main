@@ -15,6 +15,7 @@ from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /expo
 from export_excel import generate_boq_excel
 from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
 from classification import classify_measurements, classification_options, MeasurementClassificationError  # deterministic NRM2/rate classifier
+from measurement_hub import build_boq_from_measurements, validate_boq_structure  # measurement → BoQ conversion
 import time, statistics
 _processing_times = []
 _start_time = time.time()
@@ -1643,12 +1644,14 @@ def export_pdf():                           # Flask calls this for both URLs; st
     except Exception as _we:
         app.logger.warning("Could not resolve plan for watermark check: %s", _we)
 
-    try:
-        pdf_bytes = generate_boq_pdf(boq_json, watermark=_exp_watermark)   # build the PDF; returns raw bytes
     branding = _load_user_branding()        # best-effort; {} when none configured
 
     try:
-        pdf_bytes = generate_boq_pdf(boq_json, branding=branding)   # build the PDF; returns raw bytes
+        pdf_bytes = generate_boq_pdf(
+            boq_json,
+            watermark=_exp_watermark,
+            branding=branding,
+        )   # build the PDF; returns raw bytes
     except ValueError as exc:             # raised by generate_boq_pdf if JSON has no trade groups
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:              # catch any unexpected ReportLab error
@@ -1773,6 +1776,78 @@ def measurement_classify():
         return jsonify({"error": f"Classification failed: {exc}"}), 422
 
     return jsonify({"classified": classified, "options": classification_options()}), 200
+
+
+@app.route("/measurement/generate-boq", methods=["POST"])
+def measurement_generate_boq():
+    """Generate a BoQ from classified measurements.
+
+    This endpoint converts the output of /measurement/classify into a full
+    BoQ JSON structure, applies rates via _enrich_boq(), and returns a
+    preview-ready BoQ ready for export or project storage.
+
+    Input:
+    {
+        "classified_measurements": [...],  # output from /measurement/classify
+        "project_name": "string (optional)"
+    }
+
+    Output:
+    {
+        "boq_data": {...},  # enriched BoQ matching BOQ_OUTPUT_SCHEMA
+        "item_count": 42,
+        "total_value": 12345.67
+    }
+
+    Uses existing:
+    - _enrich_boq() to apply rates
+    - _validate_boq_output() to validate schema
+    - rate engine (RATES_DB)
+    """
+    if not _get_bearer_token():
+        return jsonify({"error": "Authentication required. Please sign in."}), 401
+
+    body = request.get_json(force=True, silent=True) or {}
+    classified_meas = body.get("classified_measurements")
+    project_name = body.get("project_name", "Draft BoQ from Measurements")
+
+    if not isinstance(classified_meas, list):
+        return jsonify({"error": "Request body must include 'classified_measurements' list."}), 400
+
+    if len(classified_meas) == 0:
+        return jsonify({"error": "classified_measurements cannot be empty."}), 400
+
+    try:
+        # Convert measurements to BoQ structure
+        boq_json = build_boq_from_measurements(classified_meas, project_name)
+
+        # Validate structure before enrichment
+        is_valid, error_msg = validate_boq_structure(boq_json)
+        if not is_valid:
+            app.logger.error(f"Generated BoQ validation failed: {error_msg}")
+            return jsonify({"error": f"BoQ generation failed: {error_msg}"}), 422
+
+        # Apply rates and enrichment (reuse existing logic)
+        enriched_boq = _enrich_boq(boq_json)
+
+        # Final schema validation
+        _validate_boq_output(enriched_boq)
+
+        # Calculate summary
+        item_count = sum(len(t['items']) for t in enriched_boq.get('bill_of_quantities', []))
+        total_value = _sum_line_totals(enriched_boq)
+
+        return jsonify({
+            "boq_data": enriched_boq,
+            "item_count": item_count,
+            "total_value": total_value
+        }), 200
+
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        app.logger.exception("BoQ generation failed unexpectedly")
+        return jsonify({"error": f"BoQ generation failed: {exc}"}), 500
 
 
 if __name__ == "__main__":                         # only runs when executed directly (python app.py), not when imported by a WSGI server — like a Program.Main guard in C#

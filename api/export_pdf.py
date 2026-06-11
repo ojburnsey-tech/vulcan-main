@@ -1273,8 +1273,7 @@ def _draw_watermark(canvas_obj, doc):
     canvas_obj.restoreState()
 
 
-def generate_boq_pdf(boq_json: dict, watermark: bool = False) -> bytes:
-def generate_boq_pdf(boq_json: dict, branding=None) -> bytes:
+def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> bytes:
     """Generate a professional NRM2-compliant Bill of Quantities PDF and return raw bytes.
 
     Args:
