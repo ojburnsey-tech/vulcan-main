@@ -3563,20 +3563,183 @@ const MHUB_DETAIL_ROWS = [
   ['Drawing ref', '—'],
 ];
 
+// Sortable, searchable, paginated grid for parsed measurements. Pure display —
+// no AI, classification or pricing. Filtering/sorting run once per change via
+// useMemo over the full dataset, but only one page of rows (PAGE_SIZE) is ever
+// in the DOM, so 1000+ rows stay responsive.
+const MHUB_PAGE_SIZE = 50;
+
+function MeasurementGrid({ rows, meta }) {
+  const [q, setQ]             = useState('');
+  const [sortKey, setSortKey] = useState('description');
+  const [sortDir, setSortDir] = useState('asc');
+  const [page, setPage]       = useState(0);
+
+  const filtered = React.useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return rows;
+    return rows.filter(r =>
+      String(r.description ?? '').toLowerCase().includes(term) ||
+      String(r.unit ?? '').toLowerCase().includes(term) ||
+      String(r.quantity ?? '').toLowerCase().includes(term));
+  }, [rows, q]);
+
+  const sorted = React.useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    const arr = filtered.slice();
+    arr.sort((a, b) => {
+      if (sortKey === 'quantity') {
+        const av = a.quantity == null ? -Infinity : Number(a.quantity);
+        const bv = b.quantity == null ? -Infinity : Number(b.quantity);
+        return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+      }
+      const av = String(a[sortKey] ?? '').toLowerCase();
+      const bv = String(b[sortKey] ?? '').toLowerCase();
+      return av === bv ? 0 : (av < bv ? -1 : 1) * dir;
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const pageCount = Math.max(1, Math.ceil(sorted.length / MHUB_PAGE_SIZE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const start     = safePage * MHUB_PAGE_SIZE;
+  const visible   = sorted.slice(start, start + MHUB_PAGE_SIZE);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir('asc'); }
+    setPage(0);
+  };
+  const caret = (key) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
+  const onSearch = (v) => { setQ(v); setPage(0); };
+
+  const COLS = [
+    { key: 'description', label: 'Description', align: 'left'  },
+    { key: 'quantity',    label: 'Quantity',    align: 'right' },
+    { key: 'unit',        label: 'Unit',        align: 'left'  },
+  ];
+
+  return (
+    <div className="scard vd-rise mhub-grid-card" style={{ marginBottom: 0, animationDelay: '0.08s', padding: '24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '18px' }}>
+        <div>
+          <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Measurements</p>
+          <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.42)' }}>
+            {meta?.source ? `${meta.source} · ` : ''}{meta?.file ? `${meta.file} · ` : ''}
+            {rows.length.toLocaleString('en-GB')} row{rows.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <input
+          className="finp"
+          type="search"
+          placeholder="Search description or unit…"
+          value={q}
+          onChange={e => onSearch(e.target.value)}
+          data-testid="mhub-search"
+          style={{ width: '260px', maxWidth: '100%' }}
+        />
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table className="rboq" data-testid="mhub-table">
+          <thead>
+            <tr>
+              {COLS.map(c => (
+                <th key={c.key}
+                  className={c.align === 'right' ? 'r' : ''}
+                  onClick={() => toggleSort(c.key)}
+                  data-testid={`mhub-th-${c.key}`}
+                  aria-sort={sortKey === c.key ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                  style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+                  {c.label}{caret(c.key)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {visible.length === 0 ? (
+              <tr className="rboq-item"><td colSpan={3} style={{ textAlign: 'center', padding: '28px 16px', color: 'rgba(255,255,255,0.45)' }}>
+                No measurements match “{q}”.
+              </td></tr>
+            ) : visible.map((r, i) => (
+              <tr key={start + i} className={`rboq-item${(start + i) % 2 === 1 ? ' alt' : ''}`}>
+                <td>{r.description}</td>
+                <td className="r">{r.quantity == null || r.quantity === '' ? '—' : r.quantity}</td>
+                <td>{r.unit || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
+        <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="mhub-range">
+          {sorted.length === 0
+            ? 'No results'
+            : `Showing ${start + 1}–${start + visible.length} of ${sorted.length.toLocaleString('en-GB')}` +
+              (sorted.length !== rows.length ? ` (filtered from ${rows.length.toLocaleString('en-GB')})` : '')}
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0}
+            onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="mhub-prev">← Prev</button>
+          <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.6)' }} data-testid="mhub-page">
+            Page {safePage + 1} of {pageCount}
+          </span>
+          <button className="btn btn-outline btn-pill btn-sm" disabled={safePage >= pageCount - 1}
+            onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} data-testid="mhub-next">Next →</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MeasurementHubPage({ go, toast }) {
-  // Selected files live in local component state only, keyed by source id.
-  // Nothing is processed or uploaded — this just remembers the user's pick.
-  // { [sourceId]: File }
-  const [files, setFiles] = useState({});
+  // Per-source picked File (drives the filename chip). Picking a file also kicks
+  // off an import to POST /measurement/import, whose parsed rows populate the grid.
+  const [files, setFiles]         = useState({});
+  const [measurements, setMeasurements] = useState(null);   // null until first successful import
+  const [activeMeta, setActiveMeta]     = useState(null);   // { source, file }
+  const [importId, setImportId]   = useState(0);            // bumps to remount the grid (resets sort/search/page)
+  const [importing, setImporting] = useState(null);         // source id currently importing
+  const [importError, setImportError]   = useState(null);
   const inputRefs = useRef({});
 
   const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
 
+  const runImport = async (source, file) => {
+    setImporting(source.id);
+    setImportError(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res  = await fetch(`${VQ_API}/measurement/import`, { method: 'POST', body: fd });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg = data.error || 'Import failed — please check the file and try again.';
+        setImportError(msg);
+        toast(msg, 'error');
+        return;
+      }
+      const parsed = Array.isArray(data.measurements) ? data.measurements : [];
+      setMeasurements(parsed);
+      setActiveMeta({ source: source.name, file: file.name });
+      setImportId(n => n + 1);   // fresh grid state for the new dataset
+      toast(`Imported ${parsed.length} measurement${parsed.length !== 1 ? 's' : ''}.`, 'success');
+    } catch (e) {
+      const msg = 'Network error — could not reach the server.';
+      setImportError(msg);
+      toast(msg, 'error');
+    } finally {
+      setImporting(null);
+    }
+  };
+
   const handlePick = (id, fileList) => {
     const file = fileList && fileList[0];
     if (!file) return;
-    setFiles(prev => ({ ...prev, [id]: file }));   // store the File object, no processing
-    toast(`${file.name} selected.`, 'info');
+    setFiles(prev => ({ ...prev, [id]: file }));
+    const source = MHUB_SOURCES.find(s => s.id === id);
+    if (source) runImport(source, file);
   };
 
   const clearFile = (id) => setFiles(prev => {
@@ -3628,8 +3791,8 @@ function MeasurementHubPage({ go, toast }) {
                     data-testid={`mhub-input-${s.id}`}
                     onChange={e => { handlePick(s.id, e.target.files); e.target.value = ''; }}
                   />
-                  <button className="btn btn-outline btn-pill btn-sm" onClick={() => openPicker(s.id)}>
-                    {picked ? 'Replace file' : 'Import'}
+                  <button className="btn btn-outline btn-pill btn-sm" onClick={() => openPicker(s.id)} disabled={importing === s.id}>
+                    {importing === s.id ? 'Importing…' : (picked ? 'Replace file' : 'Import')}
                   </button>
 
                   {picked && (
@@ -3654,18 +3817,22 @@ function MeasurementHubPage({ go, toast }) {
             })}
           </div>
 
-          {/* Main area — empty workspace */}
-          <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
-            <div className="empty-icon">📐</div>
-            <p className="empty-h">No measurements yet</p>
-            <p className="empty-p">
-              Connect a measurement source or open a project drawing to start building
-              a takeoff. Measurements you capture will appear in this workspace.
-            </p>
-            <button className="btn btn-outline btn-pill" disabled style={{ opacity: 0.45, cursor: 'not-allowed' }}>
-              Connect a source — coming soon
-            </button>
-          </div>
+          {/* Main area — measurement grid once imported, otherwise empty workspace */}
+          {measurements ? (
+            <MeasurementGrid key={importId} rows={measurements} meta={activeMeta} />
+          ) : (
+            <div className="empty-state vd-rise" style={{ animationDelay: '0.08s' }}>
+              <div className="empty-icon">📐</div>
+              <p className="empty-h">No measurements yet</p>
+              <p className="empty-p">
+                Import a Bluebeam CSV/XLSX or an Excel takeoff from the panel on the
+                left. Parsed measurements will appear here in a sortable, searchable grid.
+              </p>
+              {importError && (
+                <p style={{ fontSize: '13px', color: 'var(--red, #e26d5c)', marginTop: '4px' }}>{importError}</p>
+              )}
+            </div>
+          )}
 
           {/* Right panel — Details */}
           <div className="scard vd-rise mhub-details" style={{ marginBottom: 0, animationDelay: '0.16s' }}>
