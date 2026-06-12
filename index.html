@@ -1445,6 +1445,7 @@ function App() {
   const [authLoading, setAuthLoading] = useState(true);
   const [pendingEmail, setPendingEmail] = useState('');
   const [boqData, setBoqData]         = useState(null);   // holds JSON returned by /process; passed down to ResultsPage
+  const [boqSample, setBoqSample]     = useState(false);  // true when results was opened as the sample/demo BoQ
   const [projectId, setProjectId]     = useState(null);
   const [t, setTweak]                 = useTweaks(TWEAK_DEFAULTS);
 
@@ -1523,6 +1524,9 @@ function App() {
   const go = useCallback((p, opts) => {
     if (opts && opts.pendingEmail !== undefined) setPendingEmail(opts.pendingEmail);
     if (opts?.projectId) setProjectId(opts.projectId);
+    // Each visit to results declares whether it's the sample BoQ; without the
+    // flag ResultsPage shows a "no BoQ yet" empty state when boqData is null.
+    if (p === 'results') setBoqSample(!!opts?.sample);
     setPage(p);
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, []);
@@ -1564,7 +1568,7 @@ function App() {
 
   const pages = {
     // landing:     <LandingPage        go={go} tweaks={t} toast={toast} />,
-    results:        <ResultsPage        go={go} toast={toast} boqData={boqData} />,
+    results:        <ResultsPage        go={go} toast={toast} boqData={boqData} sample={boqSample} projectId={projectId} />,
     dashboard:      <DashboardPage      go={go} toast={toast} user={user} onBoqReady={setBoqData} />,
     upload:         <UploadPage         go={go} toast={toast} onBoqReady={setBoqData} />,
     settings:       <SettingsPage       go={go} toast={toast} user={user} />,
