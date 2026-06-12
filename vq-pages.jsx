@@ -237,7 +237,7 @@ function LandingPage({ go, tweaks = {}, toast }) {
             <button
               className="btn btn-amber btn-pill"
               style={{ marginTop: '32px', padding: '14px 28px', fontSize: '15px', fontWeight: 600 }}
-              onClick={() => go('results')}
+              onClick={() => go('results', { sample: true })}
             >
               See a sample BoQ →
             </button>
@@ -391,7 +391,7 @@ function LandingPage({ go, tweaks = {}, toast }) {
             <button className="btn btn-amber btn-pill btn-lg" onClick={() => go('signup')}>
               Start free
             </button>
-            <button className="btn-ghost-lt" onClick={() => go('results')}>
+            <button className="btn-ghost-lt" onClick={() => go('results', { sample: true })}>
               See a sample BoQ →
             </button>
           </div>
@@ -488,7 +488,10 @@ function normaliseBoq(raw) {
 // ─── RESULTS ───────────────────────────────────────────────────────────────────────
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
 // demo=true renders the restricted public preview: exports disabled, no grand summary
-function ResultsPage({ go, toast, boqData, embedded, demo }) {
+// sample=true renders the built-in mock BoQ (landing page "See a sample BoQ")
+// projectId is set when arriving from a project row, so the no-BoQ empty state
+// can link straight back to that project's workspace
+function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) {
   const [pdfState, setPdfState] = useState('idle');
   const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
@@ -649,6 +652,35 @@ function ResultsPage({ go, toast, boqData, embedded, demo }) {
       setExcelState('idle');
     }
   };
+
+  // A real project with no generated BoQ: say so plainly instead of showing
+  // the mock data, which is only meant for the demo / sample views.
+  if (!boqData && !demo && !sample) {
+    const empty = (
+      <div className="res-wrap" style={embedded ? { minHeight: 'auto' } : undefined}>
+        <div className="res-pad" style={embedded ? { padding: '8px 0' } : undefined}>
+          {!embedded && <span className="res-back" onClick={() => go('dashboard')}>← Back to dashboard</span>}
+          <h1 className="res-title">Bill of Quantities</h1>
+          <div className="vd-empty" style={{ padding: '72px 24px' }}>
+            <p className="vd-empty-p">No BoQ has been generated for this project yet.</p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
+              {projectId && (
+                <button className="btn btn-amber btn-pill" onClick={() => go('workspace', { projectId })}>Generate a BoQ →</button>
+              )}
+              <button className="btn btn-outline btn-pill" onClick={() => go('projects')}>Back to projects</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+    if (embedded) return empty;
+    return (
+      <div className="app-wrap">
+        <AppSidebar currentPage="results" go={go} toast={toast} />
+        <div className="app-main">{empty}</div>
+      </div>
+    );
+  }
 
   const inner = (
       <div className="res-wrap" style={embedded ? { minHeight: 'auto' } : undefined}>
@@ -993,7 +1025,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
     } catch {
       if (onBoqReady) onBoqReady(null);
     }
-    go('results');
+    go('results', { projectId: p.id });
   };
 
   const handleDelete = async (id) => {
@@ -1017,10 +1049,10 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   };
 
   // ── Quick actions ────────────────────────────────────────────────────────────
-  // Demo project: ResultsPage renders its built-in sample BoQ when boqData is null.
+  // Demo project: ResultsPage renders its built-in sample BoQ in sample mode.
   const handleDemo = () => {
     if (onBoqReady) onBoqReady(null);
-    go('results');
+    go('results', { sample: true });
   };
 
   // Import an existing BoQ from a JSON export and open it in the results view.
@@ -1451,7 +1483,7 @@ function ProjectsPage({ go, toast, onBoqReady }) {
     } catch {
       if (onBoqReady) onBoqReady(null);
     }
-    go('results');
+    go('results', { projectId: p.id });
   };
 
   const handleDelete = async (p) => {
