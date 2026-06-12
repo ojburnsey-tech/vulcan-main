@@ -16,6 +16,8 @@ from export_excel import generate_boq_excel
 from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
 from classification import classify_measurements, classification_options, MeasurementClassificationError  # deterministic NRM2/rate classifier
 from measurement_hub import build_boq_from_measurements, validate_boq_structure  # measurement → BoQ conversion
+from mapping_loader import load_mappings_at_startup, get_loader_status  # Bluebeam Term Mapping loader
+from measurement_classifier import classify_measurement  # Spreadsheet-based measurement classification
 import time, statistics
 _processing_times = []
 _start_time = time.time()
@@ -98,6 +100,17 @@ _supabase = create_client(_SB_URL, _SB_KEY) if (_SB_URL and _SB_KEY) else None
 _SB_SERVICE_KEY = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
                    or os.environ.get('SUPABASE_SERVICE_KEY', ''))
 _supabase_admin = create_client(_SB_URL, _SB_SERVICE_KEY) if (_SB_URL and _SB_SERVICE_KEY) else None
+
+
+# ── Bluebeam Term Mapping Loader ───────────────────────────────────────────────
+# Load measurement classification mappings at startup (once, cached in memory).
+_mappings_loaded_ok, _mappings_loaded_msg = load_mappings_at_startup()
+if _mappings_loaded_ok:
+    import logging
+    logging.getLogger(__name__).info(f"Mappings: {_mappings_loaded_msg}")
+else:
+    import logging
+    logging.getLogger(__name__).warning(f"Mappings: {_mappings_loaded_msg}")
 
 
 def _db_client(token=None):
@@ -1747,6 +1760,54 @@ def measurement_import():
         return jsonify({"error": f"Could not parse the file: {exc}"}), 422
 
     return jsonify({"measurements": measurements}), 200
+
+
+# ── Spreadsheet-Based Measurement Classification ────────────────────────────────
+# Lookup a measurement description in the Bluebeam Term Mapping spreadsheet.
+# Returns trade code, trade group, CSI division, unit, and takeoff type — or
+# {matched: false} if not found. No AI fallback.
+
+@app.route("/measurement/lookup-mapping", methods=["POST"])
+def measurement_lookup_mapping():
+    """Classify a measurement using the Bluebeam Term Mapping spreadsheet.
+
+    Input:
+    {
+        "description": "Wall Area"
+    }
+
+    Output (match found):
+    {
+        "matched": true,
+        "description": "Wall Area",
+        "trade_code": "TILE-CERAMIC",
+        "trade_group": "Finishes",
+        "csi_division": "09 3000",
+        "unit": "m²",
+        "takeoff_type": "Flooring"
+    }
+
+    Output (no match):
+    {
+        "matched": false,
+        "description": "Wall Area"
+    }
+
+    Mapping priority:
+    1. Exact match (case-sensitive)
+    2. Case-insensitive match
+    3. No match — returns {matched: false}
+
+    No AI classification is used. Only spreadsheet mappings.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    description = body.get("description")
+
+    if not description or not isinstance(description, str):
+        return jsonify({"matched": False, "description": description}), 200
+
+    result = classify_measurement(description)
+    return jsonify(result), 200
 
 
 _CLASSIFY_MAX_ROWS = 5000
