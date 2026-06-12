@@ -40,6 +40,21 @@ alter table public.projects add column if not exists boq_data         jsonb;
 alter table public.projects add column if not exists status           text default 'draft';
 alter table public.projects add column if not exists created_at       timestamptz not null default now();
 
+-- ── Status check constraint ─────────────────────────────────────────────────
+-- Some live databases gained a stricter "projects_status_check" constraint
+-- (e.g. created from the dashboard) that rejects 'draft', which broke project
+-- creation with Postgres error 23514. Rebuild it with the full vocabulary the
+-- app actually uses, after normalising any rows that would violate it.
+alter table public.projects drop constraint if exists projects_status_check;
+update public.projects
+   set status = 'draft'
+ where status is null
+    or status not in ('draft', 'processing', 'completed', 'archived');
+alter table public.projects alter column status set default 'draft';
+alter table public.projects
+  add constraint projects_status_check
+  check (status in ('draft', 'processing', 'completed', 'archived'));
+
 -- ── Chat messages ───────────────────────────────────────────────────────────
 create table if not exists public.chat_messages (
   id         uuid primary key default gen_random_uuid(),
@@ -58,6 +73,8 @@ create table if not exists public.usage_events (
   input_tokens  integer not null default 0,
   output_tokens integer not null default 0,
   created_at    timestamptz not null default now()
+);
+
 -- ── Branding ────────────────────────────────────────────────────────────────
 -- One row per user: company identity shown on exported BoQs, managed from the
 -- Settings → Branding tab. The logo is stored as a data URL (max 2 MB file).

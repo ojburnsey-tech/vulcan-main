@@ -1402,9 +1402,21 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
 
 // ─── PROJECTS ──────────────────────────────────────────────────────────────────────
 // Full project list — every project is viewable and selectable from here.
+// Normalise a raw status into the three buckets the UI shows.
+function vqStatusKey(status) {
+  if (status === 'completed')  return 'completed';
+  if (status === 'processing') return 'processing';
+  return 'preparing';
+}
+
 function ProjectsPage({ go, toast, onBoqReady }) {
   const { projects, loading, reload } = useProjects();
   const [openMenu, setOpenMenu] = useState(null);
+  const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('newest');
+  const [duplicating, setDuplicating] = useState(null);
+  const searchRef = React.useRef(null);
 
   useEffect(() => {
     if (openMenu === null) return;
@@ -1412,6 +1424,19 @@ function ProjectsPage({ go, toast, onBoqReady }) {
     window.addEventListener('click', close);
     return () => window.removeEventListener('click', close);
   }, [openMenu]);
+
+  // Press "/" anywhere on the page to jump to search.
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = document.activeElement?.tagName || '';
+      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(tag)) {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const handleViewBoq = async (p) => {
     setOpenMenu(null);
@@ -1429,11 +1454,12 @@ function ProjectsPage({ go, toast, onBoqReady }) {
     go('results');
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (p) => {
     setOpenMenu(null);
+    if (!window.confirm(`Delete "${p.name || 'Untitled project'}"? This permanently removes its drawings, BoQ and chat history.`)) return;
     try {
       const token = await vqToken();
-      const res = await fetch(`${VQ_API}/projects/${id}`, {
+      const res = await fetch(`${VQ_API}/projects/${p.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` },
         credentials: 'include',
@@ -1444,6 +1470,69 @@ function ProjectsPage({ go, toast, onBoqReady }) {
       toast('Network error — could not delete project.', 'error');
     }
   };
+
+  // Duplicate a project's setup (client, contract, AI instructions…) as a fresh
+  // draft — handy for repeat clients or phased works on the same site.
+  const handleDuplicate = async (p) => {
+    setOpenMenu(null);
+    setDuplicating(p.id);
+    try {
+      const token = await vqToken();
+      // The list payload can omit setup fields, so fetch the full row first.
+      const fullRes = await fetch(`${VQ_API}/projects/${p.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+      });
+      const full = fullRes.ok ? await fullRes.json() : p;
+      const res = await fetch(`${VQ_API}/projects`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        credentials: 'include',
+        body: JSON.stringify({
+          name: `${full.name || 'Untitled project'} (copy)`,
+          description: full.description,
+          client_name: full.client_name,
+          contract_type: full.contract_type,
+          location_factor: full.location_factor,
+          notes_for_ai: full.notes_for_ai,
+          auto_delete_days: full.auto_delete_days,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Could not duplicate project.');
+      }
+      toast('Project duplicated.', 'success');
+      reload();
+    } catch (e) {
+      toast(e.message || 'Could not duplicate project.', 'error');
+    } finally {
+      setDuplicating(null);
+    }
+  };
+
+  // Search, status filter and sort applied client-side over the loaded list.
+  const q = query.trim().toLowerCase();
+  const counts = { all: projects.length, preparing: 0, processing: 0, completed: 0 };
+  projects.forEach(p => { counts[vqStatusKey(p.status)] += 1; });
+  const visible = projects
+    .filter(p => statusFilter === 'all' || vqStatusKey(p.status) === statusFilter)
+    .filter(p => !q
+      || (p.name || '').toLowerCase().includes(q)
+      || (p.client_name || '').toLowerCase().includes(q))
+    .sort((a, b) => {
+      if (sortBy === 'oldest') return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+      if (sortBy === 'name')   return (a.name || '').localeCompare(b.name || '');
+      if (sortBy === 'value')  return (Number(b.estimated_value) || 0) - (Number(a.estimated_value) || 0);
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);   // newest
+    });
+
+  const FILTERS = [
+    { key: 'all',        label: 'All' },
+    { key: 'preparing',  label: 'Preparing' },
+    { key: 'processing', label: 'Processing' },
+    { key: 'completed',  label: 'Completed' },
+  ];
 
   return (
     <div className="app-wrap">
@@ -1462,6 +1551,32 @@ function ProjectsPage({ go, toast, onBoqReady }) {
           <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>+ New Project</button>
         </div>
 
+        {!loading && projects.length > 0 && (
+          <div className="vd-toolbar vd-rise" style={{ animationDelay: '0.05s' }}>
+            <div className="vd-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" />
+              </svg>
+              <input ref={searchRef} value={query} placeholder="Search by project or client…"
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Escape') { setQuery(''); e.target.blur(); } }} />
+              <kbd>/</kbd>
+            </div>
+            {FILTERS.map(f => (
+              <button key={f.key} className={`vd-chip${statusFilter === f.key ? ' active' : ''}`}
+                onClick={() => setStatusFilter(f.key)}>
+                {f.label}<span className="n">{counts[f.key]}</span>
+              </button>
+            ))}
+            <select className="vd-sort" value={sortBy} onChange={e => setSortBy(e.target.value)} title="Sort projects">
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="name">Name A–Z</option>
+              <option value="value">Highest estimate</option>
+            </select>
+          </div>
+        )}
+
         <div className="vd-card vd-rise" style={{ animationDelay: '0.1s' }}>
           {loading ? (
             <p className="vd-muted" style={{ padding: '18px' }}>Loading projects…</p>
@@ -1470,15 +1585,22 @@ function ProjectsPage({ go, toast, onBoqReady }) {
               <p className="vd-empty-p">No projects yet — create your first project to get started.</p>
               <button className="btn btn-amber btn-pill" onClick={() => go('projectsetup')}>＋ Create Project</button>
             </div>
+          ) : visible.length === 0 ? (
+            <div className="vd-empty">
+              <p className="vd-empty-p">No projects match your search.</p>
+              <button className="btn btn-outline btn-pill btn-sm" onClick={() => { setQuery(''); setStatusFilter('all'); }}>Clear filters</button>
+            </div>
           ) : (
-            projects.map(p => {
+            visible.map(p => {
               const badge = vqBadge(p.status);
               return (
                 <div key={p.id} className="vq-list-row clickable" onClick={() => go('workspace', { projectId: p.id })}>
                   <div className="vd-thumb" />
                   <div className="vd-proj-main">
                     <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
-                    <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
+                    <div className="vd-proj-time">
+                      {p.client_name ? `${p.client_name} · ` : ''}{vqTimeAgo(p.created_at) || 'Recently'}
+                    </div>
                   </div>
                   <div className="vd-proj-right">
                     <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
@@ -1495,8 +1617,11 @@ function ProjectsPage({ go, toast, onBoqReady }) {
                         <div className="vd-menu" onClick={(e) => e.stopPropagation()}>
                           <div className="vd-menu-item" onClick={() => go('workspace', { projectId: p.id })}>Open project</div>
                           <div className="vd-menu-item" onClick={() => handleViewBoq(p)}>View BoQ</div>
+                          <div className="vd-menu-item" onClick={() => handleDuplicate(p)}>
+                            {duplicating === p.id ? 'Duplicating…' : 'Duplicate'}
+                          </div>
                           <div className="vd-menu-item" onClick={() => go('projectsettings', { projectId: p.id })}>Settings</div>
-                          <div className="vd-menu-item danger" onClick={() => handleDelete(p.id)}>Delete</div>
+                          <div className="vd-menu-item danger" onClick={() => handleDelete(p)}>Delete</div>
                         </div>
                       )}
                     </div>
@@ -2368,7 +2493,9 @@ function ProjectSetupPage({ go, toast }) {
       const res = await fetch(`${VQ_API}/projects`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ ...form, status: 'draft' }),
+        // No status here — the server / DB default decides, so a drifted
+        // projects_status_check constraint can never reject the create.
+        body: JSON.stringify(form),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create project');

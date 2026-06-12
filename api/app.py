@@ -176,6 +176,11 @@ def _authenticated_user():
 _PROJECT_EXTRA_FIELDS = {"client_name", "contract_type", "location_factor",
                          "notes_for_ai", "auto_delete_days", "description"}
 
+# Statuses the app understands — kept in sync with the projects_status_check
+# constraint in supabase_schema.sql. Anything else is dropped so the column
+# default decides, rather than letting an unknown value hit the constraint.
+_PROJECT_STATUSES = {"draft", "processing", "completed", "archived"}
+
 
 def _insert_project(db, user_id, name, page_count, estimated_value, boq_data, status, extra=None):
     """Insert a single project row owned by user_id and return the created row dict.
@@ -190,13 +195,33 @@ def _insert_project(db, user_id, name, page_count, estimated_value, boq_data, st
         "page_count":      page_count,
         "estimated_value": estimated_value,
         "boq_data":        boq_data,
-        "status":          status,
     }
+    if status in _PROJECT_STATUSES:
+        row["status"] = status
     if extra:
         row.update({k: v for k, v in extra.items() if k in _PROJECT_EXTRA_FIELDS})
-    res = db.table("projects").insert(row).execute()
-    # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
-    return res.data[0] if getattr(res, "data", None) else None
+
+    # Live databases have drifted: some carry a stricter projects_status_check
+    # constraint that rejects 'draft' (Postgres error 23514). Until the schema
+    # script is re-run, fall back through values every known constraint accepts
+    # rather than failing the create outright.
+    attempts = [row]
+    if "status" in row:
+        attempts.append({k: v for k, v in row.items() if k != "status"})  # column default
+    attempts.append({**row, "status": "processing"})
+    attempts.append({**row, "status": "completed"})
+
+    last_exc = None
+    for attempt in attempts:
+        try:
+            res = db.table("projects").insert(attempt).execute()
+            # supabase-py returns the inserted rows in res.data (a list) when returning='representation'
+            return res.data[0] if getattr(res, "data", None) else None
+        except Exception as exc:
+            if "projects_status_check" not in str(exc):
+                raise
+            last_exc = exc
+    raise last_exc
 
 
 def _sum_line_totals(boq_data) -> float:
@@ -1057,7 +1082,10 @@ def create_project():
             extra=body,
         )
     except Exception as exc:
-        return jsonify({"error": f"Failed to create project: {exc}"}), 500
+        # postgrest.APIError carries a clean .message — prefer it over the raw
+        # repr (a Python dict dump) so the UI toast stays human-readable.
+        detail = getattr(exc, "message", None) or str(exc)
+        return jsonify({"error": f"Failed to create project: {detail}"}), 500
 
     return jsonify(row), 201
 

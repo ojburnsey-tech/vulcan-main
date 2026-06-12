@@ -37,6 +37,12 @@ Run the following SQL in **Supabase Dashboard → SQL Editor → New query**:
 > Without it, creating or listing projects fails with Postgres error 42501
 > ("permission denied for table projects").
 >
+> Re-running it also repairs a drifted `projects_status_check` constraint —
+> the cause of Postgres error 23514 (`new row for relation "projects" violates
+> check constraint "projects_status_check"`) when creating a project. The
+> script rebuilds the constraint to accept the statuses the app uses:
+> `draft`, `processing`, `completed`, `archived`.
+>
 > Alternatively (or additionally), set `SUPABASE_SERVICE_ROLE_KEY` in the
 > backend environment (Railway → service → Variables) using the service_role
 > key from **Project Settings → API**. The backend prefers it for table
