@@ -1734,11 +1734,14 @@ def export_excel():
     if not boq_json:
         return jsonify({"error": "Request body must be a JSON BoQ object."}), 400
 
-    firm_name    = request.args.get("firm", "")
+    # Branding comes from the signed-in user's Settings → Branding row, same as
+    # the PDF export. Query params remain as an explicit override / fallback.
+    branding     = _load_user_branding()
+    firm_name    = request.args.get("firm", "") or branding.get("company_name", "")
     project_name = request.args.get("project", "")
 
     try:
-        excel_bytes = generate_boq_excel(boq_json, firm_name, project_name)
+        excel_bytes = generate_boq_excel(boq_json, firm_name, project_name, branding=branding)
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 422
     except Exception as exc:

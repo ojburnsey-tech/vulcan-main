@@ -88,6 +88,17 @@ create table if not exists public.branding (
   updated_at      timestamptz not null default now()
 );
 
+-- Bring an existing branding table up to date with every column the app uses.
+-- Fixes "Could not find the 'logo' column of 'branding' in the schema cache"
+-- when saving from Settings → Branding on a database created before the
+-- column existed.
+alter table public.branding add column if not exists company_name    text;
+alter table public.branding add column if not exists company_address text;
+alter table public.branding add column if not exists company_phone   text;
+alter table public.branding add column if not exists company_email   text;
+alter table public.branding add column if not exists logo            text;
+alter table public.branding add column if not exists updated_at      timestamptz not null default now();
+
 -- ── Privileges ──────────────────────────────────────────────────────────────
 -- Deliberately nothing for `anon`: the anon key is public in the frontend, so
 -- granting it table access would expose every user's data. The backend now
@@ -157,3 +168,8 @@ as $$
 $$;
 
 grant execute on function public.delete_expired_projects(uuid) to authenticated, service_role;
+
+-- ── Refresh the PostgREST schema cache ──────────────────────────────────────
+-- Supabase's API layer caches the schema; tell it to reload so new columns
+-- (e.g. branding.logo) are usable immediately without waiting or restarting.
+notify pgrst, 'reload schema';

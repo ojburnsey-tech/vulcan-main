@@ -43,6 +43,10 @@ Run the following SQL in **Supabase Dashboard → SQL Editor → New query**:
 > script rebuilds the constraint to accept the statuses the app uses:
 > `draft`, `processing`, `completed`, `archived`.
 >
+> It likewise adds any missing `branding` columns and reloads the PostgREST
+> schema cache — fixing "Could not find the 'logo' column of 'branding' in
+> the schema cache" when saving Settings → Branding.
+>
 > Alternatively (or additionally), set `SUPABASE_SERVICE_ROLE_KEY` in the
 > backend environment (Railway → service → Variables) using the service_role
 > key from **Project Settings → API**. The backend prefers it for table
