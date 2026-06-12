@@ -2216,7 +2216,13 @@ function SettingsPage({ go, toast, user: userProp }) {
       if (error) throw error;
       toast('Branding saved.', 'success');
     } catch (e) {
-      toast(e.message || 'Could not save branding.', 'error');
+      // A missing column means the live database predates this feature —
+      // point at the fix instead of echoing the raw PostgREST message.
+      if (/schema cache|column/i.test(e.message || '')) {
+        toast('Database needs updating — run supabase_schema.sql in the Supabase SQL Editor (see SUPABASE_SETUP.md), then save again.', 'error');
+      } else {
+        toast(e.message || 'Could not save branding.', 'error');
+      }
     } finally {
       setBrandSaving(false);
     }
@@ -2224,6 +2230,9 @@ function SettingsPage({ go, toast, user: userProp }) {
 
   const handleLogoFile = (file) => {
     if (!file) return;
+    // PNG/JPG only: the PDF and Excel pipelines rasterise the logo with PIL,
+    // which cannot read SVG — accepting one would silently vanish on export.
+    if (!/^image\/(png|jpe?g)$/.test(file.type)) { toast('Logo must be a PNG or JPG image.', 'error'); return; }
     if (file.size > 2 * 1024 * 1024) { toast('Logo must be under 2 MB.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = () => {
@@ -2396,9 +2405,9 @@ function SettingsPage({ go, toast, user: userProp }) {
                 onClick={() => logoRef.current?.click()}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => { e.preventDefault(); handleLogoFile(e.dataTransfer.files[0]); }}>
-                <p style={{ fontSize: '14px', color: 'var(--c-400)' }}>Drop your logo here or click to upload. PNG or SVG, max 2 MB.</p>
+                <p style={{ fontSize: '14px', color: 'var(--c-400)' }}>Drop your logo here or click to upload. PNG or JPG, max 2 MB.</p>
               </div>
-              <input ref={logoRef} type="file" accept=".png,.svg,.jpg,.jpeg,.webp" style={{ display: 'none' }}
+              <input ref={logoRef} type="file" accept=".png,.jpg,.jpeg" style={{ display: 'none' }}
                 onChange={e => { handleLogoFile(e.target.files[0]); e.target.value = ''; }} />
               <div style={{ marginTop: '24px' }}>
                 <button className="btn btn-amber btn-pill" onClick={saveBranding} disabled={brandSaving}>

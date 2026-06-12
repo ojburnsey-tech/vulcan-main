@@ -16,6 +16,11 @@ from openpyxl.styles import (
 )
 from openpyxl.utils import get_column_letter
 
+# Shared logo decoder (handles data: URLs, http(s) URLs and local paths, and
+# returns None on any problem) — same source the PDF letterhead uses, so both
+# exports render the identical configured logo.
+from export_pdf import _logo_image_bytes
+
 
 # ── Colour palette (matches Vulcan Quanta brand) ──────────────────────────────
 NAVY        = "0A1628"   # dark navy — trade section headers
@@ -96,7 +101,33 @@ def _normalise_boq(boq_data):
     return []
 
 
-def generate_boq_excel(boq_data, firm_name="", project_name=""):
+_LOGO_MAX_H_PX = 56    # cap the embedded logo height so it sits inside the info box
+_LOGO_MAX_W_PX = 150   # cap width so a wide logo can't crowd the NRM2 labels
+
+
+def _build_logo_xl_image(logo_src):
+    """Return a scaled openpyxl Image for the branding logo, or None.
+
+    Never raises — a broken or unsupported logo (e.g. SVG, which PIL cannot
+    rasterise) must never break the Excel export.
+    """
+    raw = _logo_image_bytes(logo_src) if logo_src else None
+    if not raw:
+        return None
+    try:
+        from openpyxl.drawing.image import Image as XLImage   # needs Pillow
+        img = XLImage(io.BytesIO(raw))
+        if not img.width or not img.height:
+            return None
+        scale = min(_LOGO_MAX_H_PX / img.height, _LOGO_MAX_W_PX / img.width, 1.0)
+        img.width  = int(img.width * scale)
+        img.height = int(img.height * scale)
+        return img
+    except Exception:
+        return None
+
+
+def generate_boq_excel(boq_data, firm_name="", project_name="", branding=None):
     """
     Build the Excel workbook and return the raw bytes.
 
@@ -105,11 +136,15 @@ def generate_boq_excel(boq_data, firm_name="", project_name=""):
     boq_data     : dict or list — the enriched BoQ JSON from /process
     firm_name    : str — the QS firm name written into the header (optional)
     project_name : str — the project name written into the header (optional)
+    branding     : dict — the user's white-label branding (company_name,
+                   company_address, company_phone, company_email, logo_url);
+                   same shape the PDF pipeline receives (optional)
 
     Returns
     -------
     bytes — the .xlsx file content, ready to send as an HTTP response
     """
+    brand = branding if isinstance(branding, dict) else {}
 
     groups = _normalise_boq(boq_data)
     if not groups:
@@ -151,14 +186,28 @@ def generate_boq_excel(boq_data, firm_name="", project_name=""):
     ws.row_dimensions[row].height = 8
     row += 1
 
-    # Row 4-5: firm / project info box
-    # Left side: firm name and project
+    # Firm / project info box. Branding contact lines appear only when
+    # configured, so an unbranded export keeps the original four rows.
     labels = [
-        ("Firm:",    firm_name    or "[ Your firm name ]"),
+        ("Firm:",    firm_name or brand.get("company_name") or "[ Your firm name ]"),
         ("Project:", project_name or "[ Project name ]"),
+    ]
+    if brand.get("company_address"):
+        labels.append(("Address:", brand["company_address"]))
+    if brand.get("company_phone"):
+        labels.append(("Phone:", brand["company_phone"]))
+    if brand.get("company_email"):
+        labels.append(("Email:", brand["company_email"]))
+    labels += [
         ("Date:",    ""),   # left blank for QS to fill
         ("Prepared by:", "[ Name ]  [ MRICS / FRICS ]"),
     ]
+
+    # Company logo floats over the empty E–F cells beside the info box.
+    logo_img = _build_logo_xl_image(brand.get("logo_url") or brand.get("logo"))
+    if logo_img is not None:
+        ws.add_image(logo_img, f"E{row}")
+
     for label, value in labels:
         ws[f"A{row}"] = label
         ws[f"A{row}"].font      = _font(bold=True, size=9, colour="374151")
