@@ -1390,13 +1390,19 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         story.append(PageBreak())
         story += assumptions_flowables
 
-    story.append(PageBreak())
     risks = boq_json.get('risk_schedule', []) if isinstance(boq_json, dict) else []
     risk_flowables = _build_risk_schedule(risks)
     if risk_flowables:
-        story += risk_flowables
         story.append(PageBreak())
-    story += _build_dayworks()
+        story += risk_flowables
+
+    include_dayworks = bool(
+        isinstance(_summary, dict) and _summary.get('include_dayworks')
+    )
+    if include_dayworks:
+        story.append(PageBreak())
+        story += _build_dayworks()
+
     annex_flowables = _build_annexes(boq_json)
     if annex_flowables:
         story.append(PageBreak())
