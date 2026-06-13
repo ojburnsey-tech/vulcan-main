@@ -3904,15 +3904,12 @@ function MhubConfidence({ value, overridden }) {
 // no AI, no pricing. Paginated so large takeoffs stay responsive.
 const MHUB_CLS_PAGE = 50;
 
-function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying }) {
-  const [page, setPage] = useState(0);
+function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying, onGenerateBoq, generating }) {
+  const [page, setPage]         = useState(0);
+  const [q, setQ]               = useState('');
+  const [confidenceFilter, setConfidenceFilter] = useState('all');
   const nrm2Options = (options && options.nrm2_sections) || [];
   const rateKeys    = (options && options.rate_keys) || [];
-
-  const pageCount = Math.max(1, Math.ceil(rows.length / MHUB_CLS_PAGE));
-  const safePage  = Math.min(page, pageCount - 1);
-  const start     = safePage * MHUB_CLS_PAGE;
-  const visible   = rows.slice(start, start + MHUB_CLS_PAGE);
 
   const effective = (i, field) => {
     const o = overrides[i];
@@ -3923,29 +3920,147 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
     return !!o && (o.nrm2_section !== undefined || o.rate_key !== undefined);
   };
 
-  const reviewCount = rows.filter((r, i) => !isOverridden(i) && (Number(r.confidence) || 0) < 0.5).length;
+  // Build an indexed array so overrides stay aligned after filtering.
+  const indexed = rows.map((r, i) => ({ r, i }));
+
+  const filtered = React.useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return indexed.filter(({ r, i }) => {
+      if (term) {
+        const hit = String(r.description ?? '').toLowerCase().includes(term)
+          || String(r.normalised_description ?? '').toLowerCase().includes(term);
+        if (!hit) return false;
+      }
+      const pct = (Number(r.confidence) || 0) * 100;
+      const section = effective(i, 'nrm2_section');
+      if (confidenceFilter === 'high'   && pct < 80)          return false;
+      if (confidenceFilter === 'medium' && (pct < 50 || pct >= 80)) return false;
+      if (confidenceFilter === 'low'    && pct >= 50)          return false;
+      if (confidenceFilter === 'unclassified' && section)      return false;
+      return true;
+    });
+  }, [rows, overrides, q, confidenceFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / MHUB_CLS_PAGE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const start     = safePage * MHUB_CLS_PAGE;
+  const visible   = filtered.slice(start, start + MHUB_CLS_PAGE);
+
+  const onSearch = (v) => { setQ(v); setPage(0); };
+  const onFilter = (v) => { setConfidenceFilter(v); setPage(0); };
+
+  const reviewCount    = rows.filter((r, i) => !isOverridden(i) && (Number(r.confidence) || 0) < 0.5).length;
+  const unmatchedCount = rows.filter((r, i) => !effective(i, 'nrm2_section')).length;
+
   const selStyle = {
     background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
     borderRadius: '6px', color: 'white', fontSize: '12.5px', padding: '5px 7px', maxWidth: '100%', width: '100%',
   };
+  const filterSelStyle = {
+    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: '999px', color: 'white', fontSize: '12.5px', padding: '5px 14px',
+    cursor: 'pointer', outline: 'none', appearance: 'none', WebkitAppearance: 'none',
+    paddingRight: '28px',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.4)'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+  };
 
   return (
     <div className="scard vd-rise" style={{ marginBottom: 0, padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <div>
           <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Classification</p>
           <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.01em' }}>
             Imported → Normalised → NRM2 Section → Rate Key
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
           {reviewCount > 0 && (
-            <span style={{ fontSize: '12.5px', color: '#e26d5c' }}>{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</span>
+            <button
+              onClick={() => { setConfidenceFilter('low'); setPage(0); }}
+              data-testid="cls-review-trigger"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                fontSize: '12.5px', color: '#e26d5c',
+                textDecoration: confidenceFilter === 'low' ? 'none' : 'underline',
+                textDecorationStyle: 'dotted',
+              }}
+            >{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</button>
           )}
-          <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying} data-testid="cls-reclassify">
+          {unmatchedCount > 0 && (
+            <button
+              onClick={() => { setConfidenceFilter('unclassified'); setPage(0); }}
+              data-testid="cls-unclassified-trigger"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                fontSize: '12.5px', color: '#7c9cfc',
+                textDecoration: confidenceFilter === 'unclassified' ? 'none' : 'underline',
+                textDecorationStyle: 'dotted',
+              }}
+            >{unmatchedCount} unclassified row{unmatchedCount !== 1 ? 's' : ''}</button>
+          )}
+          <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying || generating} data-testid="cls-reclassify">
             {classifying ? 'Classifying…' : 'Re-classify'}
           </button>
+          <button
+            className="btn btn-amber btn-pill btn-sm"
+            onClick={onGenerateBoq}
+            disabled={!rows.length || classifying || generating}
+            data-testid="cls-generate-boq"
+          >
+            {generating ? 'Generating…' : 'Generate BoQ →'}
+          </button>
         </div>
+      </div>
+
+      {/* Search + filter toolbar — mirrors MeasurementGrid layout */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+        <input
+          className="finp"
+          type="search"
+          placeholder="Search description…"
+          value={q}
+          onChange={e => onSearch(e.target.value)}
+          data-testid="cls-search"
+          style={{ flex: '1 1 220px', maxWidth: '320px' }}
+        />
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <select
+            value={confidenceFilter}
+            onChange={e => onFilter(e.target.value)}
+            data-testid="cls-confidence-filter"
+            style={filterSelStyle}
+          >
+            <option value="all">All</option>
+            <option value="high">High Confidence ≥80%</option>
+            <option value="medium">Medium Confidence 50–79%</option>
+            <option value="low">Low Confidence &lt;50%</option>
+            <option value="unclassified">Unclassified</option>
+          </select>
+        </div>
+        {confidenceFilter === 'low' && (
+          <span data-testid="cls-review-active" style={{
+            fontSize: '12px', fontWeight: 600, color: '#e26d5c',
+            background: 'rgba(226,109,92,0.12)', border: '1px solid rgba(226,109,92,0.3)',
+            borderRadius: '999px', padding: '3px 10px', whiteSpace: 'nowrap',
+          }}>● Review mode</span>
+        )}
+        {confidenceFilter === 'unclassified' && (
+          <span data-testid="cls-unclassified-active" style={{
+            fontSize: '12px', fontWeight: 600, color: '#7c9cfc',
+            background: 'rgba(124,156,252,0.10)', border: '1px solid rgba(124,156,252,0.28)',
+            borderRadius: '999px', padding: '3px 10px', whiteSpace: 'nowrap',
+          }}>● Unclassified only</span>
+        )}
+        {(q || confidenceFilter !== 'all') && (
+          <button
+            className="btn btn-outline btn-pill btn-sm"
+            onClick={() => { setQ(''); setConfidenceFilter('all'); setPage(0); }}
+            data-testid="cls-clear-filters"
+          >
+            {confidenceFilter === 'low' && !q ? 'Clear review filter' : confidenceFilter === 'unclassified' && !q ? 'Clear unclassified filter' : 'Clear'}
+          </button>
+        )}
       </div>
 
       <div style={{ overflowX: 'auto' }}>
@@ -3961,11 +4076,21 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
             </tr>
           </thead>
           <tbody>
-            {visible.map((r, vi) => {
-              const i = start + vi;
+            {visible.length === 0 ? (
+              <tr className="rboq-item">
+                <td colSpan={6} style={{ textAlign: 'center', padding: '28px 16px', color: 'rgba(255,255,255,0.45)' }}>
+                  No rows match the current search or filter.
+                </td>
+              </tr>
+            ) : visible.map(({ r, i }, vi) => {
               const overridden = isOverridden(i);
+              const unmatched  = !effective(i, 'nrm2_section');
               return (
-                <tr key={i} className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`} data-testid={`cls-row-${i}`}>
+                <tr key={i}
+                  className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`}
+                  data-testid={`cls-row-${i}`}
+                  style={unmatched ? { borderLeft: '3px solid rgba(124,156,252,0.6)' } : undefined}
+                >
                   <td>
                     <div>{r.description || '—'}</div>
                     <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.4)' }}>
@@ -4010,7 +4135,10 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
         <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="cls-range">
-          Showing {start + 1}–{start + visible.length} of {rows.length.toLocaleString('en-GB')}
+          {filtered.length === 0
+            ? 'No results'
+            : `Showing ${start + 1}–${start + visible.length} of ${filtered.length.toLocaleString('en-GB')}` +
+              (filtered.length !== rows.length ? ` (filtered from ${rows.length.toLocaleString('en-GB')})` : '')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0} onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="cls-prev">← Prev</button>
@@ -4022,7 +4150,7 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
   );
 }
 
-function MeasurementHubPage({ go, toast }) {
+function MeasurementHubPage({ go, toast, onBoqReady }) {
   // Per-source picked File (drives the filename chip). Picking a file also kicks
   // off an import to POST /measurement/import, whose parsed rows populate the grid.
   const [tab, setTab]             = useState('measurements');
@@ -4039,17 +4167,53 @@ function MeasurementHubPage({ go, toast }) {
   const [classifying, setClassifying]       = useState(false);
   const [classifyError, setClassifyError]   = useState(null);
   const [overrides, setOverrides]           = useState({});
+  const [generating, setGenerating]         = useState(false);
+  const [generatedBoq, setGeneratedBoq]     = useState(null);
   const inputRefs = useRef({});
 
   const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
+
+  // Fire-and-forget: persist a user classification override to the backend.
+  // Called after every NRM2 / rate-key dropdown change.
+  const persistOverride = async (sourceTerm, nrm2Section, rateKey) => {
+    if (!sourceTerm) return;
+    try {
+      const token = await vqToken();
+      if (!token) return;
+      fetch(`${VQ_API}/measurement/overrides`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ source_term: sourceTerm, nrm2_section: nrm2Section || null, rate_key: rateKey || null }),
+      });
+    } catch (_) {}
+  };
+
+  // Fire-and-forget: delete a user override when the row is reset.
+  const deletePersistedOverride = async (sourceTerm) => {
+    if (!sourceTerm) return;
+    try {
+      const token = await vqToken();
+      if (!token) return;
+      fetch(`${VQ_API}/measurement/overrides`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ source_term: sourceTerm }),
+      });
+    } catch (_) {}
+  };
 
   const runClassify = async () => {
     if (!measurements || !measurements.length) return;
     setClassifying(true);
     setClassifyError(null);
     try {
+      const token = await vqToken();
       const res  = await fetch(`${VQ_API}/measurement/classify`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ measurements }),
       });
       const data = await res.json().catch(() => ({}));
@@ -4057,13 +4221,50 @@ function MeasurementHubPage({ go, toast }) {
         const msg = data.error || 'Classification failed — please try again.';
         setClassifyError(msg); toast(msg, 'error'); return;
       }
-      setClassification({ forImportId: importId, rows: data.classified || [], options: data.options || { nrm2_sections: [], rate_keys: [] } });
-      setOverrides({});
+      const classified = data.classified || [];
+      // Seed local override state from server-applied user_override rows so the
+      // "Manual" confidence badge renders correctly without another round-trip.
+      const seeded = {};
+      classified.forEach((r, i) => {
+        if (r.overridden) seeded[i] = { nrm2_section: r.nrm2_section, rate_key: r.rate_key };
+      });
+      setClassification({ forImportId: importId, rows: classified, options: data.options || { nrm2_sections: [], rate_keys: [] } });
+      setOverrides(seeded);
     } catch (e) {
       const msg = 'Network error — could not reach the server.';
       setClassifyError(msg); toast(msg, 'error');
     } finally {
       setClassifying(false);
+    }
+  };
+
+  const runGenerateBoq = async () => {
+    if (!classification.rows || !classification.rows.length) return;
+    setGenerating(true);
+    try {
+      const token = await vqToken();
+      const effective = classification.rows.map((r, i) => {
+        const o = overrides[i] || {};
+        return { ...r, ...(o.nrm2_section !== undefined ? { nrm2_section: o.nrm2_section } : {}), ...(o.rate_key !== undefined ? { rate_key: o.rate_key } : {}) };
+      });
+      const res = await fetch(`${VQ_API}/measurement/generate-boq`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ classified_measurements: effective }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || 'BoQ generation failed — please try again.', 'error');
+        return;
+      }
+      setGeneratedBoq(data.boq_data);
+      if (onBoqReady) onBoqReady(data.boq_data);
+      toast('BoQ generated — opening Results…', 'success');
+      setTimeout(() => go('results'), 600);
+    } catch (e) {
+      toast('Network error — could not reach the server.', 'error');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -4076,10 +4277,22 @@ function MeasurementHubPage({ go, toast }) {
     }
   }, [tab, importId, measurements]);
 
-  const setOverride = (idx, field, value) =>
+  const setOverride = (idx, field, value) => {
     setOverrides(prev => ({ ...prev, [idx]: { ...(prev[idx] || {}), [field]: value } }));
-  const resetOverride = (idx) =>
+    const row = (classification.rows || [])[idx];
+    if (row) {
+      // Read prev overrides synchronously (captured in closure — correct before state flush).
+      const prev = overrides[idx] || {};
+      const nrm2 = field === 'nrm2_section' ? (value || null) : (prev.nrm2_section !== undefined ? prev.nrm2_section : (row.nrm2_section || null));
+      const rkey = field === 'rate_key'     ? (value || null) : (prev.rate_key     !== undefined ? prev.rate_key     : (row.rate_key     || null));
+      persistOverride(row.normalised_description, nrm2, rkey);
+    }
+  };
+  const resetOverride = (idx) => {
+    const row = (classification.rows || [])[idx];
+    if (row) deletePersistedOverride(row.normalised_description);
     setOverrides(prev => { const next = { ...prev }; delete next[idx]; return next; });
+  };
 
   const runImport = async (source, file) => {
     setImporting(source.id);
@@ -4280,6 +4493,8 @@ function MeasurementHubPage({ go, toast }) {
               onReset={resetOverride}
               onReclassify={runClassify}
               classifying={classifying}
+              onGenerateBoq={runGenerateBoq}
+              generating={generating}
             />
           )
         )}

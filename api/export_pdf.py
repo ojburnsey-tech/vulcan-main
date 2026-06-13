@@ -108,35 +108,7 @@ PREAMBLE_ITEMS = [
 ]
 
 # (description, qty, unit, rate_per_unit)
-PRELIM_ITEMS = [
-    ("Scaffold erection, hire (8 weeks), and strike to full perimeter",  1,  "item", 4800.00),
-    ("Skip hire for duration of works (10 skips estimated)",             10, "nr",    280.00),
-    ("Temporary site hoarding and security fencing",                      1,  "item",  850.00),
-    ("Temporary welfare facilities and site WC hire (8 weeks)",           8,  "wk",     95.00),
-    ("Site insurance and all-risks policy allowance",                     1,  "item",  600.00),
-    ("Project management and site supervision",                           8,  "wk",    750.00),
-]
-
 # (description, allowance_amount)
-PROVISIONAL_SUMS = [
-    ("Connection to existing sewer; nature and extent subject "
-     "to NI Water survey; remeasurable on instruction", 1500.00),
-    ("External landscaping and reinstatement; extent and "
-     "specification to be confirmed", 2000.00),
-]
-
-PC_SUMS = [
-    ("Client's fixtures and fittings; PC Sum for supply only; "
-     "contractor to add fixing, profit and attendance separately", 3500.00),
-]
-
-STATUTORY_FEES = [
-    ("Planning application fee — Belfast City Council", 327.00),
-    ("Building Control Full Plans fee — Belfast City Council "
-     "(40–60m² bracket)", 291.60),
-    ("NI Water sewer connection application and inspection fee "
-     "(Article 163)", 229.20),
-]
 
 # (resource, grade_description, unit_string, guidance_range)
 DAYWORKS_ROWS = [
@@ -507,12 +479,23 @@ def _build_doc_control_panel(boq_json, today_str: str) -> list:
 
 def _build_form_of_tender(boq_json, today_str: str) -> list:
     """Page 1 — Form of Tender."""
+    _proj = {}
     if isinstance(boq_json, dict):
-        project  = boq_json.get('project_title', 'Residential Extension')
-        location = boq_json.get('location', '—')
-    else:
-        project  = 'Residential Extension'
-        location = '—'
+        _proj = boq_json.get('project') or {}
+        if not isinstance(_proj, dict):
+            _proj = {}
+
+    def _get(*keys, default=''):
+        for k in keys:
+            v = _proj.get(k) or (boq_json.get(k) if isinstance(boq_json, dict) else None)
+            if v:
+                return str(v).strip()
+        return default
+
+    project   = _get('name', 'project_title')
+    location  = _get('location')
+    draw_refs = _get('drawing_refs')
+    prep_by   = _get('prepared_by')
 
     story = []
     story.append(Spacer(1, 8 * mm))
@@ -527,20 +510,17 @@ def _build_form_of_tender(boq_json, today_str: str) -> list:
     def _field_row(label, text):
         return [Paragraph(label, S_BODY_BOLD), Paragraph(text, S_BODY)]
 
-    fields = Table(
-        [
-            _field_row("Project:",
-                       project),
-            _field_row("Location:",
-                       location),
-            _field_row("Drawing Refs:",
-                       "Measured from Architect's Drawings Ref: PL-01 through PL-10 and "
-                       "Structural Engineer's Calculation Sheet Ref: SE-04"),
-            _field_row("Date:",        today_str),
-            _field_row("Prepared by:", "Vulcan Quanta (AI-assisted draft)"),
-        ],
-        colWidths=[label_w, value_w],
-    )
+    field_rows = [
+        _field_row("Project:", project or 'Not Provided'),
+    ]
+    if location:
+        field_rows.append(_field_row("Location:", location))
+    if draw_refs:
+        field_rows.append(_field_row("Drawing Refs:", draw_refs))
+    field_rows.append(_field_row("Date:",        today_str))
+    field_rows.append(_field_row("Prepared by:", prep_by or 'Vulcan Quanta (AI-assisted draft)'))
+
+    fields = Table(field_rows, colWidths=[label_w, value_w])
     fields.setStyle(TableStyle([
         ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING',    (0, 0), (-1, -1), 4),
@@ -622,8 +602,31 @@ def _build_preambles() -> list:
     return story
 
 
-def _build_preliminaries() -> tuple:
-    """Section 01 — Preliminaries. Returns (flowables, prelim_total)."""
+def _build_preliminaries(prelim_allowance: float = 0.0, boq_json=None) -> tuple:
+    """Section 01 — Preliminaries. Returns (flowables, prelim_total).
+
+    prelim_allowance is drawn from boq_json.summary.preliminaries. It is
+    displayed as a 'Total — Preliminary Items' row at the foot of the pricing
+    schedule and returned as prelim_total so the Grand Summary uses the same
+    figure. Both sections therefore share a single data source.
+    """
+    _proj = {}
+    if isinstance(boq_json, dict):
+        _proj = boq_json.get('project') or {}
+        if not isinstance(_proj, dict):
+            _proj = {}
+
+    def _p(*keys, default='Not Provided'):
+        for k in keys:
+            v = _proj.get(k) or (boq_json.get(k) if isinstance(boq_json, dict) else None)
+            if v:
+                return str(v).strip()
+        return default
+
+    proj_title     = _p('name', 'project_title')
+    client_name    = _p('client_name', 'client')
+    contract_type  = _p('contract_type', default='JCT Minor Works Building Contract 2016 (or as stated)')
+
     story = _section_heading("SECTION 01 — PRELIMINARIES")
 
     lbl_w = 80 * mm
@@ -649,9 +652,9 @@ def _build_preliminaries() -> tuple:
     # ── A. PROJECT PARTICULARS ──────────────────────────────────────────────────
     story += _sub_heading('A', 'PROJECT PARTICULARS')
     story.append(_info_block([
-        ("Project title:",                      "[To be inserted]"),
+        ("Project title:",                      proj_title),
         ("Project address:",                    "[To be inserted]"),
-        ("Employer:",                           "[To be inserted]"),
+        ("Employer:",                           client_name),
         ("Architect / Contract Administrator:", "[To be inserted]"),
         ("Quantity Surveyor:",                  "[To be inserted]"),
         ("Structural Engineer:",                "[To be inserted]"),
@@ -660,7 +663,7 @@ def _build_preliminaries() -> tuple:
     # ── B. CONTRACT PARTICULARS ────────────────────────────────────────────────
     story += _sub_heading('B', 'CONTRACT PARTICULARS')
     story.append(_info_block([
-        ("Form of contract:",         "JCT Minor Works Building Contract 2016 (or as stated)"),
+        ("Form of contract:",         contract_type),
         ("Contract administrator:",   "[To be inserted]"),
         ("Liquidated damages:",        "[To be inserted] per week"),
         ("Defects liability period:",  "[To be inserted] weeks from practical completion"),
@@ -750,6 +753,22 @@ def _build_preliminaries() -> tuple:
         if ir % 2 == 0:
             p_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
+    # Subtotal row — mirrors the value shown in the Grand Summary
+    tr = len(p_rows)
+    p_rows.append([
+        Paragraph('',                          S_NORMAL),
+        Paragraph('Total — Preliminary Items', S_RIGHT_BOLD),
+        Paragraph('',                          S_RIGHT),
+        Paragraph('',                          S_RIGHT),
+        Paragraph(_fmt(prelim_allowance) if prelim_allowance else '', S_RIGHT_BOLD),
+    ])
+    p_cmds += [
+        ('SPAN',          (1, tr), (3, tr)),
+        ('LINEABOVE',     (0, tr), (-1, tr), 0.5, colors.black),
+        ('TOPPADDING',    (0, tr), (-1, tr), 4),
+        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+    ]
+
     p_base = _base_table_cmds() + [('ALIGN', (2, 0), (-1, -1), 'RIGHT')]
     p_tbl  = Table(p_rows, colWidths=[itm_w, p_desc_w, fixed_w, time_w, tot_w],
                    repeatRows=1, hAlign='LEFT')
@@ -757,10 +776,7 @@ def _build_preliminaries() -> tuple:
     story.append(p_tbl)
     story.append(Spacer(1, 4 * mm))
 
-    # Prelim total for Grand Summary — QS estimate carried from PRELIM_ITEMS
-    prelim_total = sum(round(qty * rate, 2) for _, qty, _, rate in PRELIM_ITEMS)
-
-    return story, prelim_total
+    return story, prelim_allowance
 
 
 def _build_measured_works(trade_groups) -> tuple:
@@ -818,10 +834,6 @@ def _build_measured_works(trade_groups) -> tuple:
             cdp      = item.get('cdp', False)
             perf_req = item.get('performance_requirement', '')
 
-            item_code   = f"{section_prefix}/{item_counter:03d}"
-            desc_markup = f"<b>{html.escape(item_code)}</b>  {html.escape(desc)}"
-
-            # item_code is the canonical code; PDF fallback exists for backwards compatibility.
             item_code = item.get('item_code') or f"{section_prefix}/{item_counter:03d}"
 
             desc_markup = f"<b>{item_code}</b>  {html.escape(desc)}"
@@ -841,11 +853,6 @@ def _build_measured_works(trade_groups) -> tuple:
                 Paragraph(unit,                             S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
                 Paragraph(_fmt(line_tot),                   S_RIGHT),
-                Paragraph(desc_markup,                       S_NORMAL),
-                Paragraph(f'{qty:g}',                        S_RIGHT),
-                Paragraph(unit,                              S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
-                Paragraph(_fmt(line_tot),                    S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
@@ -914,8 +921,26 @@ def _build_measured_works(trade_groups) -> tuple:
     return story, measured_total
 
 
-def _build_provisional_sums() -> tuple:
-    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees."""
+def _build_provisional_sums(boq_json=None) -> tuple:
+    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees.
+
+    Reads provisional_sums, pc_sums, and statutory_fees from boq_json.
+    Only renders sub-tables that contain items. When all three are empty,
+    renders a single professional note and returns prov_total of 0.0.
+    The Section 03 Total row is suppressed when no items are present.
+    """
+    _boq = boq_json if isinstance(boq_json, dict) else {}
+    provisional_sums = _boq.get('provisional_sums') or []
+    pc_sums          = _boq.get('pc_sums')          or []
+    statutory_fees   = _boq.get('statutory_fees')   or []
+
+    if not isinstance(provisional_sums, list):
+        provisional_sums = []
+    if not isinstance(pc_sums, list):
+        pc_sums = []
+    if not isinstance(statutory_fees, list):
+        statutory_fees = []
+
     col_w = [CONTENT_W - 100, 100]
     story = _section_heading("SECTION 03 — PROVISIONAL SUMS, PC SUMS AND FEES")
     prov_total = 0.0
@@ -962,17 +987,33 @@ def _build_provisional_sums() -> tuple:
         tbl.setStyle(TableStyle(base + cmds))
         return tbl
 
-    story.append(Paragraph("Provisional Sums", S_TRADE))
-    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS, show_ps_type=True))
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Prime Cost Sums", S_TRADE))
-    story.append(_sub_table("Prime Cost Sums", PC_SUMS))
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
-    story.append(_sub_table("Statutory Fees and Charges", STATUTORY_FEES))
-    story.append(Spacer(1, 4 * mm))
+    # ── All subsections empty ────────────────────────────────────────────────
+    if not provisional_sums and not pc_sums and not statutory_fees:
+        story.append(Paragraph(
+            "No provisional sums, prime cost sums or statutory fees have been "
+            "included in this Bill.",
+            S_BODY,
+        ))
+        story.append(Spacer(1, 4 * mm))
+        return story, 0.0
 
-    # Section total row
+    # ── Render only populated subsections ───────────────────────────────────
+    if provisional_sums:
+        story.append(Paragraph("Provisional Sums", S_TRADE))
+        story.append(_sub_table("Provisional Sums", provisional_sums, show_ps_type=True))
+        story.append(Spacer(1, 4 * mm))
+
+    if pc_sums:
+        story.append(Paragraph("Prime Cost Sums", S_TRADE))
+        story.append(_sub_table("Prime Cost Sums", pc_sums))
+        story.append(Spacer(1, 4 * mm))
+
+    if statutory_fees:
+        story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
+        story.append(_sub_table("Statutory Fees and Charges", statutory_fees))
+        story.append(Spacer(1, 4 * mm))
+
+    # ── Section total ────────────────────────────────────────────────────────
     col_w2 = [CONTENT_W - 100, 100]
     total_rows = [[
         Paragraph("Section 03 Total", S_RIGHT_BOLD),
@@ -1051,7 +1092,7 @@ def _build_risk_schedule(risks: list) -> list:
 
 
 def _build_assumptions_register(entries: list) -> list:
-    """Tender Queries & Assumptions Register — three-column table (Category | Status | Description).
+    """Assumptions Register — three-column table (Category | Status | Description).
 
     Returns [] when entries is empty so the caller can skip the section entirely.
     All user-supplied text is passed through html.escape() before rendering.
@@ -1087,24 +1128,11 @@ def _build_assumptions_register(entries: list) -> list:
         if ir % 2 == 0:
             cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-    base = _base_table_cmds() + [
-        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
-    ]
-    tbl = Table(
-        rows,
-        colWidths=[_desc_w, _type_w, _imp_w, _like_w, _mit_w],
-        repeatRows=1,
-        hAlign='LEFT',
-    )
-    tbl.setStyle(TableStyle(base + cmds))
-
-    story = _section_heading("RISK SCHEDULE")
     base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'CENTER')]
     tbl  = Table(rows, colWidths=[cat_w, status_w, desc_w], repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
 
-    story = _section_heading("Tender Queries & Assumptions Register")
+    story = _section_heading("ASSUMPTIONS REGISTER")
     story.append(tbl)
     story.append(Spacer(1, 4 * mm))
     return story
@@ -1318,10 +1346,6 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         canvas.setLineWidth(0.8)
         canvas.line(LEFT_M, rule_y, PAGE_W - RIGHT_M, rule_y)
 
-        canvas.setFont('Helvetica', 7.5)
-        canvas.setFillColor(colors.black)
-        canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
-
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
@@ -1335,9 +1359,11 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         author=document_title,
     )
 
-    prelim_flowables,   prelim_total   = _build_preliminaries()
+    _summary = boq_json.get('summary') if isinstance(boq_json, dict) else None
+    prelim_allowance = float((_summary.get('preliminaries') or 0) if isinstance(_summary, dict) else 0)
+    prelim_flowables,   prelim_total   = _build_preliminaries(prelim_allowance, boq_json)
     measured_flowables, measured_total = _build_measured_works(trade_groups)
-    prov_flowables,     prov_total     = _build_provisional_sums()
+    prov_flowables,     prov_total     = _build_provisional_sums(boq_json)
 
     story = []
     story += _build_branding_header(brand)   # [] when no branding → unchanged output
@@ -1360,13 +1386,19 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         story.append(PageBreak())
         story += assumptions_flowables
 
-    story.append(PageBreak())
     risks = boq_json.get('risk_schedule', []) if isinstance(boq_json, dict) else []
     risk_flowables = _build_risk_schedule(risks)
     if risk_flowables:
-        story += risk_flowables
         story.append(PageBreak())
-    story += _build_dayworks()
+        story += risk_flowables
+
+    include_dayworks = bool(
+        isinstance(_summary, dict) and _summary.get('include_dayworks')
+    )
+    if include_dayworks:
+        story.append(PageBreak())
+        story += _build_dayworks()
+
     annex_flowables = _build_annexes(boq_json)
     if annex_flowables:
         story.append(PageBreak())
@@ -1384,5 +1416,57 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         if watermark:
             _draw_watermark(canvas_obj, doc)
 
-    doc.build(story, onFirstPage=_first_page, onLaterPages=_later_pages)
+    # ── Numbered canvas: deferred footer + "Page N of M" ──────────────────────
+    # showPage() saves each page's canvas state rather than finalising it.
+    # save() iterates the stored states, draws the footer (now knowing total
+    # page count), then finalises each page in order.
+    from reportlab.pdfgen import canvas as _rl_canvas
+
+    footer_name = brand['company_name'] or DEFAULT_DOCUMENT_TITLE
+    _footer_name  = footer_name
+    _today_str    = today_str
+
+    class _NumberedCanvas(_rl_canvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            _rl_canvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self._draw_footer(total)
+                _rl_canvas.Canvas.showPage(self)
+            _rl_canvas.Canvas.save(self)
+
+        def _draw_footer(self, total_pages):
+            self.saveState()
+
+            foot_rule_y = BOT_M - 3 * mm
+            foot_text_y = BOT_M - 8 * mm
+
+            self.setStrokeColor(colors.Color(0.55, 0.55, 0.55))
+            self.setLineWidth(0.4)
+            self.line(LEFT_M, foot_rule_y, PAGE_W - RIGHT_M, foot_rule_y)
+
+            self.setFont('Helvetica', 7)
+            self.setFillColor(colors.Color(0.35, 0.35, 0.35))
+            self.drawString(LEFT_M, foot_text_y, _footer_name)
+            self.drawCentredString(
+                PAGE_W / 2, foot_text_y,
+                f'Bill of Quantities — Confidential — {_today_str}',
+            )
+            self.drawRightString(
+                PAGE_W - RIGHT_M, foot_text_y,
+                f'Page {self._pageNumber} of {total_pages}',
+            )
+
+            self.restoreState()
+
+    doc.build(story, onFirstPage=_first_page, onLaterPages=_later_pages,
+              canvasmaker=_NumberedCanvas)
     return buf.getvalue()

@@ -16,6 +16,7 @@ from export_excel import generate_boq_excel
 from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
 from classification import classify_measurements, classification_options, MeasurementClassificationError  # deterministic NRM2/rate classifier
 from measurement_hub import build_boq_from_measurements, validate_boq_structure  # measurement → BoQ conversion
+from user_overrides import load_overrides, save_override, delete_override  # per-user persistent classification overrides
 from mapping_loader import load_mappings_at_startup, get_loader_status  # Bluebeam Term Mapping loader
 from measurement_classifier import classify_measurement  # Spreadsheet-based measurement classification
 import time, statistics
@@ -1851,6 +1852,11 @@ def measurement_classify():
     measurement -> normalisation -> NRM2 section -> rate key, with a confidence
     score per row. No AI, no pricing — classification only. Separate from
     /process and /measurement/import; neither is affected.
+
+    When a valid Bearer token is supplied the route loads the user's saved
+    classification overrides and applies them before the keyword rules
+    (resolution order: user override → normal rules).  Requests without a
+    token continue to work unchanged.
     """
     body = request.get_json(force=True, silent=True) or {}
     measurements = body.get("measurements")
@@ -1859,8 +1865,24 @@ def measurement_classify():
     if len(measurements) > _CLASSIFY_MAX_ROWS:
         return jsonify({"error": f"Too many measurements; {_CLASSIFY_MAX_ROWS} max per request."}), 413
 
+    # Load user overrides when authenticated (fail-open: skip on any error).
+    user_overrides = {}
+    token = _get_bearer_token()
+    if token and _supabase:
+        try:
+            res  = _supabase.auth.get_user(token)
+            user = getattr(res, "user", None)
+            if user:
+                user_overrides = load_overrides(_db_client(), user.id)
+                app.logger.info(
+                    "Classification: loaded %d override(s) for user %s",
+                    len(user_overrides), user.id,
+                )
+        except Exception as exc:
+            app.logger.warning("Could not load user overrides (failing open): %s", exc)
+
     try:
-        classified = classify_measurements(measurements)
+        classified = classify_measurements(measurements, user_overrides)
     except MeasurementClassificationError as exc:
         return jsonify({"error": exc.message}), exc.status
     except Exception as exc:
@@ -1868,6 +1890,61 @@ def measurement_classify():
         return jsonify({"error": f"Classification failed: {exc}"}), 422
 
     return jsonify({"classified": classified, "options": classification_options()}), 200
+
+
+@app.route("/measurement/overrides", methods=["GET"])
+def measurement_get_overrides():
+    """Return all saved classification overrides for the authenticated user."""
+    user, err = _authenticated_user()
+    if err:
+        return err
+    overrides = load_overrides(_db_client(), user.id)
+    return jsonify({"overrides": overrides}), 200
+
+
+@app.route("/measurement/overrides", methods=["PUT"])
+def measurement_save_override():
+    """Upsert one classification override for the authenticated user.
+
+    Body: {source_term, nrm2_section (nullable), rate_key (nullable)}
+    source_term is the normalised_description returned by /measurement/classify.
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+    body        = request.get_json(force=True, silent=True) or {}
+    source_term = (body.get("source_term") or "").strip()
+    nrm2_section = body.get("nrm2_section") or None
+    rate_key     = body.get("rate_key") or None
+    if not source_term:
+        return jsonify({"error": "source_term is required."}), 400
+    try:
+        save_override(_db_client(), user.id, source_term, nrm2_section, rate_key)
+    except Exception as exc:
+        app.logger.error("Failed to save classification override: %s", exc)
+        return jsonify({"error": "Failed to save override."}), 500
+    return jsonify({"ok": True}), 200
+
+
+@app.route("/measurement/overrides", methods=["DELETE"])
+def measurement_delete_override():
+    """Delete one classification override for the authenticated user.
+
+    Body: {source_term}
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+    body        = request.get_json(force=True, silent=True) or {}
+    source_term = (body.get("source_term") or "").strip()
+    if not source_term:
+        return jsonify({"error": "source_term is required."}), 400
+    try:
+        delete_override(_db_client(), user.id, source_term)
+    except Exception as exc:
+        app.logger.error("Failed to delete classification override: %s", exc)
+        return jsonify({"error": "Failed to delete override."}), 500
+    return jsonify({"ok": True}), 200
 
 
 @app.route("/measurement/generate-boq", methods=["POST"])
