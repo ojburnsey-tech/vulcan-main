@@ -67,6 +67,24 @@ def add_cors_headers(response):
         response.headers['Access-Control-Allow-Methods']     = 'GET, POST, PUT, DELETE, OPTIONS'
         response.headers['Access-Control-Allow-Headers']     = 'Content-Type, Authorization'
         response.headers['Access-Control-Max-Age']           = '86400'
+        response.headers['Vary']                             = 'Origin'
+    return response
+
+
+# Belt-and-suspenders: if an unhandled exception reaches WSGI before after_request
+# fires (e.g. GreenletExit from a gunicorn worker kill), this handler still sets
+# CORS headers so the browser can read the error body instead of seeing an opaque
+# CORS failure.
+@app.errorhandler(Exception)
+def handle_unhandled_exception(exc):
+    app.logger.exception("Unhandled exception in request: %s", exc)
+    response = jsonify({"error": "An unexpected server error occurred. Please try again."})
+    response.status_code = 500
+    origin = request.headers.get('Origin', '')
+    if origin in _ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin']      = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Vary']                             = 'Origin'
     return response
 
 @app.route('/api/health', methods=['GET'])
@@ -1392,7 +1410,10 @@ def _run_boq_pipeline():
     if not api_key:                                 # fail fast with a clear message if the variable is missing
         return (*_fail, (jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500))
 
-    client = anthropic.Anthropic(api_key=api_key, timeout=180.0)  # create the SDK client with the key — like new AnthropicClient(apiKey) in a hypothetical C# SDK
+    # Timeout must be < gunicorn worker timeout so Flask can return a proper CORS-decorated
+    # error response rather than having the worker killed mid-request (GreenletExit bypasses
+    # after_request hooks, stripping CORS headers from the response).
+    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
 
     try:
         app.logger.info(
@@ -1418,10 +1439,12 @@ def _run_boq_pipeline():
         _processing_times.append(round(time.time() - _t, 1))
         if len(_processing_times) > 200:
             _processing_times.pop(0)
-    except anthropic.APIStatusError as exc:        # APIStatusError covers 4xx/5xx responses from the Claude API (bad key, rate limit, server error)
-        return (*_fail, (jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502))  # 502 Bad Gateway — this server got an error from an upstream service
-    except anthropic.APIConnectionError as exc:    # APIConnectionError means the network call to Anthropic failed entirely (DNS failure, timeout, etc.)
-        return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))  # 503 Service Unavailable
+    except anthropic.APIStatusError as exc:
+        return (*_fail, (jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502))
+    except anthropic.APITimeoutError:
+        return (*_fail, (jsonify({"error": "Claude API timed out. The PDF may be too large — please try a shorter document."}), 504))
+    except anthropic.APIConnectionError as exc:
+        return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))
 
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
     _log_claude_response("structured", response)
