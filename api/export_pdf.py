@@ -108,15 +108,6 @@ PREAMBLE_ITEMS = [
 ]
 
 # (description, qty, unit, rate_per_unit)
-PRELIM_ITEMS = [
-    ("Scaffold erection, hire (8 weeks), and strike to full perimeter",  1,  "item", 4800.00),
-    ("Skip hire for duration of works (10 skips estimated)",             10, "nr",    280.00),
-    ("Temporary site hoarding and security fencing",                      1,  "item",  850.00),
-    ("Temporary welfare facilities and site WC hire (8 weeks)",           8,  "wk",     95.00),
-    ("Site insurance and all-risks policy allowance",                     1,  "item",  600.00),
-    ("Project management and site supervision",                           8,  "wk",    750.00),
-]
-
 # (description, allowance_amount)
 PROVISIONAL_SUMS = [
     ("Connection to existing sewer; nature and extent subject "
@@ -622,8 +613,14 @@ def _build_preambles() -> list:
     return story
 
 
-def _build_preliminaries() -> tuple:
-    """Section 01 — Preliminaries. Returns (flowables, prelim_total)."""
+def _build_preliminaries(prelim_allowance: float = 0.0) -> tuple:
+    """Section 01 — Preliminaries. Returns (flowables, prelim_total).
+
+    prelim_allowance is drawn from boq_json.summary.preliminaries. It is
+    displayed as a 'Total — Preliminary Items' row at the foot of the pricing
+    schedule and returned as prelim_total so the Grand Summary uses the same
+    figure. Both sections therefore share a single data source.
+    """
     story = _section_heading("SECTION 01 — PRELIMINARIES")
 
     lbl_w = 80 * mm
@@ -750,6 +747,22 @@ def _build_preliminaries() -> tuple:
         if ir % 2 == 0:
             p_cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
+    # Subtotal row — mirrors the value shown in the Grand Summary
+    tr = len(p_rows)
+    p_rows.append([
+        Paragraph('',                          S_NORMAL),
+        Paragraph('Total — Preliminary Items', S_RIGHT_BOLD),
+        Paragraph('',                          S_RIGHT),
+        Paragraph('',                          S_RIGHT),
+        Paragraph(_fmt(prelim_allowance) if prelim_allowance else '', S_RIGHT_BOLD),
+    ])
+    p_cmds += [
+        ('SPAN',          (1, tr), (3, tr)),
+        ('LINEABOVE',     (0, tr), (-1, tr), 0.5, colors.black),
+        ('TOPPADDING',    (0, tr), (-1, tr), 4),
+        ('BOTTOMPADDING', (0, tr), (-1, tr), 6),
+    ]
+
     p_base = _base_table_cmds() + [('ALIGN', (2, 0), (-1, -1), 'RIGHT')]
     p_tbl  = Table(p_rows, colWidths=[itm_w, p_desc_w, fixed_w, time_w, tot_w],
                    repeatRows=1, hAlign='LEFT')
@@ -757,10 +770,7 @@ def _build_preliminaries() -> tuple:
     story.append(p_tbl)
     story.append(Spacer(1, 4 * mm))
 
-    # Prelim total for Grand Summary — QS estimate carried from PRELIM_ITEMS
-    prelim_total = sum(round(qty * rate, 2) for _, qty, _, rate in PRELIM_ITEMS)
-
-    return story, prelim_total
+    return story, prelim_allowance
 
 
 def _build_measured_works(trade_groups) -> tuple:
@@ -1313,7 +1323,9 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         author=document_title,
     )
 
-    prelim_flowables,   prelim_total   = _build_preliminaries()
+    _summary = boq_json.get('summary') if isinstance(boq_json, dict) else None
+    prelim_allowance = float((_summary.get('preliminaries') or 0) if isinstance(_summary, dict) else 0)
+    prelim_flowables,   prelim_total   = _build_preliminaries(prelim_allowance)
     measured_flowables, measured_total = _build_measured_works(trade_groups)
     prov_flowables,     prov_total     = _build_provisional_sums()
 
