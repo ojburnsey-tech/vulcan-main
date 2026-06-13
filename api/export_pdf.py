@@ -925,8 +925,9 @@ def _build_provisional_sums(boq_json=None) -> tuple:
     """Section 03 — Provisional Sums, PC Sums, and Statutory Fees.
 
     Reads provisional_sums, pc_sums, and statutory_fees from boq_json.
-    Renders empty sub-tables (£0.00 subtotals) when the payload omits them
-    so no hardcoded specimen data ever appears in the PDF.
+    Only renders sub-tables that contain items. When all three are empty,
+    renders a single professional note and returns prov_total of 0.0.
+    The Section 03 Total row is suppressed when no items are present.
     """
     _boq = boq_json if isinstance(boq_json, dict) else {}
     provisional_sums = _boq.get('provisional_sums') or []
@@ -986,17 +987,33 @@ def _build_provisional_sums(boq_json=None) -> tuple:
         tbl.setStyle(TableStyle(base + cmds))
         return tbl
 
-    story.append(Paragraph("Provisional Sums", S_TRADE))
-    story.append(_sub_table("Provisional Sums", provisional_sums, show_ps_type=True))
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Prime Cost Sums", S_TRADE))
-    story.append(_sub_table("Prime Cost Sums", pc_sums))
-    story.append(Spacer(1, 4 * mm))
-    story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
-    story.append(_sub_table("Statutory Fees and Charges", statutory_fees))
-    story.append(Spacer(1, 4 * mm))
+    # ── All subsections empty ────────────────────────────────────────────────
+    if not provisional_sums and not pc_sums and not statutory_fees:
+        story.append(Paragraph(
+            "No provisional sums, prime cost sums or statutory fees have been "
+            "included in this Bill.",
+            S_BODY,
+        ))
+        story.append(Spacer(1, 4 * mm))
+        return story, 0.0
 
-    # Section total row
+    # ── Render only populated subsections ───────────────────────────────────
+    if provisional_sums:
+        story.append(Paragraph("Provisional Sums", S_TRADE))
+        story.append(_sub_table("Provisional Sums", provisional_sums, show_ps_type=True))
+        story.append(Spacer(1, 4 * mm))
+
+    if pc_sums:
+        story.append(Paragraph("Prime Cost Sums", S_TRADE))
+        story.append(_sub_table("Prime Cost Sums", pc_sums))
+        story.append(Spacer(1, 4 * mm))
+
+    if statutory_fees:
+        story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
+        story.append(_sub_table("Statutory Fees and Charges", statutory_fees))
+        story.append(Spacer(1, 4 * mm))
+
+    # ── Section total ────────────────────────────────────────────────────────
     col_w2 = [CONTENT_W - 100, 100]
     total_rows = [[
         Paragraph("Section 03 Total", S_RIGHT_BOLD),
