@@ -3988,7 +3988,16 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
             >{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</button>
           )}
           {unmatchedCount > 0 && (
-            <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{unmatchedCount} unclassified</span>
+            <button
+              onClick={() => { setConfidenceFilter('unclassified'); setPage(0); }}
+              data-testid="cls-unclassified-trigger"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                fontSize: '12.5px', color: '#7c9cfc',
+                textDecoration: confidenceFilter === 'unclassified' ? 'none' : 'underline',
+                textDecorationStyle: 'dotted',
+              }}
+            >{unmatchedCount} unclassified row{unmatchedCount !== 1 ? 's' : ''}</button>
           )}
           <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying || generating} data-testid="cls-reclassify">
             {classifying ? 'Classifying…' : 'Re-classify'}
@@ -4036,13 +4045,20 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
             borderRadius: '999px', padding: '3px 10px', whiteSpace: 'nowrap',
           }}>● Review mode</span>
         )}
+        {confidenceFilter === 'unclassified' && (
+          <span data-testid="cls-unclassified-active" style={{
+            fontSize: '12px', fontWeight: 600, color: '#7c9cfc',
+            background: 'rgba(124,156,252,0.10)', border: '1px solid rgba(124,156,252,0.28)',
+            borderRadius: '999px', padding: '3px 10px', whiteSpace: 'nowrap',
+          }}>● Unclassified only</span>
+        )}
         {(q || confidenceFilter !== 'all') && (
           <button
             className="btn btn-outline btn-pill btn-sm"
             onClick={() => { setQ(''); setConfidenceFilter('all'); setPage(0); }}
             data-testid="cls-clear-filters"
           >
-            {confidenceFilter === 'low' && !q ? 'Clear review filter' : 'Clear'}
+            {confidenceFilter === 'low' && !q ? 'Clear review filter' : confidenceFilter === 'unclassified' && !q ? 'Clear unclassified filter' : 'Clear'}
           </button>
         )}
       </div>
@@ -4068,8 +4084,13 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
               </tr>
             ) : visible.map(({ r, i }, vi) => {
               const overridden = isOverridden(i);
+              const unmatched  = !effective(i, 'nrm2_section');
               return (
-                <tr key={i} className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`} data-testid={`cls-row-${i}`}>
+                <tr key={i}
+                  className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`}
+                  data-testid={`cls-row-${i}`}
+                  style={unmatched ? { borderLeft: '3px solid rgba(124,156,252,0.6)' } : undefined}
+                >
                   <td>
                     <div>{r.description || '—'}</div>
                     <div style={{ fontSize: '11.5px', color: 'rgba(255,255,255,0.4)' }}>
