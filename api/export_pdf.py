@@ -1042,7 +1042,7 @@ def _build_risk_schedule(risks: list) -> list:
 
 
 def _build_assumptions_register(entries: list) -> list:
-    """Tender Queries & Assumptions Register — three-column table (Category | Status | Description).
+    """Assumptions Register — three-column table (Category | Status | Description).
 
     Returns [] when entries is empty so the caller can skip the section entirely.
     All user-supplied text is passed through html.escape() before rendering.
@@ -1078,24 +1078,11 @@ def _build_assumptions_register(entries: list) -> list:
         if ir % 2 == 0:
             cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
 
-    base = _base_table_cmds() + [
-        ('ALIGN', (1, 0), (1, -1), 'CENTER'),
-        ('ALIGN', (3, 0), (3, -1), 'CENTER'),
-    ]
-    tbl = Table(
-        rows,
-        colWidths=[_desc_w, _type_w, _imp_w, _like_w, _mit_w],
-        repeatRows=1,
-        hAlign='LEFT',
-    )
-    tbl.setStyle(TableStyle(base + cmds))
-
-    story = _section_heading("RISK SCHEDULE")
     base = _base_table_cmds() + [('ALIGN', (1, 0), (1, -1), 'CENTER')]
     tbl  = Table(rows, colWidths=[cat_w, status_w, desc_w], repeatRows=1, hAlign='LEFT')
     tbl.setStyle(TableStyle(base + cmds))
 
-    story = _section_heading("Tender Queries & Assumptions Register")
+    story = _section_heading("ASSUMPTIONS REGISTER")
     story.append(tbl)
     story.append(Spacer(1, 4 * mm))
     return story
