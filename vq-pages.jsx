@@ -3904,7 +3904,7 @@ function MhubConfidence({ value, overridden }) {
 // no AI, no pricing. Paginated so large takeoffs stay responsive.
 const MHUB_CLS_PAGE = 50;
 
-function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying }) {
+function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying, onGenerateBoq, generating }) {
   const [page, setPage] = useState(0);
   const nrm2Options = (options && options.nrm2_sections) || [];
   const rateKeys    = (options && options.rate_keys) || [];
@@ -3942,8 +3942,16 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
           {reviewCount > 0 && (
             <span style={{ fontSize: '12.5px', color: '#e26d5c' }}>{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</span>
           )}
-          <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying} data-testid="cls-reclassify">
+          <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying || generating} data-testid="cls-reclassify">
             {classifying ? 'Classifying…' : 'Re-classify'}
+          </button>
+          <button
+            className="btn btn-amber btn-pill btn-sm"
+            onClick={onGenerateBoq}
+            disabled={!rows.length || classifying || generating}
+            data-testid="cls-generate-boq"
+          >
+            {generating ? 'Generating…' : 'Generate BoQ →'}
           </button>
         </div>
       </div>
@@ -4022,7 +4030,7 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
   );
 }
 
-function MeasurementHubPage({ go, toast }) {
+function MeasurementHubPage({ go, toast, onBoqReady }) {
   // Per-source picked File (drives the filename chip). Picking a file also kicks
   // off an import to POST /measurement/import, whose parsed rows populate the grid.
   const [tab, setTab]             = useState('measurements');
@@ -4039,6 +4047,8 @@ function MeasurementHubPage({ go, toast }) {
   const [classifying, setClassifying]       = useState(false);
   const [classifyError, setClassifyError]   = useState(null);
   const [overrides, setOverrides]           = useState({});
+  const [generating, setGenerating]         = useState(false);
+  const [generatedBoq, setGeneratedBoq]     = useState(null);
   const inputRefs = useRef({});
 
   const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
@@ -4064,6 +4074,36 @@ function MeasurementHubPage({ go, toast }) {
       setClassifyError(msg); toast(msg, 'error');
     } finally {
       setClassifying(false);
+    }
+  };
+
+  const runGenerateBoq = async () => {
+    if (!classification.rows || !classification.rows.length) return;
+    setGenerating(true);
+    try {
+      const token = await vqToken();
+      const effective = classification.rows.map((r, i) => {
+        const o = overrides[i] || {};
+        return { ...r, ...(o.nrm2_section !== undefined ? { nrm2_section: o.nrm2_section } : {}), ...(o.rate_key !== undefined ? { rate_key: o.rate_key } : {}) };
+      });
+      const res = await fetch(`${VQ_API}/measurement/generate-boq`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ classified_measurements: effective }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || 'BoQ generation failed — please try again.', 'error');
+        return;
+      }
+      setGeneratedBoq(data.boq_data);
+      if (onBoqReady) onBoqReady(data.boq_data);
+      toast('BoQ generated — opening Results…', 'success');
+      setTimeout(() => go('results'), 600);
+    } catch (e) {
+      toast('Network error — could not reach the server.', 'error');
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -4280,6 +4320,8 @@ function MeasurementHubPage({ go, toast }) {
               onReset={resetOverride}
               onReclassify={runClassify}
               classifying={classifying}
+              onGenerateBoq={runGenerateBoq}
+              generating={generating}
             />
           )
         )}
