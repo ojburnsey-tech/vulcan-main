@@ -3905,14 +3905,11 @@ function MhubConfidence({ value, overridden }) {
 const MHUB_CLS_PAGE = 50;
 
 function ClassificationTable({ rows, options, overrides, onOverride, onReset, onReclassify, classifying, onGenerateBoq, generating }) {
-  const [page, setPage] = useState(0);
+  const [page, setPage]         = useState(0);
+  const [q, setQ]               = useState('');
+  const [confidenceFilter, setConfidenceFilter] = useState('all');
   const nrm2Options = (options && options.nrm2_sections) || [];
   const rateKeys    = (options && options.rate_keys) || [];
-
-  const pageCount = Math.max(1, Math.ceil(rows.length / MHUB_CLS_PAGE));
-  const safePage  = Math.min(page, pageCount - 1);
-  const start     = safePage * MHUB_CLS_PAGE;
-  const visible   = rows.slice(start, start + MHUB_CLS_PAGE);
 
   const effective = (i, field) => {
     const o = overrides[i];
@@ -3923,24 +3920,66 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
     return !!o && (o.nrm2_section !== undefined || o.rate_key !== undefined);
   };
 
-  const reviewCount = rows.filter((r, i) => !isOverridden(i) && (Number(r.confidence) || 0) < 0.5).length;
+  // Build an indexed array so overrides stay aligned after filtering.
+  const indexed = rows.map((r, i) => ({ r, i }));
+
+  const filtered = React.useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return indexed.filter(({ r, i }) => {
+      if (term) {
+        const hit = String(r.description ?? '').toLowerCase().includes(term)
+          || String(r.normalised_description ?? '').toLowerCase().includes(term);
+        if (!hit) return false;
+      }
+      const pct = (Number(r.confidence) || 0) * 100;
+      const section = effective(i, 'nrm2_section');
+      if (confidenceFilter === 'high'   && pct < 80)          return false;
+      if (confidenceFilter === 'medium' && (pct < 50 || pct >= 80)) return false;
+      if (confidenceFilter === 'low'    && pct >= 50)          return false;
+      if (confidenceFilter === 'unclassified' && section)      return false;
+      return true;
+    });
+  }, [rows, overrides, q, confidenceFilter]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / MHUB_CLS_PAGE));
+  const safePage  = Math.min(page, pageCount - 1);
+  const start     = safePage * MHUB_CLS_PAGE;
+  const visible   = filtered.slice(start, start + MHUB_CLS_PAGE);
+
+  const onSearch = (v) => { setQ(v); setPage(0); };
+  const onFilter = (v) => { setConfidenceFilter(v); setPage(0); };
+
+  const reviewCount    = rows.filter((r, i) => !isOverridden(i) && (Number(r.confidence) || 0) < 0.5).length;
+  const unmatchedCount = rows.filter((r, i) => !effective(i, 'nrm2_section')).length;
+
   const selStyle = {
     background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
     borderRadius: '6px', color: 'white', fontSize: '12.5px', padding: '5px 7px', maxWidth: '100%', width: '100%',
   };
+  const filterSelStyle = {
+    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: '999px', color: 'white', fontSize: '12.5px', padding: '5px 14px',
+    cursor: 'pointer', outline: 'none', appearance: 'none', WebkitAppearance: 'none',
+    paddingRight: '28px',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,0.4)'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat', backgroundPosition: 'right 10px center',
+  };
 
   return (
     <div className="scard vd-rise" style={{ marginBottom: 0, padding: '24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '16px' }}>
         <div>
           <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Classification</p>
           <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', letterSpacing: '0.01em' }}>
             Imported → Normalised → NRM2 Section → Rate Key
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
           {reviewCount > 0 && (
             <span style={{ fontSize: '12.5px', color: '#e26d5c' }}>{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</span>
+          )}
+          {unmatchedCount > 0 && (
+            <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{unmatchedCount} unclassified</span>
           )}
           <button className="btn btn-outline btn-pill btn-sm" onClick={onReclassify} disabled={classifying || generating} data-testid="cls-reclassify">
             {classifying ? 'Classifying…' : 'Re-classify'}
@@ -3956,6 +3995,42 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
         </div>
       </div>
 
+      {/* Search + filter toolbar — mirrors MeasurementGrid layout */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+        <input
+          className="finp"
+          type="search"
+          placeholder="Search description…"
+          value={q}
+          onChange={e => onSearch(e.target.value)}
+          data-testid="cls-search"
+          style={{ flex: '1 1 220px', maxWidth: '320px' }}
+        />
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <select
+            value={confidenceFilter}
+            onChange={e => onFilter(e.target.value)}
+            data-testid="cls-confidence-filter"
+            style={filterSelStyle}
+          >
+            <option value="all">All</option>
+            <option value="high">High Confidence ≥80%</option>
+            <option value="medium">Medium Confidence 50–79%</option>
+            <option value="low">Low Confidence &lt;50%</option>
+            <option value="unclassified">Unclassified</option>
+          </select>
+        </div>
+        {(q || confidenceFilter !== 'all') && (
+          <button
+            className="btn btn-outline btn-pill btn-sm"
+            onClick={() => { setQ(''); setConfidenceFilter('all'); setPage(0); }}
+            data-testid="cls-clear-filters"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table className="rboq" data-testid="cls-table">
           <thead>
@@ -3969,8 +4044,13 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
             </tr>
           </thead>
           <tbody>
-            {visible.map((r, vi) => {
-              const i = start + vi;
+            {visible.length === 0 ? (
+              <tr className="rboq-item">
+                <td colSpan={6} style={{ textAlign: 'center', padding: '28px 16px', color: 'rgba(255,255,255,0.45)' }}>
+                  No rows match the current search or filter.
+                </td>
+              </tr>
+            ) : visible.map(({ r, i }, vi) => {
               const overridden = isOverridden(i);
               return (
                 <tr key={i} className={`rboq-item${vi % 2 === 1 ? ' alt' : ''}`} data-testid={`cls-row-${i}`}>
@@ -4018,7 +4098,10 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
         <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="cls-range">
-          Showing {start + 1}–{start + visible.length} of {rows.length.toLocaleString('en-GB')}
+          {filtered.length === 0
+            ? 'No results'
+            : `Showing ${start + 1}–${start + visible.length} of ${filtered.length.toLocaleString('en-GB')}` +
+              (filtered.length !== rows.length ? ` (filtered from ${rows.length.toLocaleString('en-GB')})` : '')}
         </span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0} onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="cls-prev">← Prev</button>
