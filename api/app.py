@@ -1336,13 +1336,13 @@ def _run_boq_pipeline():
                     for r in (_usage_rows.data or [])
                 )
                 if _tokens_used >= _limit:
-                    return jsonify({
+                    return (*_fail, (jsonify({
                         "error": (
                             f"Monthly usage limit reached for your {_plan.title()} plan "
                             f"({_tokens_used:,} of {_limit:,} tokens used). "
                             "Upgrade your plan or wait until next month to continue."
                         )
-                    }), 429
+                    }), 429))
     except Exception as _qe:
         app.logger.warning("Quota check failed (failing open): %s", _qe)
     # ── End quota check ──────────────────────────────────────────────────────
@@ -1372,13 +1372,13 @@ def _run_boq_pipeline():
                     )
                     _pc_count = len(_pc_rows.data or [])
                     if _pc_count >= 2:
-                        return jsonify({
+                        return (*_fail, (jsonify({
                             "error": (
                                 "Free plan includes 2 completed projects per month. "
                                 f"You have used {_pc_count} this month. "
                                 "Upgrade to Pro for unlimited projects."
                             )
-                        }), 429
+                        }), 429))
     except Exception as _pce:
         app.logger.warning("Project count gate failed (failing open): %s", _pce)
     # ── End project count gate ────────────────────────────────────────────────

@@ -2691,11 +2691,12 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
       const res = await fetch(`${VQ_API}/process`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
+        credentials: 'include',
         body: fd,
       });
-      const data = await res.json();
       if (!res.ok) {
-        const msg = data.error || 'Processing failed';
+        const err = await res.json().catch(() => ({ error: res.statusText || 'Processing failed' }));
+        const msg = err.error || 'Processing failed';
         if (res.status === 429 || res.status === 403) {
           toast(msg + ' See Pricing to upgrade.', 'error');
           // Navigate to pricing after a short delay so the user reads the message
@@ -2706,6 +2707,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
         setUploadStatus('idle');
         return;
       }
+      const data = await res.json();
       setBoqData(data);
       onBoqReady?.(data);
       setUploadStatus('done');
