@@ -818,10 +818,6 @@ def _build_measured_works(trade_groups) -> tuple:
             cdp      = item.get('cdp', False)
             perf_req = item.get('performance_requirement', '')
 
-            item_code   = f"{section_prefix}/{item_counter:03d}"
-            desc_markup = f"<b>{html.escape(item_code)}</b>  {html.escape(desc)}"
-
-            # item_code is the canonical code; PDF fallback exists for backwards compatibility.
             item_code = item.get('item_code') or f"{section_prefix}/{item_counter:03d}"
 
             desc_markup = f"<b>{item_code}</b>  {html.escape(desc)}"
@@ -841,11 +837,6 @@ def _build_measured_works(trade_groups) -> tuple:
                 Paragraph(unit,                             S_CENTER),
                 Paragraph(_fmt(mat + lab + plant + waste),  S_RIGHT),
                 Paragraph(_fmt(line_tot),                   S_RIGHT),
-                Paragraph(desc_markup,                       S_NORMAL),
-                Paragraph(f'{qty:g}',                        S_RIGHT),
-                Paragraph(unit,                              S_CENTER),
-                Paragraph(_fmt(mat + lab + plant + waste),   S_RIGHT),
-                Paragraph(_fmt(line_tot),                    S_RIGHT),
             ])
             if ir % 2 == 0:
                 cmds.append(('BACKGROUND', (0, ir), (-1, ir), _GREY_ALT))
