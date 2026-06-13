@@ -77,7 +77,13 @@ def add_cors_headers(response):
 # CORS failure.
 @app.errorhandler(Exception)
 def handle_unhandled_exception(exc):
-    app.logger.exception("Unhandled exception in request: %s", exc)
+    app.logger.exception(
+        "UNHANDLED_EXCEPTION in request: method=%s path=%s exception_type=%s exception_message=%s",
+        request.method,
+        request.path,
+        type(exc).__name__,
+        str(exc)
+    )
     response = jsonify({"error": "An unexpected server error occurred. Please try again."})
     response.status_code = 500
     origin = request.headers.get('Origin', '')
@@ -1395,15 +1401,21 @@ def _run_boq_pipeline():
 
     pdf_bytes = uploaded_file.read()       # read the entire upload into bytes in memory — never written to disk (like reading a Stream into byte[] in C#)
     pdf_buffer = io.BytesIO(pdf_bytes)     # wrap bytes in BytesIO so pdfplumber can treat it like a seekable file (like new MemoryStream(bytes) in C#)
+    
+    app.logger.info("START PDF PARSE: filename=%s file_size_bytes=%d", uploaded_file.filename, len(pdf_bytes))
 
     try:                                   # try/except is Python's equivalent of try/catch in C#
         with pdfplumber.open(pdf_buffer) as pdf:          # 'with' guarantees the PDF is closed even on exception — like C# 'using'
+            app.logger.info("PDF opened: page_count=%d", len(pdf.pages))
             pages_text = [page.extract_text() or "" for page in pdf.pages]  # list comprehension: extract text from every page; replace None with "" (like LINQ Select in C#)
         full_text = "\n\n".join(pages_text)               # join all pages with double newline so Claude sees page breaks (like String.Join in C#)
+        app.logger.info("END PDF PARSE: extracted_text_length=%d approx_words=%d", len(full_text), len(full_text.split()))
     except Exception as exc:               # catch any pdfplumber error (corrupt file, password-protected PDF, etc.)
+        app.logger.exception("START PDF PARSE FAILED: exception_type=%s exception_message=%s", type(exc).__name__, str(exc))
         return (*_fail, (jsonify({"error": f"Failed to read PDF: {exc}"}), 422))  # 422 Unprocessable Entity; f"..." is Python's interpolated string (like $"..." in C#)
 
     if not full_text.strip():              # .strip() removes whitespace; empty result means a scanned image PDF with no OCR text layer
+        app.logger.warning("PDF_PARSE_EMPTY_TEXT: no text extracted from %d pages", len(pages_text))
         return (*_fail, (jsonify({"error": "No text could be extracted. The PDF may be a scanned image without an OCR text layer."}), 422))
 
     api_key = os.environ.get("ANTHROPIC_API_KEY")  # read the key from the environment — never hard-code secrets in source (like Environment.GetEnvironmentVariable in C#)
@@ -1415,6 +1427,7 @@ def _run_boq_pipeline():
     # after_request hooks, stripping CORS headers from the response).
     client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
 
+    app.logger.info("START AI CALL: model=claude-sonnet-4-6 pdf_text_length=%d", len(full_text))
     try:
         app.logger.info(
             "Claude structured output call: model=%s max_tokens=%s "
@@ -1436,17 +1449,23 @@ def _run_boq_pipeline():
                 }
             ],
         )
-        _processing_times.append(round(time.time() - _t, 1))
+        _ai_call_time = round(time.time() - _t, 1)
+        _processing_times.append(_ai_call_time)
         if len(_processing_times) > 200:
             _processing_times.pop(0)
+        app.logger.info("END AI CALL: processing_time_seconds=%s stop_reason=%s", _ai_call_time, getattr(response, "stop_reason", None))
     except anthropic.APIStatusError as exc:
+        app.logger.exception("AI CALL FAILED (APIStatusError): status_code=%s message=%s", exc.status_code, exc.message)
         return (*_fail, (jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502))
-    except anthropic.APITimeoutError:
+    except anthropic.APITimeoutError as exc:
+        app.logger.exception("AI CALL FAILED (APITimeoutError): %s", str(exc))
         return (*_fail, (jsonify({"error": "Claude API timed out. The PDF may be too large — please try a shorter document."}), 504))
     except anthropic.APIConnectionError as exc:
+        app.logger.exception("AI CALL FAILED (APIConnectionError): %s", str(exc))
         return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))
 
     raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
+    app.logger.info("Claude response extracted: raw_text_length=%d", len(raw_text))
     _log_claude_response("structured", response)
 
     # ── Persist token usage to Supabase (best-effort — never fails the request) ──
@@ -1466,58 +1485,91 @@ def _run_boq_pipeline():
 
     stop_reason = getattr(response, "stop_reason", None)
     if stop_reason == "max_tokens":
+        app.logger.error("AI_OUTPUT_TRUNCATED: stop_reason=max_tokens")
         return (*_fail, (jsonify({"error": "Claude structured output was truncated before completion."}), 502))
     if stop_reason == "refusal":
+        app.logger.error("AI_OUTPUT_REFUSED: stop_reason=refusal")
         return (*_fail, (jsonify({"error": "Claude refused to produce the requested structured output."}), 502))
 
+    app.logger.info("START JSON EXTRACTION: raw_text_length=%d", len(raw_text))
     try:
         boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
+        app.logger.info("END JSON EXTRACTION: boq_data_keys=%s", list(boq_data.keys()) if isinstance(boq_data, dict) else "not_dict")
     except json.JSONDecodeError as exc:
-        app.logger.exception("Claude structured output was not valid JSON: %s", exc)
+        app.logger.exception("JSON_EXTRACTION_FAILED: JSONDecodeError at line %s col %s: %s. First 500 chars of raw_text: %s", exc.lineno, exc.colno, exc.msg, raw_text[:500])
         return (*_fail, (jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502))
+    except Exception as exc:
+        app.logger.exception("JSON_EXTRACTION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
+        return (*_fail, (jsonify({"error": f"Failed to parse response: {exc}"}), 502))
 
+    app.logger.info("START SCHEMA VALIDATION")
     try:
         _validate_boq_output(boq_data)
+        app.logger.info("END SCHEMA VALIDATION: validation_passed=true")
     except ValueError as exc:
-        app.logger.warning("Claude structured output failed schema validation: %s", exc)
+        app.logger.exception("SCHEMA_VALIDATION_FAILED: ValueError: %s", str(exc))
         return (*_fail, (jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502))
+    except Exception as exc:
+        app.logger.exception("SCHEMA_VALIDATION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
+        return (*_fail, (jsonify({"error": f"Schema validation error: {exc}"}), 502))
 
-    boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
+    app.logger.info("START RATE ENRICHMENT")
+    try:
+        boq_data = _enrich_boq(boq_data)               # look up rates in RATES_DB and add material_rate, labour_rate, line_total to every item
+        app.logger.info("END RATE ENRICHMENT: enrichment_complete=true")
+    except Exception as exc:
+        app.logger.exception("RATE_ENRICHMENT_FAILED: exception_type=%s: %s", type(exc).__name__, str(exc))
+        return (*_fail, (jsonify({"error": f"Failed to enrich BoQ with rates: {exc}"}), 502))
 
+    app.logger.info("PIPELINE_SUCCESS: returning_to_process_pdf")
     return boq_data, pages_text, uploaded_file, None
 
 
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
+    app.logger.info("PROCESS_PDF_START: method=POST path=/process")
+    
     if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
+        app.logger.warning("PROCESS_PDF_AUTH_FAILED: no bearer token in Authorization header")
         return jsonify({"error": "Authentication required. Please sign in."}), 401
 
+    app.logger.info("PROCESS_PDF_AUTH_OK: calling _run_boq_pipeline")
     boq_data, pages_text, uploaded_file, err = _run_boq_pipeline()
     if err:
+        app.logger.error("PROCESS_PDF_PIPELINE_ERROR: pipeline_returned_error")
         return err
 
+    app.logger.info("PROCESS_PDF_PIPELINE_SUCCESS: pages=%d boq_trades=%d", 
+                   len(pages_text), 
+                   len(boq_data.get("bill_of_quantities", [])) if isinstance(boq_data, dict) else 0)
+    
     print('BOQ STRUCTURE:', json.dumps(boq_data, indent=2)[:500])
 
     # Auto-save the completed BoQ as a project for the authenticated user.
     # This is best-effort: any failure is logged but never surfaced to the caller,
     # so a save problem can't turn a successful BoQ generation into an error response.
+    app.logger.info("START AUTO-SAVE")
     try:
         user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
         user     = getattr(user_res, "user", None) if user_res else None
         if user:
+            app.logger.info("AUTO_SAVE: authenticated user_id=%s", user.id)
             db = _db_client()
             project_id = (request.form.get("project_id") or "").strip()
             if project_id:
                 # The upload belongs to an existing project (workspace flow) —
                 # attach the BoQ to that row instead of creating a duplicate.
+                app.logger.info("AUTO_SAVE: updating existing project_id=%s", project_id)
                 db.table("projects").update({
                     "page_count":      len(pages_text),
                     "estimated_value": _sum_line_totals(boq_data),
                     "boq_data":        boq_data,
                     "status":          "completed",
                 }).eq("id", project_id).eq("user_id", user.id).execute()
+                app.logger.info("AUTO_SAVE: project update completed for project_id=%s", project_id)
             else:
                 project_name = re.sub(r'\.pdf$', '', uploaded_file.filename, flags=re.IGNORECASE)  # filename without the .pdf extension
+                app.logger.info("AUTO_SAVE: creating new project name=%s pages=%d", project_name, len(pages_text))
                 _insert_project(
                     db,
                     user_id=user.id,
@@ -1527,10 +1579,24 @@ def process_pdf():                         # Flask calls this function when a ma
                     boq_data=boq_data,
                     status='completed',
                 )
+                app.logger.info("AUTO_SAVE: new project created successfully")
+        else:
+            app.logger.warning("AUTO_SAVE: no authenticated user, skipping save")
     except Exception as exc:
-        app.logger.warning("Failed to auto-save project from /process: %s", exc)
+        app.logger.exception("AUTO_SAVE_FAILED: exception_type=%s message=%s (continuing to return response)", type(exc).__name__, str(exc))
 
-    return jsonify(boq_data), 200                  # serialise the Python dict/list back to a JSON HTTP response — like return Ok(boqData) in C# Web API
+    app.logger.info("START RESPONSE BUILD: serializing boq_data to JSON")
+    try:
+        response_obj = jsonify(boq_data)
+        response_obj.status_code = 200
+        app.logger.info("END RESPONSE BUILD: jsonify successful status_code=200")
+        app.logger.info("PROCESS_PDF_SUCCESS: returning response to client")
+        return response_obj
+    except Exception as exc:
+        app.logger.exception("RESPONSE_BUILD_FAILED: exception_type=%s message=%s", type(exc).__name__, str(exc))
+        error_response = jsonify({"error": f"Failed to serialize response: {exc}"})
+        error_response.status_code = 502
+        return error_response
 
 
 # ── Public demo (no account required) ───────────────────────────────────────────────
