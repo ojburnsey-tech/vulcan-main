@@ -4173,13 +4173,47 @@ function MeasurementHubPage({ go, toast, onBoqReady }) {
 
   const openPicker = (id) => { inputRefs.current[id] && inputRefs.current[id].click(); };
 
+  // Fire-and-forget: persist a user classification override to the backend.
+  // Called after every NRM2 / rate-key dropdown change.
+  const persistOverride = async (sourceTerm, nrm2Section, rateKey) => {
+    if (!sourceTerm) return;
+    try {
+      const token = await vqToken();
+      if (!token) return;
+      fetch(`${VQ_API}/measurement/overrides`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ source_term: sourceTerm, nrm2_section: nrm2Section || null, rate_key: rateKey || null }),
+      });
+    } catch (_) {}
+  };
+
+  // Fire-and-forget: delete a user override when the row is reset.
+  const deletePersistedOverride = async (sourceTerm) => {
+    if (!sourceTerm) return;
+    try {
+      const token = await vqToken();
+      if (!token) return;
+      fetch(`${VQ_API}/measurement/overrides`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ source_term: sourceTerm }),
+      });
+    } catch (_) {}
+  };
+
   const runClassify = async () => {
     if (!measurements || !measurements.length) return;
     setClassifying(true);
     setClassifyError(null);
     try {
+      const token = await vqToken();
       const res  = await fetch(`${VQ_API}/measurement/classify`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ measurements }),
       });
       const data = await res.json().catch(() => ({}));
@@ -4187,8 +4221,15 @@ function MeasurementHubPage({ go, toast, onBoqReady }) {
         const msg = data.error || 'Classification failed — please try again.';
         setClassifyError(msg); toast(msg, 'error'); return;
       }
-      setClassification({ forImportId: importId, rows: data.classified || [], options: data.options || { nrm2_sections: [], rate_keys: [] } });
-      setOverrides({});
+      const classified = data.classified || [];
+      // Seed local override state from server-applied user_override rows so the
+      // "Manual" confidence badge renders correctly without another round-trip.
+      const seeded = {};
+      classified.forEach((r, i) => {
+        if (r.overridden) seeded[i] = { nrm2_section: r.nrm2_section, rate_key: r.rate_key };
+      });
+      setClassification({ forImportId: importId, rows: classified, options: data.options || { nrm2_sections: [], rate_keys: [] } });
+      setOverrides(seeded);
     } catch (e) {
       const msg = 'Network error — could not reach the server.';
       setClassifyError(msg); toast(msg, 'error');
@@ -4236,10 +4277,22 @@ function MeasurementHubPage({ go, toast, onBoqReady }) {
     }
   }, [tab, importId, measurements]);
 
-  const setOverride = (idx, field, value) =>
+  const setOverride = (idx, field, value) => {
     setOverrides(prev => ({ ...prev, [idx]: { ...(prev[idx] || {}), [field]: value } }));
-  const resetOverride = (idx) =>
+    const row = (classification.rows || [])[idx];
+    if (row) {
+      // Read prev overrides synchronously (captured in closure — correct before state flush).
+      const prev = overrides[idx] || {};
+      const nrm2 = field === 'nrm2_section' ? (value || null) : (prev.nrm2_section !== undefined ? prev.nrm2_section : (row.nrm2_section || null));
+      const rkey = field === 'rate_key'     ? (value || null) : (prev.rate_key     !== undefined ? prev.rate_key     : (row.rate_key     || null));
+      persistOverride(row.normalised_description, nrm2, rkey);
+    }
+  };
+  const resetOverride = (idx) => {
+    const row = (classification.rows || [])[idx];
+    if (row) deletePersistedOverride(row.normalised_description);
     setOverrides(prev => { const next = { ...prev }; delete next[idx]; return next; });
+  };
 
   const runImport = async (source, file) => {
     setImporting(source.id);

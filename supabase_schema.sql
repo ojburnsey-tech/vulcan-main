@@ -99,6 +99,28 @@ alter table public.branding add column if not exists company_email   text;
 alter table public.branding add column if not exists logo            text;
 alter table public.branding add column if not exists updated_at      timestamptz not null default now();
 
+-- ── Classification overrides ────────────────────────────────────────────────
+-- Per-user learned mappings: normalised_description → (nrm2_section, rate_key).
+-- Applied before keyword rules so user corrections are respected on all future
+-- imports. One row per (user_id, source_term) — upserted on each manual change.
+create table if not exists public.classification_overrides (
+  id           uuid        primary key default gen_random_uuid(),
+  user_id      uuid        not null references auth.users(id) on delete cascade,
+  source_term  text        not null,
+  nrm2_section text,
+  rate_key     text,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+-- One override per term per user — enforces clean upsert semantics.
+create unique index if not exists classification_overrides_user_term
+  on public.classification_overrides (user_id, source_term);
+
+-- Index for the common read pattern (load all overrides for a user).
+create index if not exists classification_overrides_user_id
+  on public.classification_overrides (user_id);
+
 -- ── Privileges ──────────────────────────────────────────────────────────────
 -- Deliberately nothing for `anon`: the anon key is public in the frontend, so
 -- granting it table access would expose every user's data. The backend now
@@ -108,7 +130,8 @@ grant usage on schema public to authenticated, service_role;
 grant select, insert, update, delete on public.projects      to authenticated, service_role;
 grant select, insert, update, delete on public.chat_messages to authenticated, service_role;
 grant select, insert on public.usage_events to authenticated, service_role;
-grant select, insert, update, delete on public.branding      to authenticated, service_role;
+grant select, insert, update, delete on public.branding                   to authenticated, service_role;
+grant select, insert, update, delete on public.classification_overrides    to authenticated, service_role;
 
 -- profiles is created by SUPABASE_SETUP.md §3 — grant only if it exists so this
 -- script never aborts halfway.
@@ -133,6 +156,14 @@ create policy "Users manage own projects"
 drop policy if exists "Users manage own chat messages" on public.chat_messages;
 create policy "Users manage own chat messages"
   on public.chat_messages for all
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+alter table public.classification_overrides enable row level security;
+
+drop policy if exists "Users manage own classification overrides" on public.classification_overrides;
+create policy "Users manage own classification overrides"
+  on public.classification_overrides for all
   using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
 

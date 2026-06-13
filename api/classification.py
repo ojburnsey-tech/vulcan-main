@@ -188,12 +188,40 @@ def _confidence(section_score, key_score, agree):
 
 # ── Orchestration ───────────────────────────────────────────────────────────────
 
-def classify_one(measurement):
-    """Run the full pipeline for a single measurement dict."""
+def classify_one(measurement, user_overrides=None):
+    """Run the full pipeline for a single measurement dict.
+
+    Resolution order:
+      1. user_overrides dict (keyed by lower-cased normalised_description)
+      2. Normal keyword + Jaccard rules (existing behaviour)
+    """
     raw_desc = (measurement.get('description') or '').strip()
     raw_unit = (measurement.get('unit') or '').strip()
 
     norm = normalise(raw_desc, raw_unit)
+
+    # ── Resolution step 1: user override ────────────────────────────────────
+    if user_overrides:
+        ov = user_overrides.get(norm['normalised_description'].lower())
+        if ov:
+            nrm2_section = ov.get('nrm2_section') or None
+            rate_key     = ov.get('rate_key') or None
+            return {
+                "description":            raw_desc,
+                "quantity":               measurement.get('quantity'),
+                "unit":                   raw_unit,
+                "normalised_description": norm['normalised_description'],
+                "normalised_unit":        norm['normalised_unit'],
+                "nrm2_section":           nrm2_section,
+                "nrm2_label":             _NRM2_LABEL.get(nrm2_section, 'Unclassified') if nrm2_section else 'Unclassified',
+                "rate_key":               rate_key,
+                "rate_unit":              RATES_DB.get(rate_key, {}).get('unit') if rate_key else None,
+                "confidence":             1.0,
+                "method":                 "user_override",
+                "overridden":             True,
+            }
+
+    # ── Resolution step 2: normal rules ─────────────────────────────────────
     section = classify_nrm2(norm['normalised_description'])
     rate = assign_rate_key(norm['normalised_description'], section['nrm2_section'])
 
@@ -224,16 +252,16 @@ def classify_one(measurement):
     }
 
 
-def classify_measurements(measurements):
+def classify_measurements(measurements, user_overrides=None):
     """Classify a list of measurement dicts. Raises MeasurementClassificationError
-    on malformed input."""
+    on malformed input. user_overrides is propagated to classify_one()."""
     if not isinstance(measurements, list):
         raise MeasurementClassificationError("`measurements` must be a list.", 400)
     out = []
     for m in measurements:
         if not isinstance(m, dict):
             raise MeasurementClassificationError("Each measurement must be an object.", 400)
-        out.append(classify_one(m))
+        out.append(classify_one(m, user_overrides))
     return out
 
 
