@@ -1346,10 +1346,6 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         canvas.setLineWidth(0.8)
         canvas.line(LEFT_M, rule_y, PAGE_W - RIGHT_M, rule_y)
 
-        canvas.setFont('Helvetica', 7.5)
-        canvas.setFillColor(colors.black)
-        canvas.drawRightString(PAGE_W - RIGHT_M, rule_y - 8, f'Page {doc.page}')
-
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
@@ -1420,5 +1416,57 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         if watermark:
             _draw_watermark(canvas_obj, doc)
 
-    doc.build(story, onFirstPage=_first_page, onLaterPages=_later_pages)
+    # ── Numbered canvas: deferred footer + "Page N of M" ──────────────────────
+    # showPage() saves each page's canvas state rather than finalising it.
+    # save() iterates the stored states, draws the footer (now knowing total
+    # page count), then finalises each page in order.
+    from reportlab.pdfgen import canvas as _rl_canvas
+
+    footer_name = brand['company_name'] or DEFAULT_DOCUMENT_TITLE
+    _footer_name  = footer_name
+    _today_str    = today_str
+
+    class _NumberedCanvas(_rl_canvas.Canvas):
+        def __init__(self, *args, **kwargs):
+            _rl_canvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self._draw_footer(total)
+                _rl_canvas.Canvas.showPage(self)
+            _rl_canvas.Canvas.save(self)
+
+        def _draw_footer(self, total_pages):
+            self.saveState()
+
+            foot_rule_y = BOT_M - 3 * mm
+            foot_text_y = BOT_M - 8 * mm
+
+            self.setStrokeColor(colors.Color(0.55, 0.55, 0.55))
+            self.setLineWidth(0.4)
+            self.line(LEFT_M, foot_rule_y, PAGE_W - RIGHT_M, foot_rule_y)
+
+            self.setFont('Helvetica', 7)
+            self.setFillColor(colors.Color(0.35, 0.35, 0.35))
+            self.drawString(LEFT_M, foot_text_y, _footer_name)
+            self.drawCentredString(
+                PAGE_W / 2, foot_text_y,
+                f'Bill of Quantities — Confidential — {_today_str}',
+            )
+            self.drawRightString(
+                PAGE_W - RIGHT_M, foot_text_y,
+                f'Page {self._pageNumber} of {total_pages}',
+            )
+
+            self.restoreState()
+
+    doc.build(story, onFirstPage=_first_page, onLaterPages=_later_pages,
+              canvasmaker=_NumberedCanvas)
     return buf.getvalue()
