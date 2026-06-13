@@ -3976,7 +3976,16 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
           {reviewCount > 0 && (
-            <span style={{ fontSize: '12.5px', color: '#e26d5c' }}>{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</span>
+            <button
+              onClick={() => { setConfidenceFilter('low'); setPage(0); }}
+              data-testid="cls-review-trigger"
+              style={{
+                background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                fontSize: '12.5px', color: '#e26d5c',
+                textDecoration: confidenceFilter === 'low' ? 'none' : 'underline',
+                textDecorationStyle: 'dotted',
+              }}
+            >{reviewCount} low-confidence row{reviewCount !== 1 ? 's' : ''} to review</button>
           )}
           {unmatchedCount > 0 && (
             <span style={{ fontSize: '12.5px', color: 'var(--amber)' }}>{unmatchedCount} unclassified</span>
@@ -4020,13 +4029,20 @@ function ClassificationTable({ rows, options, overrides, onOverride, onReset, on
             <option value="unclassified">Unclassified</option>
           </select>
         </div>
+        {confidenceFilter === 'low' && (
+          <span data-testid="cls-review-active" style={{
+            fontSize: '12px', fontWeight: 600, color: '#e26d5c',
+            background: 'rgba(226,109,92,0.12)', border: '1px solid rgba(226,109,92,0.3)',
+            borderRadius: '999px', padding: '3px 10px', whiteSpace: 'nowrap',
+          }}>● Review mode</span>
+        )}
         {(q || confidenceFilter !== 'all') && (
           <button
             className="btn btn-outline btn-pill btn-sm"
             onClick={() => { setQ(''); setConfidenceFilter('all'); setPage(0); }}
             data-testid="cls-clear-filters"
           >
-            Clear
+            {confidenceFilter === 'low' && !q ? 'Clear review filter' : 'Clear'}
           </button>
         )}
       </div>
