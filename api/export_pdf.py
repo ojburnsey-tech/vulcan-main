@@ -109,25 +109,6 @@ PREAMBLE_ITEMS = [
 
 # (description, qty, unit, rate_per_unit)
 # (description, allowance_amount)
-PROVISIONAL_SUMS = [
-    ("Connection to existing sewer; nature and extent subject "
-     "to NI Water survey; remeasurable on instruction", 1500.00),
-    ("External landscaping and reinstatement; extent and "
-     "specification to be confirmed", 2000.00),
-]
-
-PC_SUMS = [
-    ("Client's fixtures and fittings; PC Sum for supply only; "
-     "contractor to add fixing, profit and attendance separately", 3500.00),
-]
-
-STATUTORY_FEES = [
-    ("Planning application fee — Belfast City Council", 327.00),
-    ("Building Control Full Plans fee — Belfast City Council "
-     "(40–60m² bracket)", 291.60),
-    ("NI Water sewer connection application and inspection fee "
-     "(Article 163)", 229.20),
-]
 
 # (resource, grade_description, unit_string, guidance_range)
 DAYWORKS_ROWS = [
@@ -498,12 +479,23 @@ def _build_doc_control_panel(boq_json, today_str: str) -> list:
 
 def _build_form_of_tender(boq_json, today_str: str) -> list:
     """Page 1 — Form of Tender."""
+    _proj = {}
     if isinstance(boq_json, dict):
-        project  = boq_json.get('project_title', 'Residential Extension')
-        location = boq_json.get('location', '—')
-    else:
-        project  = 'Residential Extension'
-        location = '—'
+        _proj = boq_json.get('project') or {}
+        if not isinstance(_proj, dict):
+            _proj = {}
+
+    def _get(*keys, default=''):
+        for k in keys:
+            v = _proj.get(k) or (boq_json.get(k) if isinstance(boq_json, dict) else None)
+            if v:
+                return str(v).strip()
+        return default
+
+    project   = _get('name', 'project_title')
+    location  = _get('location')
+    draw_refs = _get('drawing_refs')
+    prep_by   = _get('prepared_by')
 
     story = []
     story.append(Spacer(1, 8 * mm))
@@ -518,20 +510,17 @@ def _build_form_of_tender(boq_json, today_str: str) -> list:
     def _field_row(label, text):
         return [Paragraph(label, S_BODY_BOLD), Paragraph(text, S_BODY)]
 
-    fields = Table(
-        [
-            _field_row("Project:",
-                       project),
-            _field_row("Location:",
-                       location),
-            _field_row("Drawing Refs:",
-                       "Measured from Architect's Drawings Ref: PL-01 through PL-10 and "
-                       "Structural Engineer's Calculation Sheet Ref: SE-04"),
-            _field_row("Date:",        today_str),
-            _field_row("Prepared by:", "Vulcan Quanta (AI-assisted draft)"),
-        ],
-        colWidths=[label_w, value_w],
-    )
+    field_rows = [
+        _field_row("Project:", project or 'Not Provided'),
+    ]
+    if location:
+        field_rows.append(_field_row("Location:", location))
+    if draw_refs:
+        field_rows.append(_field_row("Drawing Refs:", draw_refs))
+    field_rows.append(_field_row("Date:",        today_str))
+    field_rows.append(_field_row("Prepared by:", prep_by or 'Vulcan Quanta (AI-assisted draft)'))
+
+    fields = Table(field_rows, colWidths=[label_w, value_w])
     fields.setStyle(TableStyle([
         ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
         ('TOPPADDING',    (0, 0), (-1, -1), 4),
@@ -613,7 +602,7 @@ def _build_preambles() -> list:
     return story
 
 
-def _build_preliminaries(prelim_allowance: float = 0.0) -> tuple:
+def _build_preliminaries(prelim_allowance: float = 0.0, boq_json=None) -> tuple:
     """Section 01 — Preliminaries. Returns (flowables, prelim_total).
 
     prelim_allowance is drawn from boq_json.summary.preliminaries. It is
@@ -621,6 +610,23 @@ def _build_preliminaries(prelim_allowance: float = 0.0) -> tuple:
     schedule and returned as prelim_total so the Grand Summary uses the same
     figure. Both sections therefore share a single data source.
     """
+    _proj = {}
+    if isinstance(boq_json, dict):
+        _proj = boq_json.get('project') or {}
+        if not isinstance(_proj, dict):
+            _proj = {}
+
+    def _p(*keys, default='Not Provided'):
+        for k in keys:
+            v = _proj.get(k) or (boq_json.get(k) if isinstance(boq_json, dict) else None)
+            if v:
+                return str(v).strip()
+        return default
+
+    proj_title     = _p('name', 'project_title')
+    client_name    = _p('client_name', 'client')
+    contract_type  = _p('contract_type', default='JCT Minor Works Building Contract 2016 (or as stated)')
+
     story = _section_heading("SECTION 01 — PRELIMINARIES")
 
     lbl_w = 80 * mm
@@ -646,9 +652,9 @@ def _build_preliminaries(prelim_allowance: float = 0.0) -> tuple:
     # ── A. PROJECT PARTICULARS ──────────────────────────────────────────────────
     story += _sub_heading('A', 'PROJECT PARTICULARS')
     story.append(_info_block([
-        ("Project title:",                      "[To be inserted]"),
+        ("Project title:",                      proj_title),
         ("Project address:",                    "[To be inserted]"),
-        ("Employer:",                           "[To be inserted]"),
+        ("Employer:",                           client_name),
         ("Architect / Contract Administrator:", "[To be inserted]"),
         ("Quantity Surveyor:",                  "[To be inserted]"),
         ("Structural Engineer:",                "[To be inserted]"),
@@ -657,7 +663,7 @@ def _build_preliminaries(prelim_allowance: float = 0.0) -> tuple:
     # ── B. CONTRACT PARTICULARS ────────────────────────────────────────────────
     story += _sub_heading('B', 'CONTRACT PARTICULARS')
     story.append(_info_block([
-        ("Form of contract:",         "JCT Minor Works Building Contract 2016 (or as stated)"),
+        ("Form of contract:",         contract_type),
         ("Contract administrator:",   "[To be inserted]"),
         ("Liquidated damages:",        "[To be inserted] per week"),
         ("Defects liability period:",  "[To be inserted] weeks from practical completion"),
@@ -915,8 +921,25 @@ def _build_measured_works(trade_groups) -> tuple:
     return story, measured_total
 
 
-def _build_provisional_sums() -> tuple:
-    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees."""
+def _build_provisional_sums(boq_json=None) -> tuple:
+    """Section 03 — Provisional Sums, PC Sums, and Statutory Fees.
+
+    Reads provisional_sums, pc_sums, and statutory_fees from boq_json.
+    Renders empty sub-tables (£0.00 subtotals) when the payload omits them
+    so no hardcoded specimen data ever appears in the PDF.
+    """
+    _boq = boq_json if isinstance(boq_json, dict) else {}
+    provisional_sums = _boq.get('provisional_sums') or []
+    pc_sums          = _boq.get('pc_sums')          or []
+    statutory_fees   = _boq.get('statutory_fees')   or []
+
+    if not isinstance(provisional_sums, list):
+        provisional_sums = []
+    if not isinstance(pc_sums, list):
+        pc_sums = []
+    if not isinstance(statutory_fees, list):
+        statutory_fees = []
+
     col_w = [CONTENT_W - 100, 100]
     story = _section_heading("SECTION 03 — PROVISIONAL SUMS, PC SUMS AND FEES")
     prov_total = 0.0
@@ -964,13 +987,13 @@ def _build_provisional_sums() -> tuple:
         return tbl
 
     story.append(Paragraph("Provisional Sums", S_TRADE))
-    story.append(_sub_table("Provisional Sums", PROVISIONAL_SUMS, show_ps_type=True))
+    story.append(_sub_table("Provisional Sums", provisional_sums, show_ps_type=True))
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("Prime Cost Sums", S_TRADE))
-    story.append(_sub_table("Prime Cost Sums", PC_SUMS))
+    story.append(_sub_table("Prime Cost Sums", pc_sums))
     story.append(Spacer(1, 4 * mm))
     story.append(Paragraph("Statutory Fees and Charges", S_TRADE))
-    story.append(_sub_table("Statutory Fees and Charges", STATUTORY_FEES))
+    story.append(_sub_table("Statutory Fees and Charges", statutory_fees))
     story.append(Spacer(1, 4 * mm))
 
     # Section total row
@@ -1325,9 +1348,9 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
 
     _summary = boq_json.get('summary') if isinstance(boq_json, dict) else None
     prelim_allowance = float((_summary.get('preliminaries') or 0) if isinstance(_summary, dict) else 0)
-    prelim_flowables,   prelim_total   = _build_preliminaries(prelim_allowance)
+    prelim_flowables,   prelim_total   = _build_preliminaries(prelim_allowance, boq_json)
     measured_flowables, measured_total = _build_measured_works(trade_groups)
-    prov_flowables,     prov_total     = _build_provisional_sums()
+    prov_flowables,     prov_total     = _build_provisional_sums(boq_json)
 
     story = []
     story += _build_branding_header(brand)   # [] when no branding → unchanged output
