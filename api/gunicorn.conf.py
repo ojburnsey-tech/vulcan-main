@@ -39,20 +39,21 @@ workers = int(os.environ.get("WEB_CONCURRENCY", "2"))
 worker_class = "gevent"
 
 # ── Timeout ───────────────────────────────────────────────────────────────────
-# 360s, deliberately chosen with comfortable headroom over the worst-case
-# /process pipeline. Budget (worst case, large NRM2 BoQ):
-#   pdfplumber + 2 Supabase gates ........ ~20s
-#   Claude messages.create (max_tokens=16000, single attempt, no retries) ≤ 240s
-#       (the Anthropic client in app.py is pinned to timeout=240, max_retries=0
-#        precisely so a single attempt can never outlast this worker timeout and
-#        can never silently retry-and-re-bill — see the comment at that call.)
-#   usage persist + enrich + auto-save + jsonify .. ~10s
-#   ──────────────────────────────────────────────
-#   total ........................................ ~270s  →  90s of headroom < 360s
-# Raising this above the Anthropic client timeout guarantees Flask gets the
-# chance to build a proper CORS-decorated JSON response (success OR clean error)
-# instead of being killed mid-request.
-timeout = int(os.environ.get("GUNICORN_TIMEOUT", "360"))
+# 660s. This MUST sit above the Anthropic client timeout in api/app.py
+# (ANTHROPIC_CLIENT_TIMEOUT_S = 600s) so a long-but-healthy /process stream is
+# never killed mid-flight. Railway-log evidence proved a non-streaming 16k-token
+# NRM2 bill can legitimately run for several minutes even on a 3KB PDF, so the old
+# 180s (Procfile) / 300s (Dockerfile) / 360s values were all too low. The app now
+# STREAMS the Claude call, so under gevent the read yields to the hub and the
+# worker heartbeat keeps ticking — but we still keep this generous ceiling as the
+# hard safety net. Budget (worst case):
+#   pdfplumber + 2 Supabase gates ........................... ~20s
+#   Claude streaming completion (inactivity-bounded at 600s) .. ≤ 600s
+#   usage persist + enrich + auto-save + jsonify ............. ~10s
+#   ──────────────────────────────────────────────────────────
+#   total ................................................... ≤ 630s  →  30s headroom < 660s
+# Required order across the three layers: anthropic(600) < frontend(650) < gunicorn(660).
+timeout = int(os.environ.get("GUNICORN_TIMEOUT", "660"))
 
 # graceful_timeout matches `timeout` so a worker told to shut down is given the
 # same window to finish an in-flight BoQ before being force-killed.
@@ -64,6 +65,18 @@ graceful_timeout = timeout
 accesslog = "-"
 errorlog = "-"
 loglevel = os.environ.get("GUNICORN_LOGLEVEL", "info")
+
+
+# ── Startup telemetry ─────────────────────────────────────────────────────────
+# Log the worker timeout the instant the master is ready, so a mismatch between
+# this and the Anthropic client timeout (app.py logs its own TIMEOUT_BUDGET line)
+# is obvious in Railway logs at boot — not discovered later via burnt credits.
+def when_ready(server):
+    server.log.info(
+        "GUNICORN_READY: worker_timeout=%ss graceful_timeout=%ss workers=%s worker_class=%s "
+        "(must be > Anthropic client timeout in app.py = 600s)",
+        timeout, graceful_timeout, workers, worker_class,
+    )
 
 
 # ── Diagnostic: log which request was in flight when a worker is killed ────────

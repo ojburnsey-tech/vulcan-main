@@ -148,11 +148,15 @@ function LandingPage({ go, tweaks = {}, toast }) {
   return (
     <>
       {/* ── FIXED VIDEO BACKGROUND — sits behind the entire page at z-index 0 ── */}
+      {/* hero.mp4?v=2 — cache-bust. GitHub Pages caches static assets hard, so when
+          the video file is replaced under the SAME filename, browsers/CDN keep serving
+          the old one. Bump ?v=N whenever hero.mp4 changes, and keep N IDENTICAL across
+          all three refs (this <video>, the other <video> below, and the index.html preload). */}
       <div className="cin-video-bg" aria-hidden="true">
         <video
           ref={videoRef}
           className="cin-video"
-          src="hero.mp4"
+          src="hero.mp4?v=2"
           muted
           playsInline
           preload="auto"
@@ -808,11 +812,18 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
 const VQ_API = 'https://vulcan-production-d039.up.railway.app';
 
 // ─── Upload resilience (shared by every /process + /demo-process caller) ──────────────
-// The backend's gunicorn worker timeout is 360s. We abort the client fetch a bit
-// before that so a hung backend gives the user feedback instead of an endless fake
-// progress bar. 280s leaves room for the server to return its own clean 504 from the
-// 240s Claude timeout first; only a truly stuck backend trips this.
-const VQ_UPLOAD_TIMEOUT_MS = 280000;
+// A full NRM2 bill streams from Claude for SEVERAL MINUTES (the backend Anthropic
+// client allows 600s), so the client timeout must be LONGER than the legitimate
+// generation time — a too-short abort was never the real failure, but we still bound
+// it so the UI can't hang forever. 650s sits between the 600s Anthropic timeout and
+// the 660s gunicorn worker timeout: a healthy bill returns well inside it, and the
+// backend's own clean 504 (if Claude truly stalls at 600s) still arrives before we abort.
+// Keep this in sync with FRONTEND_ABORT_TIMEOUT_S in api/app.py.
+const VQ_UPLOAD_TIMEOUT_MS = 650000;
+
+// After this long the UI swaps to a reassuring "this is normal, keep waiting" message
+// so a multi-minute (but healthy) NRM2 generation doesn't look stuck.
+const VQ_LONG_RUN_HINT_MS = 60000;
 
 // Map a fetch() REJECTION to a specific, debuggable message. fetch() only rejects on
 // (a) an AbortController abort, or (b) a true network/CORS failure (TypeError) — HTTP
@@ -1961,6 +1972,9 @@ function UploadPage({ go, toast, onBoqReady }) {
   const [fileName, setFileName] = useState(null);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('idle');
+  // After ~60s of generating, flip to a reassuring message — a detailed NRM2 bill
+  // legitimately streams for minutes, so silence here looks (wrongly) like a hang.
+  const [longRun, setLongRun] = useState(false);
 
   // processFile accepts the real File object (not just its name)
   // It is declared async so we can use await inside — like an async Task method in C#
@@ -1968,6 +1982,7 @@ function UploadPage({ go, toast, onBoqReady }) {
     setFileName(file.name);         // display the filename immediately in the UI
     setStatus('uploading');         // switch the progress bar to the uploading state
     setProgress(0);                 // reset progress to 0
+    setLongRun(false);              // reset the "this is taking a while" hint
 
     // Animate the bar to ~90% while the fetch is in flight so the user sees activity.
     // We cap at 90 so there is always a visible jump to 100 when the response arrives.
@@ -1976,6 +1991,9 @@ function UploadPage({ go, toast, onBoqReady }) {
       p = Math.min(p + Math.random() * 8 + 4, 90);   // increment randomly, never exceed 90
       setProgress(p);
     }, 300);
+
+    // After 60s, reassure the user that a multi-minute NRM2 generation is normal.
+    const hintTimer = setTimeout(() => setLongRun(true), VQ_LONG_RUN_HINT_MS);
 
     // Abort the request if the backend hangs past VQ_UPLOAD_TIMEOUT_MS so the user
     // gets a clear message instead of a fake progress bar that never completes.
@@ -2002,8 +2020,10 @@ function UploadPage({ go, toast, onBoqReady }) {
         credentials: 'include',
         signal: timer.signal,
       });
-      timer.clear();       // response arrived — cancel the abort timer
-      clearInterval(iv);   // stop the fake progress animation now that the server has responded
+      timer.clear();             // response arrived — cancel the abort timer
+      clearTimeout(hintTimer);   // and the "taking a while" hint timer
+      clearInterval(iv);         // stop the fake progress animation now that the server has responded
+      setLongRun(false);
 
       if (!res.ok) {
         // A clean 401 means the session expired (or the token was rejected) — send
@@ -2045,7 +2065,9 @@ function UploadPage({ go, toast, onBoqReady }) {
       // (TypeError); HTTP 4xx/5xx are handled by the !res.ok check above. Log the real
       // error object so this is diagnosable from the browser console without Railway logs.
       timer.clear();
+      clearTimeout(hintTimer);
       clearInterval(iv);
+      setLongRun(false);
       console.error('[VQ] /process upload failed:', err);
       toast(vqUploadErrorMessage(err), 'error');
       setStatus('idle');
@@ -2054,7 +2076,11 @@ function UploadPage({ go, toast, onBoqReady }) {
     }
   };
 
-  const statusMsg = { uploading: 'Uploading drawing…', processing: 'AI reading your drawing…', done: '✓ Ready! Opening your BoQ…' };
+  // Once longRun is set (after ~60s), tell the user a detailed bill genuinely takes
+  // a few minutes so the wait doesn't read as a hang.
+  const statusMsg = longRun
+    ? { uploading: 'Uploading drawing…', processing: 'Generating your Bill of Quantities — this can take a few minutes for detailed NRM2 output…', done: '✓ Ready! Opening your BoQ…' }
+    : { uploading: 'Uploading drawing…', processing: 'AI reading your drawing…', done: '✓ Ready! Opening your BoQ…' };
   const barColor = status === 'done' ? 'var(--green)' : status === 'processing' ? 'var(--amber)' : 'var(--blue)';
 
   return (
@@ -2685,6 +2711,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
   const [chatInput, setChatInput] = React.useState('');
   const [chatSending, setChatSending] = React.useState(false);
   const [uploadStatus, setUploadStatus] = React.useState('idle'); // idle | uploading | processing | done
+  const [uploadLongRun, setUploadLongRun] = React.useState(false); // true after ~60s — see UploadPage.longRun
   const [boqData, setBoqData] = React.useState(null);
   const chatEndRef = React.useRef(null);
 
@@ -2728,9 +2755,12 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
   const handleUploadAndGenerate = async (file) => {
     if (!file) return;
     setUploadStatus('uploading');
+    setUploadLongRun(false);
     setTab('generate');
     // Same abort-on-hang protection as UploadPage.processFile (shared helper).
     const timer = vqAbortTimer();
+    // After ~60s show the "detailed bills take a few minutes" reassurance.
+    const hintTimer = setTimeout(() => setUploadLongRun(true), VQ_LONG_RUN_HINT_MS);
     try {
       const token = await getToken();
       const fd = new FormData();
@@ -2747,6 +2777,8 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
         signal: timer.signal,
       });
       timer.clear();
+      clearTimeout(hintTimer);
+      setUploadLongRun(false);
       if (!res.ok) {
         // Expired session → sign-in, matching the Upload page behaviour.
         if (res.status === 401) {
@@ -2776,6 +2808,8 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
     } catch (e) {
       // Differentiate abort vs network/CORS vs other, and log the real error.
       timer.clear();
+      clearTimeout(hintTimer);
+      setUploadLongRun(false);
       console.error('[VQ] workspace /process upload failed:', e);
       toast(vqUploadErrorMessage(e), 'error');
       setUploadStatus('idle');
@@ -2872,9 +2906,16 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
               <div style={{ textAlign:'center', padding:'48px 0' }}>
                 <div style={{ width:48, height:48, border:'3px solid var(--amber)', borderTopColor:'transparent', borderRadius:'50%', margin:'0 auto 24px', animation:'spin 0.8s linear infinite' }} />
                 <p style={{ fontWeight:600, color:'rgba(255,255,255,0.82)' }}>
-                  {uploadStatus === 'uploading' ? 'Uploading drawing…' : 'AI reading your drawing…'}
+                  {uploadStatus === 'uploading'
+                    ? 'Uploading drawing…'
+                    : uploadLongRun
+                      ? 'Generating your Bill of Quantities — this can take a few minutes for detailed NRM2 output…'
+                      : 'AI reading your drawing…'}
                 </p>
-                <p style={{ fontSize:13, color:'var(--c-400)', marginTop:8 }}>This takes 30–90 seconds for a typical drawing set.</p>
+                {/* Drop the misleading "30–90 seconds" line once we're past a minute. */}
+                {!uploadLongRun && (
+                  <p style={{ fontSize:13, color:'var(--c-400)', marginTop:8 }}>This takes 30–90 seconds for a typical drawing set.</p>
+                )}
               </div>
             )}
           </div>
@@ -3338,10 +3379,11 @@ function SignInPage({ go, toast, user }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: heroPlayed ? 'transparent' : '#080706', overflow: 'hidden' }}>
       {/* Video only on first visit — skipped once heroPlayed is true */}
+      {/* hero.mp4?v=2 — keep this version query identical to the other hero.mp4 refs (cache-bust). */}
       {!heroPlayed && (
         <video
           ref={videoRef}
-          src="hero.mp4"
+          src="hero.mp4?v=2"
           autoPlay
           muted
           playsInline
