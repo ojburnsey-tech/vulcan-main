@@ -807,6 +807,37 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
 // Base URL for the Railway backend — same host used by /process, /download, /projects.
 const VQ_API = 'https://vulcan-production-d039.up.railway.app';
 
+// ─── Upload resilience (shared by every /process + /demo-process caller) ──────────────
+// The backend's gunicorn worker timeout is 360s. We abort the client fetch a bit
+// before that so a hung backend gives the user feedback instead of an endless fake
+// progress bar. 280s leaves room for the server to return its own clean 504 from the
+// 240s Claude timeout first; only a truly stuck backend trips this.
+const VQ_UPLOAD_TIMEOUT_MS = 280000;
+
+// Map a fetch() REJECTION to a specific, debuggable message. fetch() only rejects on
+// (a) an AbortController abort, or (b) a true network/CORS failure (TypeError) — HTTP
+// 4xx/5xx do NOT reject and are handled via res.ok at each call site. Centralising this
+// keeps the three near-duplicate upload blocks from drifting apart on wording.
+function vqUploadErrorMessage(err) {
+  if (err && err.name === 'AbortError') {
+    return 'The server is taking longer than expected — your file may still be processing. Please check back in a minute or try a smaller PDF.';
+  }
+  if (err instanceof TypeError) {
+    // Classic opaque failure: connection reset, DNS, or a response missing CORS
+    // headers (e.g. a killed worker). Distinct wording so it's separable in support.
+    return 'Network error — could not reach the server. Check your connection and try again.';
+  }
+  return (err && err.message) ? err.message : 'Something went wrong. Please try again.';
+}
+
+// Start a fetch abort timer; returns { signal, clear } — call clear() once the
+// response (or error) has arrived so the timer can't fire late.
+function vqAbortTimer(ms = VQ_UPLOAD_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), ms);
+  return { signal: controller.signal, clear: () => clearTimeout(id) };
+}
+
 // Resolve the current Supabase access token (empty string when not signed in / configured).
 async function vqToken() {
   const { data: { session } } = window.VQAuth
@@ -1946,6 +1977,9 @@ function UploadPage({ go, toast, onBoqReady }) {
       setProgress(p);
     }, 300);
 
+    // Abort the request if the backend hangs past VQ_UPLOAD_TIMEOUT_MS so the user
+    // gets a clear message instead of a fake progress bar that never completes.
+    const timer = vqAbortTimer();
     try {
       // FormData is the browser's equivalent of a multipart/form-data body — like
       // MultipartFormDataContent in C# HttpClient
@@ -1959,15 +1993,27 @@ function UploadPage({ go, toast, onBoqReady }) {
 
       // fetch() sends the HTTP request and returns a Promise — like HttpClient.PostAsync in C#.
       // No Content-Type header needed; the browser sets multipart/form-data + boundary automatically.
-      const res = await fetch('https://vulcan-production-d039.up.railway.app/process', {
+      // Use the shared VQ_API base URL (was a hardcoded literal, which risked drifting
+      // from the other upload blocks). signal wires up the abort timer above.
+      const res = await fetch(`${VQ_API}/process`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${token}` },
         body: formData,
         credentials: 'include',
+        signal: timer.signal,
       });
+      timer.clear();       // response arrived — cancel the abort timer
       clearInterval(iv);   // stop the fake progress animation now that the server has responded
 
       if (!res.ok) {
+        // A clean 401 means the session expired (or the token was rejected) — send
+        // the user to sign-in rather than showing a confusing "upload failed" toast.
+        if (res.status === 401) {
+          toast('Your session expired. Please sign in again.', 'error');
+          setStatus('idle'); setFileName(null); setProgress(0);
+          setTimeout(() => go('signin'), 1200);
+          return;
+        }
         // Try to read a JSON error body from Flask, fall back to the HTTP status text
         const err = await res.json().catch(() => ({ error: res.statusText }));
         const msg = err.error || 'Upload failed. Please try again.';
@@ -1995,10 +2041,13 @@ function UploadPage({ go, toast, onBoqReady }) {
       setTimeout(() => { setStatus('done'); setTimeout(() => go('results'), 700); }, 1200);
 
     } catch (err) {
-      // fetch() itself throws only on network-level failures (no connection, DNS error, etc.)
-      // HTTP error statuses (4xx, 5xx) do NOT throw — they are handled by the !res.ok check above
+      // fetch() only REJECTS on an abort (AbortError) or a true network/CORS failure
+      // (TypeError); HTTP 4xx/5xx are handled by the !res.ok check above. Log the real
+      // error object so this is diagnosable from the browser console without Railway logs.
+      timer.clear();
       clearInterval(iv);
-      toast('Network error — could not reach the server.', 'error');
+      console.error('[VQ] /process upload failed:', err);
+      toast(vqUploadErrorMessage(err), 'error');
       setStatus('idle');
       setFileName(null);
       setProgress(0);
@@ -2680,6 +2729,8 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
     if (!file) return;
     setUploadStatus('uploading');
     setTab('generate');
+    // Same abort-on-hang protection as UploadPage.processFile (shared helper).
+    const timer = vqAbortTimer();
     try {
       const token = await getToken();
       const fd = new FormData();
@@ -2693,8 +2744,17 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
         headers: { Authorization: `Bearer ${token}` },
         credentials: 'include',
         body: fd,
+        signal: timer.signal,
       });
+      timer.clear();
       if (!res.ok) {
+        // Expired session → sign-in, matching the Upload page behaviour.
+        if (res.status === 401) {
+          toast('Your session expired. Please sign in again.', 'error');
+          setUploadStatus('idle');
+          setTimeout(() => go('signin'), 1200);
+          return;
+        }
         const err = await res.json().catch(() => ({ error: res.statusText || 'Processing failed' }));
         const msg = err.error || 'Processing failed';
         if (res.status === 429 || res.status === 403) {
@@ -2714,7 +2774,10 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
       toast('BoQ generated.', 'success');
       setTab('results');
     } catch (e) {
-      toast(e.message, 'error');
+      // Differentiate abort vs network/CORS vs other, and log the real error.
+      timer.clear();
+      console.error('[VQ] workspace /process upload failed:', e);
+      toast(vqUploadErrorMessage(e), 'error');
       setUploadStatus('idle');
     }
   };
@@ -4537,12 +4600,16 @@ function DemoPage({ go, toast }) {
     setStatus('processing');
     setDemoBoq(null);
 
+    // Demo runs the same heavy Claude pipeline as /process, so it needs the same
+    // abort-on-hang protection (the public path has no auth, hence no 401 branch).
+    const timer = vqAbortTimer();
     try {
       const formData = new FormData();
       formData.append('file', file);                 // same field name Flask expects in /demo-process
       formData.append('sample_project', sample);     // which sample card the visitor picked
 
-      const res = await fetch(`${VQ_API}/demo-process`, { method: 'POST', body: formData });
+      const res = await fetch(`${VQ_API}/demo-process`, { method: 'POST', body: formData, signal: timer.signal });
+      timer.clear();
 
       if (res.status === 429) {
         const err = await res.json().catch(() => ({}));
@@ -4563,7 +4630,11 @@ function DemoPage({ go, toast }) {
       setDemoBoq(data);
       setStatus('done');
     } catch (err) {
-      toast('Network error — could not reach the server.', 'error');
+      // Same abort/network/other differentiation + structured logging as the
+      // authenticated upload flows.
+      timer.clear();
+      console.error('[VQ] /demo-process failed:', err);
+      toast(vqUploadErrorMessage(err), 'error');
       setStatus('idle');
     }
   };
