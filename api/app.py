@@ -4,7 +4,6 @@ import os                          # os gives access to environment variables (l
 import io                          # io.BytesIO is an in-memory byte buffer — like MemoryStream in C#
 import re                          # re is Python's regex module — like System.Text.RegularExpressions in C#
 import json                        # json parses/serialises JSON — like System.Text.Json in C#
-import difflib                     # difflib is a stdlib module for comparing sequences; used for fuzzy string matching
 import pdfplumber                  # third-party library that opens PDFs and extracts text page by page
 import anthropic                   # official Anthropic Python SDK — wraps the Claude REST API
 from flask import Flask, request, jsonify, send_file, session, send_from_directory, make_response  # session = server-signed cookie dict, like HttpContext.Session in ASP.NET
@@ -20,9 +19,17 @@ from user_overrides import load_overrides, save_override, delete_override  # per
 from mapping_loader import load_mappings_at_startup, get_loader_status  # Bluebeam Term Mapping loader
 from measurement_classifier import classify_measurement  # Spreadsheet-based measurement classification
 import time, statistics
+import threading                  # only used for a stable per-request key in the in-flight tracker below
 _processing_times = []
 _start_time = time.time()
 _ai_status = None
+
+# In-flight request registry, read by the gunicorn worker_abort hook in
+# gunicorn.conf.py so a killed/timed-out worker can log WHICH request it was
+# serving (gevent worker kills otherwise leave no trace in Railway's logs).
+# Keyed by greenlet/thread id (threading.get_ident() returns the greenlet id once
+# gunicorn's gevent worker has monkey-patched the process).
+_INFLIGHT_REQUESTS: dict = {}
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -52,6 +59,24 @@ _ALLOWED_ORIGINS = [
 def handle_options():
     if request.method == 'OPTIONS':
         return make_response('', 204)
+
+
+# ── In-flight request tracking (for worker-kill diagnostics) ──────────────────
+# Record what this greenlet is working on so gunicorn's worker_abort hook can name
+# the request if the worker is killed (e.g. a /process that outran the timeout).
+@app.before_request
+def _track_inflight():
+    if request.method == 'OPTIONS':
+        return
+    _INFLIGHT_REQUESTS[threading.get_ident()] = (request.method, request.path, time.time())
+
+
+# teardown_request runs on success AND on normal exceptions, clearing the entry.
+# A hard worker kill (GreenletExit) skips it on purpose — that leaves the entry
+# behind precisely so worker_abort can report the request that was still running.
+@app.teardown_request
+def _untrack_inflight(exc=None):
+    _INFLIGHT_REQUESTS.pop(threading.get_ident(), None)
 
 
 # ── CORS headers on every response ───────────────────────────────────────────
@@ -1267,14 +1292,20 @@ Be concise and professional. Give specific figures from the BoQ where relevant.
         return jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500
 
     try:
-        chat_client = anthropic.Anthropic(api_key=api_key, timeout=60.0)
+        # max_retries=1: chat replies are short (max_tokens=1024) so a single
+        # retry on a transient blip stays well under both the 60s client timeout
+        # and the gunicorn worker timeout — unlike the /process call, this can't
+        # cause a runaway retry-storm.
+        chat_client = anthropic.Anthropic(api_key=api_key, timeout=60.0, max_retries=1)
         response = chat_client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
             system=system,
             messages=messages,
         )
-        assistant_reply = response.content[0].text
+        # _extract_claude_text joins all text blocks safely; response.content[0]
+        # would IndexError if Claude returned no text block.
+        assistant_reply = _extract_claude_text(response)
     except Exception as exc:
         return jsonify({"error": f"AI error: {exc}"}), 500
 
@@ -1290,13 +1321,20 @@ Be concise and professional. Give specific figures from the BoQ where relevant.
     return jsonify({"reply": assistant_reply}), 200
 
 
-def _run_boq_pipeline():
+def _run_boq_pipeline(user=None):
     """Shared upload → pdfplumber → Claude → validate → enrich pipeline.
 
     Single home for the BoQ generation business logic, used by both the
     authenticated /process route and the public /demo-process route so the
     pipeline is never duplicated.  Reads the uploaded file from the current
     Flask request context.
+
+    `user` is the already-validated Supabase user resolved by the caller
+    (/process passes it; /demo-process passes None for the public path). Passing
+    it in means we DON'T re-call _supabase.auth.get_user() three separate times
+    inside one request — each of those was a network round trip, and the ones
+    after the Claude call widened the window in which a worker-kill could lose a
+    BoQ that had already been billed.
 
     Returns (boq_data, pages_text, uploaded_file, error) where error is a
     (response, status) tuple ready to return from a view, or None on success.
@@ -1315,76 +1353,75 @@ def _run_boq_pipeline():
         "studio": 2_000_000,
     }
     try:
-        if _supabase:
-            _quota_user_res = _supabase.auth.get_user(_get_bearer_token())
-            _quota_user     = getattr(_quota_user_res, "user", None) if _quota_user_res else None
-            if _quota_user:
-                _plan = (
-                    (_quota_user.user_metadata or {}).get("plan", "free") or "free"
-                ).lower().strip()
-                _limit = _PLAN_MONTHLY_TOKEN_LIMITS.get(_plan, _PLAN_MONTHLY_TOKEN_LIMITS["free"])
+        # Reuse the user the caller already validated — no extra auth round trip.
+        # (user is None on the public /demo-process path, which skips the quota.)
+        _quota_user = user
+        if _supabase and _quota_user:
+            _plan = (
+                (_quota_user.user_metadata or {}).get("plan", "free") or "free"
+            ).lower().strip()
+            _limit = _PLAN_MONTHLY_TOKEN_LIMITS.get(_plan, _PLAN_MONTHLY_TOKEN_LIMITS["free"])
 
-                # Sum tokens used this calendar month
-                from datetime import datetime, timezone
-                _month_start = datetime.now(timezone.utc).replace(
-                    day=1, hour=0, minute=0, second=0, microsecond=0
-                ).isoformat()
-                _usage_rows = (
-                    _db_client()
-                    .table("usage_events")
-                    .select("input_tokens, output_tokens")
-                    .eq("user_id", _quota_user.id)
-                    .gte("created_at", _month_start)
-                    .execute()
-                )
-                _tokens_used = sum(
-                    (r.get("input_tokens", 0) or 0) + (r.get("output_tokens", 0) or 0)
-                    for r in (_usage_rows.data or [])
-                )
-                if _tokens_used >= _limit:
-                    return (*_fail, (jsonify({
-                        "error": (
-                            f"Monthly usage limit reached for your {_plan.title()} plan "
-                            f"({_tokens_used:,} of {_limit:,} tokens used). "
-                            "Upgrade your plan or wait until next month to continue."
-                        )
-                    }), 429))
+            # Sum tokens used this calendar month
+            from datetime import datetime, timezone
+            _month_start = datetime.now(timezone.utc).replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0
+            ).isoformat()
+            _usage_rows = (
+                _db_client()
+                .table("usage_events")
+                .select("input_tokens, output_tokens")
+                .eq("user_id", _quota_user.id)
+                .gte("created_at", _month_start)
+                .execute()
+            )
+            _tokens_used = sum(
+                (r.get("input_tokens", 0) or 0) + (r.get("output_tokens", 0) or 0)
+                for r in (_usage_rows.data or [])
+            )
+            if _tokens_used >= _limit:
+                return (*_fail, (jsonify({
+                    "error": (
+                        f"Monthly usage limit reached for your {_plan.title()} plan "
+                        f"({_tokens_used:,} of {_limit:,} tokens used). "
+                        "Upgrade your plan or wait until next month to continue."
+                    )
+                }), 429))
     except Exception as _qe:
         app.logger.warning("Quota check failed (failing open): %s", _qe)
     # ── End quota check ──────────────────────────────────────────────────────
 
     # ── Free-tier project count gate (2 completed projects per calendar month) ─
     try:
-        if _supabase:
-            _pc_user_res = _supabase.auth.get_user(_get_bearer_token())
-            _pc_user     = getattr(_pc_user_res, "user", None) if _pc_user_res else None
-            if _pc_user:
-                _pc_plan = (
-                    (_pc_user.user_metadata or {}).get("plan", "free") or "free"
-                ).lower().strip()
-                if _pc_plan == "free":
-                    from datetime import datetime, timezone
-                    _pc_month_start = datetime.now(timezone.utc).replace(
-                        day=1, hour=0, minute=0, second=0, microsecond=0
-                    ).isoformat()
-                    _pc_rows = (
-                        _db_client()
-                        .table("projects")
-                        .select("id")
-                        .eq("user_id", _pc_user.id)
-                        .eq("status", "completed")
-                        .gte("created_at", _pc_month_start)
-                        .execute()
-                    )
-                    _pc_count = len(_pc_rows.data or [])
-                    if _pc_count >= 2:
-                        return (*_fail, (jsonify({
-                            "error": (
-                                "Free plan includes 2 completed projects per month. "
-                                f"You have used {_pc_count} this month. "
-                                "Upgrade to Pro for unlimited projects."
-                            )
-                        }), 429))
+        # Reuse the caller-validated user instead of a second auth round trip.
+        _pc_user = user
+        if _supabase and _pc_user:
+            _pc_plan = (
+                (_pc_user.user_metadata or {}).get("plan", "free") or "free"
+            ).lower().strip()
+            if _pc_plan == "free":
+                from datetime import datetime, timezone
+                _pc_month_start = datetime.now(timezone.utc).replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0
+                ).isoformat()
+                _pc_rows = (
+                    _db_client()
+                    .table("projects")
+                    .select("id")
+                    .eq("user_id", _pc_user.id)
+                    .eq("status", "completed")
+                    .gte("created_at", _pc_month_start)
+                    .execute()
+                )
+                _pc_count = len(_pc_rows.data or [])
+                if _pc_count >= 2:
+                    return (*_fail, (jsonify({
+                        "error": (
+                            "Free plan includes 2 completed projects per month. "
+                            f"You have used {_pc_count} this month. "
+                            "Upgrade to Pro for unlimited projects."
+                        )
+                    }), 429))
     except Exception as _pce:
         app.logger.warning("Project count gate failed (failing open): %s", _pce)
     # ── End project count gate ────────────────────────────────────────────────
@@ -1422,10 +1459,24 @@ def _run_boq_pipeline():
     if not api_key:                                 # fail fast with a clear message if the variable is missing
         return (*_fail, (jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500))
 
-    # Timeout must be < gunicorn worker timeout so Flask can return a proper CORS-decorated
-    # error response rather than having the worker killed mid-request (GreenletExit bypasses
-    # after_request hooks, stripping CORS headers from the response).
-    client = anthropic.Anthropic(api_key=api_key, timeout=120.0)
+    # ROOT-CAUSE FIX for the credit-draining hang.
+    # Previously this was `timeout=120.0` with the SDK's DEFAULT max_retries=2.
+    # On a large NRM2 BoQ the first attempt routinely runs past 120s; the SDK
+    # then SILENTLY retries (up to 2 more times). Each retry is a brand-new,
+    # non-idempotent generation that bills tokens again, and the cumulative wall
+    # time (up to 3 × 120s = 360s) blew past the gunicorn worker --timeout. The
+    # worker was killed (GreenletExit) AFTER tokens were spent but BEFORE
+    # after_request could attach CORS headers, so fetch() saw an opaque network
+    # error — exactly the reported symptom, at full Claude cost every time.
+    #
+    # Fix: ONE attempt (max_retries=0 — never silently re-bill an expensive call)
+    # with a generous 240s timeout. 240s comfortably fits the worst-case single
+    # generation yet stays well under the 360s gunicorn worker timeout
+    # (see api/gunicorn.conf.py), guaranteeing Flask can return a proper
+    # CORS-decorated JSON response — success OR a clean 504 — instead of being
+    # killed mid-request. A transient overload now surfaces as a clean error the
+    # user can retry, rather than a hidden triple-charge.
+    client = anthropic.Anthropic(api_key=api_key, timeout=240.0, max_retries=0)
 
     app.logger.info("START AI CALL: model=claude-sonnet-4-6 pdf_text_length=%d", len(full_text))
     try:
@@ -1468,18 +1519,42 @@ def _run_boq_pipeline():
     app.logger.info("Claude response extracted: raw_text_length=%d", len(raw_text))
     _log_claude_response("structured", response)
 
-    # ── Persist token usage to Supabase (best-effort — never fails the request) ──
+    # ── COST-SAFETY GUARDRAIL: persist the paid-for Claude output FIRST ──────────
+    # This runs immediately after the (billed) Claude call and BEFORE JSON parse,
+    # schema validation, enrichment and auto-save. If any of those later steps
+    # raises — or the worker is killed before the response reaches the browser —
+    # the raw response we already paid for is safely on disk in usage_events, so
+    # it can be recovered without calling (and paying) Claude again.
+    #   TODO(recovery): a future GET /projects/<id>/recover (out of scope now)
+    #   could read the latest usage_events.raw_response for the user, re-run
+    #   _enrich_boq on it and return the BoQ — no second Claude call required.
+    # Best-effort: a logging/persistence failure must NEVER fail the request.
+    # We reuse the caller-validated `user` instead of a 3rd auth.get_user() call.
     try:
         _usage = getattr(response, "usage", None)
-        if _usage and _supabase:
-            _usage_user_res = _supabase.auth.get_user(_get_bearer_token())
-            _usage_user     = getattr(_usage_user_res, "user", None) if _usage_user_res else None
-            if _usage_user:
-                _db_client().table("usage_events").insert({
-                    "user_id":       _usage_user.id,
-                    "input_tokens":  getattr(_usage, "input_tokens",  0) or 0,
-                    "output_tokens": getattr(_usage, "output_tokens", 0) or 0,
-                }).execute()
+        if _supabase and user:
+            _usage_row = {
+                "user_id":       user.id,
+                "input_tokens":  getattr(_usage, "input_tokens",  0) or 0,
+                "output_tokens": getattr(_usage, "output_tokens", 0) or 0,
+            }
+            # Extra recovery columns (raw_response/model/stop_reason) are added by
+            # supabase_schema.sql. On a live DB that hasn't run the migration yet,
+            # PostgREST rejects unknown columns — so fall back to the minimal row
+            # rather than losing the usage event entirely.
+            _recovery_row = {
+                **_usage_row,
+                "raw_response": raw_text,
+                "model":        "claude-sonnet-4-6",
+                "stop_reason":  getattr(response, "stop_reason", None),
+            }
+            try:
+                _db_client().table("usage_events").insert(_recovery_row).execute()
+            except Exception as _re:
+                app.logger.warning(
+                    "Recovery columns not present (run supabase_schema.sql to enable "
+                    "BoQ recovery); persisting usage only: %s", _re)
+                _db_client().table("usage_events").insert(_usage_row).execute()
     except Exception as _ue:
         app.logger.warning("Failed to persist usage event: %s", _ue)
 
@@ -1528,13 +1603,22 @@ def _run_boq_pipeline():
 @app.route("/process", methods=["POST"])   # decorator registers this function as POST /process handler — like [HttpPost("process")] in C# Web API
 def process_pdf():                         # Flask calls this function when a matching request arrives
     app.logger.info("PROCESS_PDF_START: method=POST path=/process")
-    
-    if not _get_bearer_token():            # guard: reject requests with no Authorization: Bearer header
-        app.logger.warning("PROCESS_PDF_AUTH_FAILED: no bearer token in Authorization header")
-        return jsonify({"error": "Authentication required. Please sign in."}), 401
 
-    app.logger.info("PROCESS_PDF_AUTH_OK: calling _run_boq_pipeline")
-    boq_data, pages_text, uploaded_file, err = _run_boq_pipeline()
+    # Validate the JWT up front — NOT just "is a token present?". The old guard
+    # only checked _get_bearer_token() was non-empty, so an EXPIRED/invalid token
+    # sailed past it and still triggered a paid Claude call (the quota/auto-save
+    # blocks fail open on a bad token). Resolving the user here means an expired
+    # mid-upload session returns a clean 401 BEFORE any billing, and the frontend
+    # can redirect to sign-in instead of showing a fake-progress hang.
+    user, err = _authenticated_user()
+    if err:
+        app.logger.warning("PROCESS_PDF_AUTH_FAILED: token missing/invalid/expired")
+        return err
+
+    app.logger.info("PROCESS_PDF_AUTH_OK: calling _run_boq_pipeline user_id=%s", user.id)
+    # Pass the validated user down so the pipeline reuses it for the quota gate,
+    # project gate and usage persistence instead of re-validating 3 more times.
+    boq_data, pages_text, uploaded_file, err = _run_boq_pipeline(user=user)
     if err:
         app.logger.error("PROCESS_PDF_PIPELINE_ERROR: pipeline_returned_error")
         return err
@@ -1550,8 +1634,10 @@ def process_pdf():                         # Flask calls this function when a ma
     # so a save problem can't turn a successful BoQ generation into an error response.
     app.logger.info("START AUTO-SAVE")
     try:
-        user_res = _supabase.auth.get_user(_get_bearer_token()) if _supabase else None
-        user     = getattr(user_res, "user", None) if user_res else None
+        # Reuse the user validated at the top of this route — this used to be a
+        # 4th _supabase.auth.get_user() round trip AFTER the Claude call, which is
+        # exactly the kind of post-billing latency that widened the worker-kill
+        # window described in the timeout fix above.
         if user:
             app.logger.info("AUTO_SAVE: authenticated user_id=%s", user.id)
             db = _db_client()

@@ -66,14 +66,27 @@ create table if not exists public.chat_messages (
 );
 
 -- ── Usage events ─────────────────────────────────────────────────────────────
+-- raw_response/model/stop_reason are the COST-SAFETY recovery columns: /process
+-- writes the (already billed) Claude output here BEFORE parsing/enriching/saving,
+-- so a dropped response or killed worker never means a fully wasted Claude call.
 create table if not exists public.usage_events (
   id            uuid primary key default gen_random_uuid(),
   user_id       uuid not null references auth.users(id) on delete cascade,
   project_id    uuid references public.projects(id) on delete set null,
   input_tokens  integer not null default 0,
   output_tokens integer not null default 0,
+  raw_response  text,
+  model         text,
+  stop_reason   text,
   created_at    timestamptz not null default now()
 );
+
+-- Bring an existing usage_events table up to date so the recovery persistence in
+-- /process works without a manual migration (insert falls back to the minimal
+-- row if these are absent, but adding them enables BoQ recovery).
+alter table public.usage_events add column if not exists raw_response text;
+alter table public.usage_events add column if not exists model        text;
+alter table public.usage_events add column if not exists stop_reason  text;
 
 -- ── Branding ────────────────────────────────────────────────────────────────
 -- One row per user: company identity shown on exported BoQs, managed from the
