@@ -19,6 +19,7 @@ from user_overrides import load_overrides, save_override, delete_override  # per
 from mapping_loader import load_mappings_at_startup, get_loader_status  # Bluebeam Term Mapping loader
 from measurement_classifier import classify_measurement  # Spreadsheet-based measurement classification
 import time, statistics
+import copy                         # deep-copy BOQ_OUTPUT_SCHEMA into the tool input_schema without mutating the validator's copy
 import threading                  # only used for a stable per-request key in the in-flight tracker below
 _processing_times = []
 _start_time = time.time()
@@ -353,6 +354,70 @@ def _extract_claude_text(response) -> str:
         for block in response.content
         if getattr(block, "type", None) == "text"
     ).strip()
+
+
+def _extract_tool_use_input(response):
+    """Return the .input dict from the first tool_use block in a Message, or None.
+
+    Under forced tool_choice the model answers with a tool_use block whose .input the
+    SDK has already parsed into a dict (accumulated across the stream with jiter
+    partial_mode, so even a max_tokens truncation yields the valid-so-far portion).
+    Reading .input here is the definitive fix for the two Railway-logged 502 bugs:
+      Bug 1 — no text block means no ```json markdown fence to trip json.loads;
+      Bug 2 — the dict shape is schema-driven, not free-text-guessed.
+    """
+    for block in getattr(response, "content", None) or []:
+        if getattr(block, "type", None) == "tool_use":
+            inp = getattr(block, "input", None)
+            if isinstance(inp, dict):
+                return inp
+    return None
+
+
+def _strip_code_fence(text: str) -> str:
+    """Strip a markdown code fence Claude may wrap JSON in despite being told not to.
+
+    Railway logs (POST /process → 502) showed raw_text starting with ```json then a
+    newline, so `json.loads` failed at 'line 1 column 1 (char 0)'. Prose instructions
+    do NOT reliably suppress fences, so the text path must defend against them:
+      • removes a leading ``` or ```json (any language tag), tolerating surrounding
+        whitespace and the newline after the opening fence;
+      • removes a trailing ```;
+      • returns the text unchanged when there is no fence (always safe to call).
+    Only fence-stripping happens here; the riskier first-'{'/last-'}' extraction is a
+    separate helper applied by the pipeline ONLY after the de-fenced text still fails
+    to parse, so it can never corrupt valid JSON whose strings contain braces.
+    """
+    if not text:
+        return text
+    s = text.strip()
+    if s.startswith("```"):
+        nl = s.find("\n")                  # drop the opening fence line (``` plus optional lang tag)
+        s = s[nl + 1:] if nl != -1 else s[3:]
+        s = s.rstrip()
+        if s.endswith("```"):              # drop the trailing closing fence
+            s = s[:-3]
+    return s.strip()
+
+
+def _extract_first_json_object(text):
+    """Last-resort parse of the substring from the first '{' to the last '}'.
+
+    Used ONLY after fence-stripping still fails to parse, so it cannot corrupt
+    otherwise-valid JSON; it strips any leading/trailing prose the model added around
+    the object. Returns a dict or None.
+    """
+    if not text:
+        return None
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start:end + 1])
+    except Exception:
+        return None
+    return obj if isinstance(obj, dict) else None
 
 
 def _log_claude_response(attempt: str, response) -> None:
@@ -743,9 +808,17 @@ SYSTEM_PROMPT = (
     "  * intended_use: e.g. 'Tender Pricing'\n"
     "Use the typical values above unless the input document states otherwise. "
     "Do not invent project-specific revision information that is not in the input.\n"
-    "Respond with a single raw JSON object only — no markdown, no code fences, "
-    "no preamble, no trailing text. The root key must be bill_of_quantities "
-    "containing an array of trade groups, each with a trade string and an items array."
+    # OUTPUT MECHANISM: the API FORCES a tool call (tool_choice=record_bill_of_quantities),
+    # so the model answers by populating that tool's input — NOT by writing JSON text.
+    # The old "respond with a single raw JSON object" wording produced the two bugs the
+    # Railway logs caught (a ```json markdown fence, and bill_of_quantities returned as an
+    # object), because prose can't enforce shape. We now state the shape AND the mechanism.
+    "Provide your completed Bill of Quantities by calling the record_bill_of_quantities "
+    "tool. Populate bill_of_quantities as an ARRAY of trade groups — each an object with a "
+    "'trade' string and an 'items' array — and place document-control fields (revision, "
+    "issue_status, prepared_by, checked_by, intended_use) at the TOP LEVEL of the tool "
+    "input, never nested inside bill_of_quantities. Do not add keys that are not in the "
+    "tool schema."
 )
 
 BOQ_OUTPUT_SCHEMA = {
@@ -881,6 +954,46 @@ BOQ_OUTPUT_SCHEMA = {
 _BOQ_OUTPUT_VALIDATOR = Draft202012Validator(BOQ_OUTPUT_SCHEMA)
 
 
+# ── Forced structured output via tool use (THE definitive fix for shape drift) ──────
+# Railway logs proved prose schema instructions are NOT reliably obeyed: the model
+# wrapped its JSON in a ```json fence (Bug 1) AND returned bill_of_quantities as an
+# OBJECT of metadata instead of the required ARRAY of trade groups (Bug 2). The robust
+# fix is tool use: we hand Claude a tool whose input_schema IS the BoQ schema and FORCE
+# it (tool_choice) to answer by emitting a tool_use block whose .input is already a dict
+# in the right shape — no text, no fence, no json.loads, no shape guessing.
+BOQ_TOOL_NAME = "record_bill_of_quantities"
+
+
+def _build_boq_tool_input_schema():
+    """BOQ_OUTPUT_SCHEMA adapted as an Anthropic tool input_schema.
+
+    Identical to BOQ_OUTPUT_SCHEMA except the enrichment-only item_code property is
+    removed (the model must not generate it; _enrich_boq assigns it and won't overwrite
+    a model-supplied value). Every keyword used here — type/properties/required/items/
+    enum/additionalProperties — is supported by Anthropic tool input_schema; there are
+    no $ref/oneOf/allOf/pattern/format constructs that would need rewriting.
+    """
+    schema = copy.deepcopy(BOQ_OUTPUT_SCHEMA)
+    try:
+        schema["properties"]["bill_of_quantities"]["items"]["properties"]["items"]["items"]["properties"].pop("item_code", None)
+    except (KeyError, TypeError):
+        pass
+    return schema
+
+
+BOQ_TOOL = {
+    "name": BOQ_TOOL_NAME,
+    "description": (
+        "Record the completed NRM2 Bill of Quantities. Call this exactly once with the "
+        "full bill. bill_of_quantities MUST be an ARRAY of trade groups, each an object "
+        "with a 'trade' string and an 'items' array of line items. Put document-control "
+        "fields (revision, issue_status, prepared_by, checked_by, intended_use) at the "
+        "TOP LEVEL — never nested inside bill_of_quantities."
+    ),
+    "input_schema": _build_boq_tool_input_schema(),
+}
+
+
 def _validate_boq_output(boq_data):
     """Validate Claude's structured output before pricing enrichment."""
     try:
@@ -888,6 +1001,132 @@ def _validate_boq_output(boq_data):
     except ValidationError as exc:
         path = ".".join(str(p) for p in exc.absolute_path) or "<root>"
         raise ValueError(f"{path}: {exc.message}") from exc
+
+
+# Top-level keys BOQ_OUTPUT_SCHEMA permits. Anything else (the project/client/
+# currency/notes the model invented in the Railway logs) trips additionalProperties:
+# false at the root, so normalization drops it rather than letting validation 502.
+_BOQ_ALLOWED_TOP_KEYS = {
+    "revision", "issue_status", "prepared_by", "checked_by", "intended_use",
+    "bill_of_quantities", "risk_schedule", "annexes", "assumptions_register",
+}
+_BOQ_METADATA_KEYS = ("revision", "issue_status", "prepared_by", "checked_by", "intended_use")
+# Line-item fields the model may legitimately supply. item_code is intentionally
+# EXCLUDED: it is generated during enrichment and _enrich_boq does not overwrite a
+# model-supplied one, so we strip any model value here to guarantee a clean code.
+_BOQ_ITEM_FIELDS = (
+    "description", "rate_key", "quantity", "unit",
+    "drawing_ref", "dimension_string", "cdp", "performance_requirement",
+)
+_BOQ_ALLOWED_ANNEX_KEYS = {
+    "schedules", "performance_specifications", "quotations",
+    "risk_notes", "contractor_designed_scope", "statutory_undertaker_information",
+}
+
+
+def _looks_like_trade_groups(value) -> bool:
+    """True if value is a non-empty list whose entries look like {trade, items} groups."""
+    if not isinstance(value, list) or not value:
+        return False
+    hits = sum(
+        1 for v in value
+        if isinstance(v, dict) and ("items" in v or "line_items" in v) and ("trade" in v or "name" in v)
+    )
+    return hits >= max(1, len(value) // 2)
+
+
+def _clean_boq_item(item):
+    """Return a schema-clean copy of a line item, or None if it lacks required fields.
+
+    Keeps only allowed item fields (drops item_code + any invented keys that would
+    trip additionalProperties:false), coerces quantity to a float (the schema requires
+    a number), and rejects truncation-tail items missing description/rate_key/unit/qty.
+    """
+    if not isinstance(item, dict):
+        return None
+    desc = item.get("description") or item.get("desc")
+    rate_key = str(item.get("rate_key") or "").strip()
+    unit = item.get("unit")
+    if not desc or not rate_key or not unit:
+        return None
+    try:
+        qty = float(item.get("quantity"))
+    except (TypeError, ValueError):
+        return None                                  # missing/half-written number (e.g. truncated mid-value)
+    clean = {k: item[k] for k in _BOQ_ITEM_FIELDS if k in item}
+    clean["description"] = desc
+    clean["rate_key"] = rate_key
+    clean["quantity"] = qty
+    if "cdp" in clean and not isinstance(clean["cdp"], bool):
+        clean.pop("cdp", None)                       # cdp is optional + boolean-typed; drop a non-bool rather than 502
+    return clean
+
+
+def _normalize_boq_shape(data):
+    """Coerce a near-miss Claude BoQ back into BOQ_OUTPUT_SCHEMA shape (defense-in-depth).
+
+    Even with forced tool use we keep this as a safety net for the EXACT drift the
+    Railway logs showed (Bug 2) and for truncation tails:
+      • bill_of_quantities arriving as an OBJECT (metadata + a nested trade array)
+        instead of the required ARRAY → lift metadata to top level, dig out the array;
+      • a 'trades' key or a trade-name→items mapping → convert to the array shape;
+      • invented top-level keys (project/client/currency/notes) and unknown annex keys
+        → dropped so additionalProperties:false does not hard-fail validation;
+      • trailing incomplete line items / now-empty trade groups (truncation) → dropped.
+    Best-effort and never raises; returns the input unchanged if it is unrecognisable.
+    """
+    if isinstance(data, list):
+        data = {"bill_of_quantities": data}          # a bare list of trade groups is acceptable drift
+    if not isinstance(data, dict):
+        return data
+
+    out = dict(data)                                 # shallow copy; we rebuild bill_of_quantities below
+    boq = out.get("bill_of_quantities")
+
+    # Bug 2 core case: bill_of_quantities is an OBJECT, not an array.
+    if isinstance(boq, dict):
+        nested = boq
+        trade_array = next((v for v in nested.values() if _looks_like_trade_groups(v)), None)
+        if trade_array is None:                      # fall back to any list value inside the object
+            lists = [v for v in nested.values() if isinstance(v, list)]
+            trade_array = lists[0] if lists else []
+        for mk in _BOQ_METADATA_KEYS:                # lift recognised metadata up to the top level
+            if mk in nested and not out.get(mk):
+                out[mk] = nested[mk]
+        boq = trade_array
+
+    # Other wrapper shapes seen historically.
+    if not isinstance(boq, list):
+        if isinstance(out.get("trades"), list):
+            boq = out["trades"]
+        else:
+            boq = [
+                {"trade": k, "items": v} for k, v in out.items()
+                if isinstance(v, list) and k not in ("risk_schedule", "assumptions_register")
+            ]
+
+    # Rebuild clean trade groups: exactly {trade, items}, items cleaned + tail-dropped.
+    clean_groups = []
+    for g in boq if isinstance(boq, list) else []:
+        if not isinstance(g, dict):
+            continue
+        raw_items = g.get("items") or g.get("line_items") or []
+        if not isinstance(raw_items, list):
+            continue
+        good = [ci for ci in (_clean_boq_item(it) for it in raw_items) if ci]
+        if good:
+            clean_groups.append({"trade": str(g.get("trade") or g.get("name") or "General"), "items": good})
+    out["bill_of_quantities"] = clean_groups
+
+    # Strip unknown top-level keys, and unknown annex keys (annexes also has
+    # additionalProperties:false), so legitimate drift degrades instead of 502-ing.
+    for k in list(out.keys()):
+        if k not in _BOQ_ALLOWED_TOP_KEYS:
+            out.pop(k, None)
+    if isinstance(out.get("annexes"), dict):
+        out["annexes"] = {k: v for k, v in out["annexes"].items() if k in _BOQ_ALLOWED_ANNEX_KEYS}
+
+    return out
 
 
 def _salvage_truncated_boq(raw_text):
@@ -1627,8 +1866,8 @@ def _run_boq_pipeline(user=None):
         # Log value is DERIVED from the constant (was a hardcoded "16000") so the log
         # can never drift from the real max_tokens sent on the call below.
         "START AI CALL: model=claude-sonnet-4-6 max_tokens=%d streaming=true "
-        "timeout=%ss pdf_text_length=%d approx_words=%d",
-        BOQ_MAX_OUTPUT_TOKENS, ANTHROPIC_CLIENT_TIMEOUT_S, len(full_text), len(full_text.split()),
+        "tool=%s tool_choice=forced timeout=%ss pdf_text_length=%d approx_words=%d",
+        BOQ_MAX_OUTPUT_TOKENS, BOQ_TOOL_NAME, ANTHROPIC_CLIENT_TIMEOUT_S, len(full_text), len(full_text.split()),
     )
     try:
         _t = time.time()
@@ -1639,24 +1878,35 @@ def _run_boq_pipeline(user=None):
         #     while tokens are flowing (the 120s ReadTimeout failure mode is gone);
         #   • we emit a heartbeat every ~15s so Railway logs PROVE the call is alive
         #     and show progress, instead of a silent multi-minute gap.
-        # stream.get_final_message() returns the SAME Message shape create() did, so
-        # every downstream step (_extract_claude_text, _log_claude_response, usage
-        # persist, stop_reason checks, json.loads, schema validation) is unchanged.
+        # We FORCE tool use (tools + tool_choice): the BoQ comes back as a tool_use
+        # block whose .input is a schema-shaped dict, eliminating the ```json-fence and
+        # wrong-shape 502s. stream.get_final_message() still returns the full Message.
         with client.messages.stream(
             model="claude-sonnet-4-6",
             max_tokens=BOQ_MAX_OUTPUT_TOKENS,      # raised 16000 → 32000 (see BOQ_MAX_OUTPUT_TOKENS): the old cap truncated full NRM2 bills mid-JSON
             system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in the Anthropic SDK (NOT a {"role":"system"} entry — that's the OpenAI convention)
+            tools=[BOQ_TOOL],                      # hand Claude the BoQ schema AS a tool (input_schema == BOQ_OUTPUT_SCHEMA)
+            tool_choice={"type": "tool", "name": BOQ_TOOL_NAME},   # FORCE the answer into that tool's input — no free-text JSON to mis-shape or fence
             messages=[
                 {"role": "user", "content": full_text},   # the extracted PDF text is the entire user turn for Claude to analyse
             ],
         ) as stream:
-            for _text in stream.text_stream:       # iterate to drive the stream; _text is each incremental text delta
-                _chars += len(_text)
+            # Forced tool use emits NO text deltas — the BoQ streams as input_json_delta
+            # events — so iterate the RAW event stream, not stream.text_stream (which
+            # would be empty and starve the heartbeat). Counting partial_json bytes keeps
+            # "AI CALL IN PROGRESS" meaningful so a stuck stream is still distinguishable
+            # from a slow-but-healthy one in Railway logs.
+            for _event in stream:
+                if getattr(_event, "type", None) == "content_block_delta":
+                    _delta = getattr(_event, "delta", None)
+                    _piece = getattr(_delta, "partial_json", None) or getattr(_delta, "text", None)
+                    if _piece:
+                        _chars += len(_piece)
                 _now = time.time()
                 if _now - _last_log >= 15:          # heartbeat at most every 15s — keeps logs readable
                     app.logger.info("AI CALL IN PROGRESS: elapsed=%.0fs accumulated_chars=%d", _now - _t, _chars)
                     _last_log = _now
-            response = stream.get_final_message()   # fully-accumulated Message (same shape as messages.create())
+            response = stream.get_final_message()   # fully-accumulated Message; tool_use.input is a parsed dict
         _ai_call_time = round(time.time() - _t, 1)
         _processing_times.append(_ai_call_time)
         if len(_processing_times) > 200:
@@ -1685,8 +1935,16 @@ def _run_boq_pipeline(user=None):
         app.logger.exception("AI CALL FAILED (APIConnectionError): %s", str(exc))
         return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))
 
-    raw_text = _extract_claude_text(response)     # join Claude text blocks; strip whitespace/newlines Claude may have emitted before the JSON
-    app.logger.info("Claude response extracted: raw_text_length=%d", len(raw_text))
+    # ── Read Claude's answer. PRIMARY: forced tool_use → a schema-shaped dict ────────
+    # tool_choice forced the model to answer via the record_bill_of_quantities tool, so
+    # the BoQ arrives as tool_use.input — already a parsed dict in the correct shape.
+    # This is the definitive fix for the two Railway-logged 502 bugs: Bug 1 (the model
+    # wrapped JSON in a ```json fence → json.loads failed at char 0) and Bug 2 (it
+    # returned bill_of_quantities as an OBJECT of metadata, not the required ARRAY).
+    # tool_use has no text and no fence, and its shape is schema-driven, so both vanish.
+    tool_input = _extract_tool_use_input(response)
+    raw_text   = _extract_claude_text(response)   # normally "" under forced tool use; kept for the text fallback + logging
+    app.logger.info("Claude response read: tool_use=%s raw_text_length=%d", tool_input is not None, len(raw_text))
     _log_claude_response("structured", response)
 
     # ── COST-SAFETY GUARDRAIL: persist the paid-for Claude output FIRST ──────────
@@ -1712,9 +1970,18 @@ def _run_boq_pipeline(user=None):
             # supabase_schema.sql. On a live DB that hasn't run the migration yet,
             # PostgREST rejects unknown columns — so fall back to the minimal row
             # rather than losing the usage event entirely.
+            # Under forced tool use raw_text is empty, so persist the tool_use input
+            # JSON instead — otherwise the cost-safety recovery would have nothing to
+            # recover. The raw_response column is text and holds either form.
+            _persist_payload = raw_text
+            if not _persist_payload and tool_input is not None:
+                try:
+                    _persist_payload = json.dumps(tool_input)
+                except Exception:
+                    _persist_payload = ""
             _recovery_row = {
                 **_usage_row,
-                "raw_response": raw_text,
+                "raw_response": _persist_payload,
                 "model":        "claude-sonnet-4-6",
                 "stop_reason":  getattr(response, "stop_reason", None),
             }
@@ -1729,75 +1996,77 @@ def _run_boq_pipeline(user=None):
         app.logger.warning("Failed to persist usage event: %s", _ue)
 
     stop_reason = getattr(response, "stop_reason", None)
-
-    # ── GRACEFUL TRUNCATION RECOVERY (stop_reason == "max_tokens") ───────────────
-    # WHAT WAS WRONG: this used to be an unconditional 502 that DISCARDED a paid-for,
-    # almost-complete bill. WHY IT MATTERS: when the model hits BOQ_MAX_OUTPUT_TOKENS
-    # on a genuinely huge BoQ, the streamed JSON is intact except for an unterminated
-    # array/object at the very end — json.loads would fail, and the user (already
-    # billed for the output) hit a dead end. THE FIX: try to REPAIR the partial JSON
-    # via _salvage_truncated_boq (close open brackets, drop the final incomplete
-    # item); if the salvage is a structurally valid bill, continue with it and flag
-    # it "_truncated" so the frontend can show a NON-BLOCKING caveat instead of an
-    # error. We only fall back to a 502 if the salvage genuinely cannot be parsed.
-    # The partial raw_text is already persisted to usage_events.raw_response just
-    # above (the persist runs BEFORE this check), so the paid output survives either
-    # branch for later recovery.
-    boq_data = None
-    truncated = False
-    if stop_reason == "max_tokens":
-        app.logger.warning("AI_OUTPUT_TRUNCATED: stop_reason=max_tokens raw_text_length=%d — attempting salvage", len(raw_text))
-        _salvaged = _salvage_truncated_boq(raw_text)
-        if _salvaged is not None:
-            try:
-                _validate_boq_output(_salvaged)        # a salvaged bill must STILL pass the schema, even if missing its final sections
-                boq_data = _salvaged
-                truncated = True
-                app.logger.warning(
-                    "AI_OUTPUT_TRUNCATED_SALVAGED: recovered %d trade section(s) from truncated output — flagging partial",
-                    len(boq_data.get("bill_of_quantities", [])) if isinstance(boq_data, dict) else 0,
-                )
-            except Exception as _se:                   # parsed, but not a valid BoQ → treat as unsalvageable
-                app.logger.error("AI_OUTPUT_TRUNCATED_SALVAGE_INVALID: %s", _se)
-        if boq_data is None:
-            # Salvage genuinely failed. Fall back to 502 — but with an ACCURATE message.
-            # NOT the old generic "try a shorter document": the system prompt forces a
-            # full bill regardless of input size, so size is rarely the lever. The paid
-            # partial output is already in usage_events.raw_response for recovery.
-            app.logger.error("AI_OUTPUT_TRUNCATED_UNSALVAGEABLE: returning 502 (partial output persisted for recovery)")
-            return (*_fail, (jsonify({"error": (
-                "This was an unusually large and detailed bill, and Claude reached its "
-                "maximum output length before the Bill of Quantities finished. Please try "
-                "generating it again — large bills occasionally complete on a second pass."
-            )}), 502))
-    elif stop_reason == "refusal":
+    truncated   = (stop_reason == "max_tokens")
+    if stop_reason == "refusal":
         app.logger.error("AI_OUTPUT_REFUSED: stop_reason=refusal")
         return (*_fail, (jsonify({"error": "Claude refused to produce the requested structured output."}), 502))
 
-    # Normal (non-truncated) path: parse + validate the COMPLETE JSON. Skipped when the
-    # truncation branch above already produced a validated boq_data via salvage.
-    if boq_data is None:
-        app.logger.info("START JSON EXTRACTION: raw_text_length=%d", len(raw_text))
-        try:
-            boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
-            app.logger.info("END JSON EXTRACTION: boq_data_keys=%s", list(boq_data.keys()) if isinstance(boq_data, dict) else "not_dict")
-        except json.JSONDecodeError as exc:
-            app.logger.exception("JSON_EXTRACTION_FAILED: JSONDecodeError at line %s col %s: %s. First 500 chars of raw_text: %s", exc.lineno, exc.colno, exc.msg, raw_text[:500])
-            return (*_fail, (jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502))
-        except Exception as exc:
-            app.logger.exception("JSON_EXTRACTION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
-            return (*_fail, (jsonify({"error": f"Failed to parse response: {exc}"}), 502))
+    # User-facing 502 messages, defined once (reused on every parse/validate failure path).
+    _TRUNC_MSG = ("This was an unusually large and detailed bill, and Claude reached its "
+                  "maximum output length before the Bill of Quantities finished. Please try "
+                  "generating it again — large bills occasionally complete on a second pass.")
+    _SHAPE_MSG = ("The AI returned an unexpected structure for the Bill of Quantities. "
+                  "This is usually transient — please try generating again.")
 
-        app.logger.info("START SCHEMA VALIDATION")
+    # ── Obtain boq_data as a dict ────────────────────────────────────────────────
+    # PRIMARY: the forced tool_use input — already a dict, schema-shaped (no fence, no
+    # json.loads). On a max_tokens truncation the SDK's jiter partial-parse yields the
+    # valid-so-far portion, and _normalize_boq_shape below drops any incomplete tail.
+    boq_data = None
+    if tool_input is not None:
+        boq_data = tool_input
+        app.logger.info("BOQ_SOURCE=tool_use input_keys=%s", list(tool_input.keys()))
+    else:
+        # FALLBACK (should not happen under forced tool_choice): the model returned TEXT.
+        # Strip any markdown code fence (Bug 1) then parse; on truncation use the
+        # bracket-closing salvage; last resort = first-'{'…last-'}' substring (only AFTER
+        # fence-strip fails, so valid JSON with braces inside strings is never corrupted).
+        cleaned = _strip_code_fence(raw_text)
+        app.logger.warning("BOQ_SOURCE=text_fallback cleaned_length=%d fence_stripped=%s",
+                           len(cleaned), cleaned != (raw_text or "").strip())
         try:
-            _validate_boq_output(boq_data)
-            app.logger.info("END SCHEMA VALIDATION: validation_passed=true")
-        except ValueError as exc:
-            app.logger.exception("SCHEMA_VALIDATION_FAILED: ValueError: %s", str(exc))
-            return (*_fail, (jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502))
-        except Exception as exc:
-            app.logger.exception("SCHEMA_VALIDATION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
-            return (*_fail, (jsonify({"error": f"Schema validation error: {exc}"}), 502))
+            boq_data = json.loads(cleaned)
+        except Exception as _je:
+            app.logger.warning("TEXT_FALLBACK json.loads failed (%s); trying salvage/extraction", _je)
+            if truncated:
+                boq_data = _salvage_truncated_boq(cleaned)
+            if boq_data is None:
+                boq_data = _extract_first_json_object(cleaned)
+        if boq_data is None:
+            app.logger.error("BOQ_UNPARSEABLE (truncated=%s). First 500 chars of raw_text: %s", truncated, (raw_text or "")[:500])
+            return (*_fail, (jsonify({"error": _TRUNC_MSG if truncated else _SHAPE_MSG}), 502))
+
+    # ── Normalise shape (defense-in-depth for the Bug 2 drift + truncation tails) ──
+    # Fixes the EXACT drift the Railway logs showed — bill_of_quantities returned as an
+    # OBJECT with metadata nested inside, plus invented top-level keys (project/client/
+    # currency/notes) that would trip additionalProperties:false — and drops incomplete
+    # trailing items. A slightly-off response degrades into a valid BoQ instead of a 502.
+    try:
+        boq_data = _normalize_boq_shape(boq_data)
+    except Exception as _ne:
+        app.logger.warning("BOQ_NORMALIZE_FAILED (continuing with raw shape): %s", _ne)
+
+    # Nothing usable left (e.g. truncated before the first complete item) → surface an
+    # accurate error rather than returning an empty bill (which would pass the schema).
+    _trades = boq_data.get("bill_of_quantities") if isinstance(boq_data, dict) else None
+    if not _trades:
+        app.logger.error("BOQ_EMPTY_AFTER_NORMALIZE: no usable trade sections (truncated=%s)", truncated)
+        return (*_fail, (jsonify({"error": _TRUNC_MSG if truncated else _SHAPE_MSG}), 502))
+
+    # ── Validate the (normalised) structure ──────────────────────────────────────
+    app.logger.info("START SCHEMA VALIDATION: keys=%s trade_sections=%d", list(boq_data.keys()), len(_trades))
+    try:
+        _validate_boq_output(boq_data)
+        app.logger.info("END SCHEMA VALIDATION: validation_passed=true")
+    except ValueError as exc:
+        # Log the FULL normalised payload (also persisted to usage_events) so the drift is
+        # debuggable from Railway logs without re-running a paid generation.
+        app.logger.error("SCHEMA_VALIDATION_FAILED after normalize: %s | payload=%s",
+                         exc, json.dumps(boq_data, default=str)[:4000])
+        return (*_fail, (jsonify({"error": _TRUNC_MSG if truncated else _SHAPE_MSG}), 502))
+    except Exception as exc:
+        app.logger.exception("SCHEMA_VALIDATION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
+        return (*_fail, (jsonify({"error": f"Schema validation error: {exc}"}), 502))
 
     app.logger.info("START RATE ENRICHMENT")
     try:
@@ -1808,17 +2077,18 @@ def _run_boq_pipeline(user=None):
         return (*_fail, (jsonify({"error": f"Failed to enrich BoQ with rates: {exc}"}), 502))
 
     if truncated:
-        # NON-BLOCKING truncation flags. Added AFTER validation + enrichment so they
-        # never trip the schema's additionalProperties:False (validation rejects
-        # unknown top-level keys). The frontend reads _truncated to show a caveat
-        # banner while STILL rendering and navigating to the (partial) bill.
+        # NON-BLOCKING truncation flags (the tool/text path + normalize already salvaged a
+        # partial-but-valid bill). Added AFTER validation + enrichment so they never trip
+        # the schema's additionalProperties:False. The frontend reads _truncated to show a
+        # caveat banner while STILL rendering and navigating to the (partial) bill.
+        app.logger.warning("AI_OUTPUT_TRUNCATED_SALVAGED: proceeding with partial bill trades=%d", len(_trades))
         boq_data["_truncated"] = True
         boq_data["_truncation_notice"] = (
             "This bill was very large and may be missing its final sections — "
             "please review and regenerate if needed."
         )
 
-    app.logger.info("PIPELINE_SUCCESS: returning_to_process_pdf truncated=%s", truncated)
+    app.logger.info("PIPELINE_SUCCESS: returning_to_process_pdf truncated=%s trades=%d", truncated, len(_trades))
     return boq_data, pages_text, uploaded_file, None
 
 
