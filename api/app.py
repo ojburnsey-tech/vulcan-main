@@ -31,7 +31,32 @@ _ai_status = None
 # gunicorn's gevent worker has monkey-patched the process).
 _INFLIGHT_REQUESTS: dict = {}
 
+# ── Timeout budget (ONE place; the three layers must stay strictly ordered) ──────
+# A /process upload is a single long request: a non-streaming completion toward
+# max_tokens=16000 against the ~6,500-token NRM2 SYSTEM_PROMPT routinely takes
+# SEVERAL MINUTES even for a tiny PDF (the prompt forces a full 41-section bill).
+# The three timeouts below must satisfy  anthropic < frontend < gunicorn  so that
+# whichever limit trips, the browser still receives a clean, CORS-decorated reply:
+#   • ANTHROPIC ─ per-read/inactivity timeout on the Claude call (we also stream,
+#                 so this only fires if tokens genuinely stop arriving).
+#   • FRONTEND  ─ vq-pages.jsx AbortController (kept in sync there).
+#   • GUNICORN  ─ worker --timeout in api/gunicorn.conf.py (kept in sync there).
+# These last two are recorded here only so the startup log can surface all three
+# together — a mismatch like the old 120s-anthropic-vs-180s-gunicorn is then
+# obvious in Railway logs at boot instead of being discovered via burnt credits.
+ANTHROPIC_CLIENT_TIMEOUT_S = 600   # 10 min — real headroom for a full 16k-token bill
+FRONTEND_ABORT_TIMEOUT_S   = 650   # mirrors VQ_UPLOAD_TIMEOUT_MS in vq-pages.jsx
+GUNICORN_WORKER_TIMEOUT_S  = 660   # mirrors `timeout` in api/gunicorn.conf.py
+
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
+
+# Surface the whole timeout budget in one line at import/boot so any future
+# layer-mismatch is visible in Railway logs immediately (point 6 of the fix).
+app.logger.info(
+    "TIMEOUT_BUDGET: anthropic_client=%ss frontend_abort=%ss gunicorn_worker=%ss "
+    "(must stay ordered anthropic < frontend < gunicorn)",
+    ANTHROPIC_CLIENT_TIMEOUT_S, FRONTEND_ABORT_TIMEOUT_S, GUNICORN_WORKER_TIMEOUT_S,
+)
 
 # Flask sessions are signed cookies; SECRET_KEY is the signing key.
 # Without it sessions cannot be trusted.  Set this env var in production —
@@ -1459,58 +1484,81 @@ def _run_boq_pipeline(user=None):
     if not api_key:                                 # fail fast with a clear message if the variable is missing
         return (*_fail, (jsonify({"error": "ANTHROPIC_API_KEY environment variable is not set on the server."}), 500))
 
-    # ROOT-CAUSE FIX for the credit-draining hang.
-    # Previously this was `timeout=120.0` with the SDK's DEFAULT max_retries=2.
-    # On a large NRM2 BoQ the first attempt routinely runs past 120s; the SDK
-    # then SILENTLY retries (up to 2 more times). Each retry is a brand-new,
-    # non-idempotent generation that bills tokens again, and the cumulative wall
-    # time (up to 3 × 120s = 360s) blew past the gunicorn worker --timeout. The
-    # worker was killed (GreenletExit) AFTER tokens were spent but BEFORE
-    # after_request could attach CORS headers, so fetch() saw an opaque network
-    # error — exactly the reported symptom, at full Claude cost every time.
+    # ROOT-CAUSE FIX (confirmed via Railway logs: httpx.ReadTimeout → APITimeoutError).
+    # The old non-streaming client used timeout=120s (later 240s). A full NRM2 bill
+    # (max_tokens=16000 against the ~6,500-token SYSTEM_PROMPT, which forces all 41
+    # sections regardless of input) legitimately generates for SEVERAL MINUTES even
+    # for a 3KB PDF — so any short *total-request* timeout trips while Claude is still
+    # producing billable output: tokens burnt, no usable result.
     #
-    # Fix: ONE attempt (max_retries=0 — never silently re-bill an expensive call)
-    # with a generous 240s timeout. 240s comfortably fits the worst-case single
-    # generation yet stays well under the 360s gunicorn worker timeout
-    # (see api/gunicorn.conf.py), guaranteeing Flask can return a proper
-    # CORS-decorated JSON response — success OR a clean 504 — instead of being
-    # killed mid-request. A transient overload now surfaces as a clean error the
-    # user can retry, rather than a hidden triple-charge.
-    client = anthropic.Anthropic(api_key=api_key, timeout=240.0, max_retries=0)
+    # Two-part fix:
+    #   (1) timeout = ANTHROPIC_CLIENT_TIMEOUT_S (600s). Combined with STREAMING below
+    #       this behaves as an INACTIVITY timeout: it only fires if tokens stop
+    #       arriving for 600s, which a healthy generation never does — so the
+    #       wall-clock length of a slow-but-successful bill no longer matters.
+    #   (2) max_retries=0 — never silently re-bill a long, non-idempotent generation.
+    # The gunicorn worker timeout (api/gunicorn.conf.py = GUNICORN_WORKER_TIMEOUT_S,
+    # 660s) sits ABOVE this so the worker is never killed mid-stream; the layers are
+    # logged together at boot as TIMEOUT_BUDGET. 120s/240s were simply far too
+    # aggressive for non-streaming 16k-token output.
+    client = anthropic.Anthropic(api_key=api_key, timeout=float(ANTHROPIC_CLIENT_TIMEOUT_S), max_retries=0)
 
-    app.logger.info("START AI CALL: model=claude-sonnet-4-6 pdf_text_length=%d", len(full_text))
+    app.logger.info(
+        "START AI CALL: model=claude-sonnet-4-6 max_tokens=16000 streaming=true "
+        "timeout=%ss pdf_text_length=%d approx_words=%d",
+        ANTHROPIC_CLIENT_TIMEOUT_S, len(full_text), len(full_text.split()),
+    )
     try:
-        app.logger.info(
-            "Claude structured output call: model=%s max_tokens=%s "
-            "pdf_text_length=%s approximate_word_count=%s",
-            "claude-sonnet-4-6",
-            12000,
-            len(full_text),
-            len(full_text.split()),
-        )
         _t = time.time()
-        response = client.messages.create(         # call the Messages API — a synchronous HTTP POST to the Claude endpoint
-            model="claude-sonnet-4-6",             # the specific Claude model to use
-            max_tokens=16000,                       # maximum tokens Claude may generate; 4096 is enough for a detailed BoQ
-            system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in Anthropic SDK (NOT a {"role":"system"} entry — that is the OpenAI convention)
-            messages=[                             # messages is a list of conversation turns; here just one user turn with no prior history
-                {
-                    "role": "user",                # "user" is the caller/human role — equivalent to UserChatMessage in a C# OpenAI SDK
-                    "content": full_text,          # the extracted PDF text is the entire user message for Claude to analyse
-                }
+        _last_log = _t
+        _chars = 0
+        # STREAM the completion instead of blocking on messages.create(). Two wins:
+        #   • the socket stays continuously active, so the read timeout cannot trip
+        #     while tokens are flowing (the 120s ReadTimeout failure mode is gone);
+        #   • we emit a heartbeat every ~15s so Railway logs PROVE the call is alive
+        #     and show progress, instead of a silent multi-minute gap.
+        # stream.get_final_message() returns the SAME Message shape create() did, so
+        # every downstream step (_extract_claude_text, _log_claude_response, usage
+        # persist, stop_reason checks, json.loads, schema validation) is unchanged.
+        with client.messages.stream(
+            model="claude-sonnet-4-6",
+            max_tokens=16000,
+            system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in the Anthropic SDK (NOT a {"role":"system"} entry — that's the OpenAI convention)
+            messages=[
+                {"role": "user", "content": full_text},   # the extracted PDF text is the entire user turn for Claude to analyse
             ],
-        )
+        ) as stream:
+            for _text in stream.text_stream:       # iterate to drive the stream; _text is each incremental text delta
+                _chars += len(_text)
+                _now = time.time()
+                if _now - _last_log >= 15:          # heartbeat at most every 15s — keeps logs readable
+                    app.logger.info("AI CALL IN PROGRESS: elapsed=%.0fs accumulated_chars=%d", _now - _t, _chars)
+                    _last_log = _now
+            response = stream.get_final_message()   # fully-accumulated Message (same shape as messages.create())
         _ai_call_time = round(time.time() - _t, 1)
         _processing_times.append(_ai_call_time)
         if len(_processing_times) > 200:
             _processing_times.pop(0)
-        app.logger.info("END AI CALL: processing_time_seconds=%s stop_reason=%s", _ai_call_time, getattr(response, "stop_reason", None))
+        app.logger.info("END AI CALL: processing_time_seconds=%s accumulated_chars=%d stop_reason=%s",
+                        _ai_call_time, _chars, getattr(response, "stop_reason", None))
     except anthropic.APIStatusError as exc:
         app.logger.exception("AI CALL FAILED (APIStatusError): status_code=%s message=%s", exc.status_code, exc.message)
         return (*_fail, (jsonify({"error": f"Claude API error {exc.status_code}: {exc.message}"}), 502))
     except anthropic.APITimeoutError as exc:
-        app.logger.exception("AI CALL FAILED (APITimeoutError): %s", str(exc))
-        return (*_fail, (jsonify({"error": "Claude API timed out. The PDF may be too large — please try a shorter document."}), 504))
+        # ACCURATE message: this is a generation-TIME problem, not a file-SIZE problem.
+        # The old text ("the PDF may be too large") was actively misleading — a 3KB PDF
+        # triggers it too, because the system prompt forces a full bill regardless of
+        # input size. Only mention document size when the extracted text really is large.
+        app.logger.exception("AI CALL FAILED (APITimeoutError after %ss inactivity): %s", ANTHROPIC_CLIENT_TIMEOUT_S, str(exc))
+        if len(full_text) > 60000:   # ~15k+ tokens of input genuinely adds latency
+            _to_msg = ("Claude timed out generating the Bill of Quantities. Your document is "
+                       "large, which adds to generation time — try splitting it into smaller "
+                       "sections, or try again in a moment.")
+        else:
+            _to_msg = ("Claude is taking longer than expected to generate the full Bill of "
+                       "Quantities. This is usually due to server load, not file size — "
+                       "please try again in a moment.")
+        return (*_fail, (jsonify({"error": _to_msg}), 504))
     except anthropic.APIConnectionError as exc:
         app.logger.exception("AI CALL FAILED (APIConnectionError): %s", str(exc))
         return (*_fail, (jsonify({"error": f"Could not reach Claude API: {exc}"}), 503))
