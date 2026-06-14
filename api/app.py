@@ -32,8 +32,8 @@ _ai_status = None
 _INFLIGHT_REQUESTS: dict = {}
 
 # ── Timeout budget (ONE place; the three layers must stay strictly ordered) ──────
-# A /process upload is a single long request: a non-streaming completion toward
-# max_tokens=16000 against the ~6,500-token NRM2 SYSTEM_PROMPT routinely takes
+# A /process upload is a single long request: a STREAMING completion toward
+# BOQ_MAX_OUTPUT_TOKENS against the ~6,500-token NRM2 SYSTEM_PROMPT routinely takes
 # SEVERAL MINUTES even for a tiny PDF (the prompt forces a full 41-section bill).
 # The three timeouts below must satisfy  anthropic < frontend < gunicorn  so that
 # whichever limit trips, the browser still receives a clean, CORS-decorated reply:
@@ -44,9 +44,33 @@ _INFLIGHT_REQUESTS: dict = {}
 # These last two are recorded here only so the startup log can surface all three
 # together — a mismatch like the old 120s-anthropic-vs-180s-gunicorn is then
 # obvious in Railway logs at boot instead of being discovered via burnt credits.
-ANTHROPIC_CLIENT_TIMEOUT_S = 600   # 10 min — real headroom for a full 16k-token bill
+ANTHROPIC_CLIENT_TIMEOUT_S = 600   # 10 min — inactivity headroom for a full 32k-token bill
 FRONTEND_ABORT_TIMEOUT_S   = 650   # mirrors VQ_UPLOAD_TIMEOUT_MS in vq-pages.jsx
 GUNICORN_WORKER_TIMEOUT_S  = 660   # mirrors `timeout` in api/gunicorn.conf.py
+
+# ── BoQ output-token budget ──────────────────────────────────────────────────────
+# The model writes the ENTIRE NRM2 bill as one JSON object, and the SYSTEM_PROMPT
+# demands a lot of it: up to 41 work sections, a mandatory trades checklist, a 5.41
+# BWIC section, a risk_schedule and an assumptions_register — and every line item is
+# verbose (description, rate_key, quantity, unit, drawing_ref, dimension_string, cdp,
+# performance_requirement). A full bill routinely blew past the OLD 16,000-token cap,
+# so the stream stopped with stop_reason=="max_tokens" mid-object: the JSON was
+# unparseable, /process 502'd, and the (billed) output was wasted.
+#
+# WHY 32,000 — and pointedly NOT the full ceiling:
+#   • The Sonnet 4.x SYNCHRONOUS Messages API ceiling is 64,000 output tokens, so the
+#     old 16,000 used only ~25% of the available headroom.
+#   • 32,000 roughly DOUBLES the prior headroom while still controlling two real
+#     trade-offs: (a) COST — output tokens bill at the higher per-token rate, so we
+#     do not reserve 64k we rarely need; and (b) LATENCY — more tokens means a longer
+#     stream, and the whole generation must still finish within the timeout budget
+#     ABOVE. Streaming makes ANTHROPIC_CLIENT_TIMEOUT_S an INACTIVITY timeout, so a
+#     longer-but-healthy stream is fine as long as tokens keep flowing — the
+#     "AI CALL IN PROGRESS" heartbeat in _run_boq_pipeline distinguishes a
+#     slow-but-alive stream from a genuinely stuck one in Railway logs.
+#   • Raise toward 64,000 ONLY if truncation still occurs on the very largest real
+#     bills; the salvage path in _run_boq_pipeline now degrades gracefully if it does.
+BOQ_MAX_OUTPUT_TOKENS = 32000
 
 app = Flask(__name__)              # create the Flask app instance; __name__ tells Flask the root path (like WebApplication.CreateBuilder in C#)
 
@@ -610,6 +634,11 @@ SYSTEM_PROMPT = (
     "'Provide installation to achieve specified thermal performance.' "
     "Do not mark ordinary measured building elements as CDP. "
     "Omit cdp and performance_requirement entirely from items that are not CDP.\n"
+    # OUTPUT-BLOAT EVALUATION (point 5 of the truncation fix): performance_requirement
+    # — one of the two heaviest free-text per-item fields — is ALREADY conditional. The
+    # rule above generates it ONLY where cdp=true and explicitly OMITS it (and cdp) from
+    # every non-CDP item, so it is produced only where it adds value. There is no
+    # per-item bloat to cut here; left exactly as-is.
     # ── Tender Query and Assumptions Register ────────────────────────────────
     "- TENDER QUERY AND ASSUMPTIONS RULE: Whenever information is incomplete, "
     "inferred, or excluded, you MUST populate the top-level assumptions_register "
@@ -649,6 +678,24 @@ SYSTEM_PROMPT = (
     "Always include this field. If a quantity is a single dimension with no "
     "calculation (e.g. a single door counted as 1nr), write: '1 nr — single "
     "item'. This field is mandatory for every line item.\n"
+    # ── OUTPUT-BLOAT TODO (point 5, DEFERRED — do not change without QS sign-off) ──
+    # dimension_string is the OTHER heavy free-text per-item field and, unlike
+    # performance_requirement above, it is MANDATORY on every line item. It is the
+    # single biggest lever left for cutting output tokens (and therefore truncation
+    # risk + per-bill cost), but it is also the measurement AUDIT TRAIL.
+    #   SPECIFIC OPPORTUNITY: make dimension_string OPTIONAL for trivial enumerated
+    #   items — those counted as a plain "1 nr" / "n nr" with NO arithmetic to show
+    #   (single door, single fitting). Today the prompt forces the boilerplate string
+    #   "1 nr — single item" onto each of those rows; omitting it would save ~5–8
+    #   output tokens per simple item with zero loss of derivable information, and
+    #   _enrich_boq already setdefault()s dimension_string to '' so downstream
+    #   export/render is unaffected.
+    #   TRADEOFF / WHY DEFERRED: some QS reviewers expect EVERY priced row to carry a
+    #   value in the dimension column for a uniform, defensible audit trail; an empty
+    #   cell on count items is a presentation/compliance judgement call, not a clear
+    #   win. Per the brief we do NOT guess on anything touching NRM2/audit value —
+    #   the BOQ_MAX_OUTPUT_TOKENS=32000 raise + truncation salvage are the safe fix.
+    #   Revisit with a QS to confirm before relaxing the "mandatory" wording above.
 
     # ── Risk schedule ─────────────────────────────────────────────────────────
     "- RISK SCHEDULE RULE: Generate a risk_schedule whenever the project contains "
@@ -841,6 +888,78 @@ def _validate_boq_output(boq_data):
     except ValidationError as exc:
         path = ".".join(str(p) for p in exc.absolute_path) or "<root>"
         raise ValueError(f"{path}: {exc.message}") from exc
+
+
+def _salvage_truncated_boq(raw_text):
+    """Best-effort repair of a JSON BoQ that was cut off at the output-token ceiling.
+
+    When the model hits BOQ_MAX_OUTPUT_TOKENS the stream stops with
+    stop_reason=="max_tokens" PART-WAY through writing the JSON — almost always an
+    unterminated string / half-written final line item at the very end, with every
+    earlier section intact. Rather than throw that paid-for, mostly-complete bill
+    away with a 502, we try to REPAIR it:
+
+      1. Scan the accumulated text once, tracking string-escape state and a stack of
+         every still-open '{' / '['. JSON structure characters inside string values
+         (e.g. a literal '}' in a description) are ignored because we only act when
+         NOT inside a string.
+      2. Remember the index just AFTER the last container that closed CLEANLY while
+         still nested inside the bill (stack non-empty) — that is a safe cut point
+         sitting right after a complete line item or a complete trade section.
+      3. Truncate there (dropping the final incomplete item) and append the closing
+         brackets the stack says are still open, in reverse order.
+      4. json.loads the repaired text.
+
+    Returns the parsed dict on success, or None if it still cannot be parsed (in
+    which case the caller falls back to an accurate 502). The caller re-runs
+    _validate_boq_output on the result, so a structurally invalid salvage is rejected.
+    """
+    if not raw_text or "{" not in raw_text:
+        return None
+
+    in_string = False
+    escape = False
+    stack = []                 # every still-open container, in nesting order
+    safe_cut = None            # index just AFTER the last cleanly-closed nested element
+    safe_stack = None          # the open-container stack to re-close at that cut point
+
+    for i, ch in enumerate(raw_text):
+        if escape:                         # previous char was a backslash inside a string
+            escape = False
+            continue
+        if in_string:
+            if ch == "\\":
+                escape = True              # next char is escaped — don't treat it as a quote
+            elif ch == '"':
+                in_string = False          # closing quote
+            continue
+        if ch == '"':
+            in_string = True               # opening quote
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if not stack:
+                return None                # unbalanced — json.loads would fail anyway
+            stack.pop()
+            # A container just closed outside any string. While we are still nested
+            # inside the outer bill object/array, this is the safest place to cut:
+            # everything up to here parses, and the partial tail can be discarded.
+            if stack:
+                safe_cut = i + 1
+                safe_stack = list(stack)
+
+    if safe_cut is None or not safe_stack:
+        return None                        # nothing closed cleanly inside the bill → unsalvageable
+
+    head = raw_text[:safe_cut]             # ends right after a complete '}' or ']' (no dangling comma)
+    closers = "".join("}" if b == "{" else "]" for b in reversed(safe_stack))
+    repaired = head + closers
+
+    try:
+        parsed = json.loads(repaired)
+    except Exception:
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 # ── Rate-matching helpers ─────────────────────────────────────────────────────────────
 # These run once at module load time — like a static constructor in C#.
@@ -1486,8 +1605,9 @@ def _run_boq_pipeline(user=None):
 
     # ROOT-CAUSE FIX (confirmed via Railway logs: httpx.ReadTimeout → APITimeoutError).
     # The old non-streaming client used timeout=120s (later 240s). A full NRM2 bill
-    # (max_tokens=16000 against the ~6,500-token SYSTEM_PROMPT, which forces all 41
-    # sections regardless of input) legitimately generates for SEVERAL MINUTES even
+    # (max_tokens=BOQ_MAX_OUTPUT_TOKENS against the ~6,500-token SYSTEM_PROMPT, which
+    # forces all 41 sections regardless of input) legitimately generates for
+    # SEVERAL MINUTES even
     # for a 3KB PDF — so any short *total-request* timeout trips while Claude is still
     # producing billable output: tokens burnt, no usable result.
     #
@@ -1504,9 +1624,11 @@ def _run_boq_pipeline(user=None):
     client = anthropic.Anthropic(api_key=api_key, timeout=float(ANTHROPIC_CLIENT_TIMEOUT_S), max_retries=0)
 
     app.logger.info(
-        "START AI CALL: model=claude-sonnet-4-6 max_tokens=16000 streaming=true "
+        # Log value is DERIVED from the constant (was a hardcoded "16000") so the log
+        # can never drift from the real max_tokens sent on the call below.
+        "START AI CALL: model=claude-sonnet-4-6 max_tokens=%d streaming=true "
         "timeout=%ss pdf_text_length=%d approx_words=%d",
-        ANTHROPIC_CLIENT_TIMEOUT_S, len(full_text), len(full_text.split()),
+        BOQ_MAX_OUTPUT_TOKENS, ANTHROPIC_CLIENT_TIMEOUT_S, len(full_text), len(full_text.split()),
     )
     try:
         _t = time.time()
@@ -1522,7 +1644,7 @@ def _run_boq_pipeline(user=None):
         # persist, stop_reason checks, json.loads, schema validation) is unchanged.
         with client.messages.stream(
             model="claude-sonnet-4-6",
-            max_tokens=16000,
+            max_tokens=BOQ_MAX_OUTPUT_TOKENS,      # raised 16000 → 32000 (see BOQ_MAX_OUTPUT_TOKENS): the old cap truncated full NRM2 bills mid-JSON
             system=SYSTEM_PROMPT,                  # system prompt is a top-level kwarg in the Anthropic SDK (NOT a {"role":"system"} entry — that's the OpenAI convention)
             messages=[
                 {"role": "user", "content": full_text},   # the extracted PDF text is the entire user turn for Claude to analyse
@@ -1607,34 +1729,75 @@ def _run_boq_pipeline(user=None):
         app.logger.warning("Failed to persist usage event: %s", _ue)
 
     stop_reason = getattr(response, "stop_reason", None)
+
+    # ── GRACEFUL TRUNCATION RECOVERY (stop_reason == "max_tokens") ───────────────
+    # WHAT WAS WRONG: this used to be an unconditional 502 that DISCARDED a paid-for,
+    # almost-complete bill. WHY IT MATTERS: when the model hits BOQ_MAX_OUTPUT_TOKENS
+    # on a genuinely huge BoQ, the streamed JSON is intact except for an unterminated
+    # array/object at the very end — json.loads would fail, and the user (already
+    # billed for the output) hit a dead end. THE FIX: try to REPAIR the partial JSON
+    # via _salvage_truncated_boq (close open brackets, drop the final incomplete
+    # item); if the salvage is a structurally valid bill, continue with it and flag
+    # it "_truncated" so the frontend can show a NON-BLOCKING caveat instead of an
+    # error. We only fall back to a 502 if the salvage genuinely cannot be parsed.
+    # The partial raw_text is already persisted to usage_events.raw_response just
+    # above (the persist runs BEFORE this check), so the paid output survives either
+    # branch for later recovery.
+    boq_data = None
+    truncated = False
     if stop_reason == "max_tokens":
-        app.logger.error("AI_OUTPUT_TRUNCATED: stop_reason=max_tokens")
-        return (*_fail, (jsonify({"error": "Claude structured output was truncated before completion."}), 502))
-    if stop_reason == "refusal":
+        app.logger.warning("AI_OUTPUT_TRUNCATED: stop_reason=max_tokens raw_text_length=%d — attempting salvage", len(raw_text))
+        _salvaged = _salvage_truncated_boq(raw_text)
+        if _salvaged is not None:
+            try:
+                _validate_boq_output(_salvaged)        # a salvaged bill must STILL pass the schema, even if missing its final sections
+                boq_data = _salvaged
+                truncated = True
+                app.logger.warning(
+                    "AI_OUTPUT_TRUNCATED_SALVAGED: recovered %d trade section(s) from truncated output — flagging partial",
+                    len(boq_data.get("bill_of_quantities", [])) if isinstance(boq_data, dict) else 0,
+                )
+            except Exception as _se:                   # parsed, but not a valid BoQ → treat as unsalvageable
+                app.logger.error("AI_OUTPUT_TRUNCATED_SALVAGE_INVALID: %s", _se)
+        if boq_data is None:
+            # Salvage genuinely failed. Fall back to 502 — but with an ACCURATE message.
+            # NOT the old generic "try a shorter document": the system prompt forces a
+            # full bill regardless of input size, so size is rarely the lever. The paid
+            # partial output is already in usage_events.raw_response for recovery.
+            app.logger.error("AI_OUTPUT_TRUNCATED_UNSALVAGEABLE: returning 502 (partial output persisted for recovery)")
+            return (*_fail, (jsonify({"error": (
+                "This was an unusually large and detailed bill, and Claude reached its "
+                "maximum output length before the Bill of Quantities finished. Please try "
+                "generating it again — large bills occasionally complete on a second pass."
+            )}), 502))
+    elif stop_reason == "refusal":
         app.logger.error("AI_OUTPUT_REFUSED: stop_reason=refusal")
         return (*_fail, (jsonify({"error": "Claude refused to produce the requested structured output."}), 502))
 
-    app.logger.info("START JSON EXTRACTION: raw_text_length=%d", len(raw_text))
-    try:
-        boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
-        app.logger.info("END JSON EXTRACTION: boq_data_keys=%s", list(boq_data.keys()) if isinstance(boq_data, dict) else "not_dict")
-    except json.JSONDecodeError as exc:
-        app.logger.exception("JSON_EXTRACTION_FAILED: JSONDecodeError at line %s col %s: %s. First 500 chars of raw_text: %s", exc.lineno, exc.colno, exc.msg, raw_text[:500])
-        return (*_fail, (jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502))
-    except Exception as exc:
-        app.logger.exception("JSON_EXTRACTION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
-        return (*_fail, (jsonify({"error": f"Failed to parse response: {exc}"}), 502))
+    # Normal (non-truncated) path: parse + validate the COMPLETE JSON. Skipped when the
+    # truncation branch above already produced a validated boq_data via salvage.
+    if boq_data is None:
+        app.logger.info("START JSON EXTRACTION: raw_text_length=%d", len(raw_text))
+        try:
+            boq_data = json.loads(raw_text)            # structured output returns JSON text matching BOQ_OUTPUT_SCHEMA
+            app.logger.info("END JSON EXTRACTION: boq_data_keys=%s", list(boq_data.keys()) if isinstance(boq_data, dict) else "not_dict")
+        except json.JSONDecodeError as exc:
+            app.logger.exception("JSON_EXTRACTION_FAILED: JSONDecodeError at line %s col %s: %s. First 500 chars of raw_text: %s", exc.lineno, exc.colno, exc.msg, raw_text[:500])
+            return (*_fail, (jsonify({"error": f"Claude structured output was not valid JSON: {exc}"}), 502))
+        except Exception as exc:
+            app.logger.exception("JSON_EXTRACTION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
+            return (*_fail, (jsonify({"error": f"Failed to parse response: {exc}"}), 502))
 
-    app.logger.info("START SCHEMA VALIDATION")
-    try:
-        _validate_boq_output(boq_data)
-        app.logger.info("END SCHEMA VALIDATION: validation_passed=true")
-    except ValueError as exc:
-        app.logger.exception("SCHEMA_VALIDATION_FAILED: ValueError: %s", str(exc))
-        return (*_fail, (jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502))
-    except Exception as exc:
-        app.logger.exception("SCHEMA_VALIDATION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
-        return (*_fail, (jsonify({"error": f"Schema validation error: {exc}"}), 502))
+        app.logger.info("START SCHEMA VALIDATION")
+        try:
+            _validate_boq_output(boq_data)
+            app.logger.info("END SCHEMA VALIDATION: validation_passed=true")
+        except ValueError as exc:
+            app.logger.exception("SCHEMA_VALIDATION_FAILED: ValueError: %s", str(exc))
+            return (*_fail, (jsonify({"error": f"Claude structured output failed schema validation: {exc}"}), 502))
+        except Exception as exc:
+            app.logger.exception("SCHEMA_VALIDATION_FAILED: Unexpected exception_type=%s: %s", type(exc).__name__, str(exc))
+            return (*_fail, (jsonify({"error": f"Schema validation error: {exc}"}), 502))
 
     app.logger.info("START RATE ENRICHMENT")
     try:
@@ -1644,7 +1807,18 @@ def _run_boq_pipeline(user=None):
         app.logger.exception("RATE_ENRICHMENT_FAILED: exception_type=%s: %s", type(exc).__name__, str(exc))
         return (*_fail, (jsonify({"error": f"Failed to enrich BoQ with rates: {exc}"}), 502))
 
-    app.logger.info("PIPELINE_SUCCESS: returning_to_process_pdf")
+    if truncated:
+        # NON-BLOCKING truncation flags. Added AFTER validation + enrichment so they
+        # never trip the schema's additionalProperties:False (validation rejects
+        # unknown top-level keys). The frontend reads _truncated to show a caveat
+        # banner while STILL rendering and navigating to the (partial) bill.
+        boq_data["_truncated"] = True
+        boq_data["_truncation_notice"] = (
+            "This bill was very large and may be missing its final sections — "
+            "please review and regenerate if needed."
+        )
+
+    app.logger.info("PIPELINE_SUCCESS: returning_to_process_pdf truncated=%s", truncated)
     return boq_data, pages_text, uploaded_file, None
 
 

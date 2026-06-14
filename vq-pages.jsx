@@ -151,7 +151,9 @@ function LandingPage({ go, tweaks = {}, toast }) {
       {/* hero.mp4?v=2 — cache-bust. GitHub Pages caches static assets hard, so when
           the video file is replaced under the SAME filename, browsers/CDN keep serving
           the old one. Bump ?v=N whenever hero.mp4 changes, and keep N IDENTICAL across
-          all three refs (this <video>, the other <video> below, and the index.html preload). */}
+          BOTH <video> refs (this one and the other <video> below). The invalid
+          index.html <link rel="preload" as="video"> that used to be a third ref was
+          removed — these <video preload="auto"> elements warm the cache on their own. */}
       <div className="cin-video-bg" aria-hidden="true">
         <video
           ref={videoRef}
@@ -703,6 +705,15 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
           {flagCount > 0 && <span className="conf-note">— {flagCount} item{flagCount !== 1 ? 's' : ''} flagged for review</span>}
         </div>
         <p className="res-disclaimer">AI-generated draft — professional review required before issue to client. Edit inline, then export.</p>
+        {boqData && boqData._truncated && (
+          /* Durable caveat when the backend salvaged a bill that hit Claude's
+             output-token ceiling. The (partial) bill still renders in full below —
+             this just tells the QS some final sections may be missing, since the
+             upload toast auto-dismisses after a few seconds and is easy to miss. */
+          <div className="res-truncation-banner" role="status">
+            ⚠ {boqData._truncation_notice || 'This bill was very large and may be missing its final sections — please review and regenerate if needed.'}
+          </div>
+        )}
         <div className="res-controls">
           {demo ? (
             <>
@@ -2053,6 +2064,15 @@ function UploadPage({ go, toast, onBoqReady }) {
       // res.json() parses the JSON response body — like JsonSerializer.Deserialize in C#
       const data = await res.json();
 
+      // The backend now SALVAGES a bill that hit Claude's output-token ceiling rather
+      // than 502-ing: it returns a valid (but possibly partial) BoQ flagged _truncated.
+      // Surface a NON-BLOCKING warning and STILL render/navigate — a partial bill the
+      // QS can review beats a hard failure. A persistent caveat banner also shows on
+      // the results page (ResultsPage reads the same _truncated flag).
+      if (data && data._truncated) {
+        toast(data._truncation_notice || 'This bill was very large and may be missing its final sections — please review and regenerate if needed.', 'warning');
+      }
+
       setProgress(100);           // snap the bar to 100% to signal completion
       setStatus('processing');    // show the "AI reading" message briefly
       onBoqReady(data);           // store the BoQ JSON in App-level state for ResultsPage
@@ -2803,7 +2823,14 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
       setBoqData(data);
       onBoqReady?.(data);
       setUploadStatus('done');
-      toast('BoQ generated.', 'success');
+      // If the backend salvaged a truncated (output-token ceiling) bill, warn instead
+      // of the plain success toast — but STILL switch to the results tab and render the
+      // partial bill (ResultsPage shows a persistent caveat banner via the same flag).
+      if (data && data._truncated) {
+        toast(data._truncation_notice || 'This bill was very large and may be missing its final sections — please review and regenerate if needed.', 'warning');
+      } else {
+        toast('BoQ generated.', 'success');
+      }
       setTab('results');
     } catch (e) {
       // Differentiate abort vs network/CORS vs other, and log the real error.
