@@ -2888,7 +2888,15 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
             <span className="vd-section-title">{project?.name || 'Untitled'}</span>
             {project?.client_name && <span style={{ fontSize:13, color:'var(--c-400)' }}>{project.client_name}</span>}
           </div>
-          <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('projectsettings', { projectId })}>Settings</button>
+          <div style={{ display:'flex', gap:8 }}>
+            {boqData && (
+              <button className="btn btn-outline btn-pill btn-sm"
+                onClick={() => go('review', { projectId })}>
+                Review &amp; Sign-off
+              </button>
+            )}
+            <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('projectsettings', { projectId })}>Settings</button>
+          </div>
         </div>
 
         {/* Tab bar */}
@@ -4792,11 +4800,778 @@ function DemoPage({ go, toast }) {
   );
 }
 
+// ─── REVIEW & SIGN-OFF WORKSPACE ──────────────────────────────────────────────
+function ReviewWorkspacePage({ go, toast, projectId }) {
+  const [project,      setProject]      = React.useState(null);
+  const [boqData,      setBoqData]      = React.useState(null);
+  const [reviewStates, setReviewStates] = React.useState({});
+  const [auditEvents,  setAuditEvents]  = React.useState([]);
+  const [loading,      setLoading]      = React.useState(true);
+
+  const [filter,     setFilter]     = React.useState('all');
+  const [auditOpen,  setAuditOpen]  = React.useState(true);
+  const [editingId,  setEditingId]  = React.useState(null);
+  const [editForm,   setEditForm]   = React.useState({ qty: '', rate: '' });
+  const [rejectId,   setRejectId]   = React.useState(null);
+  const [rejectReason, setRejectReason] = React.useState('');
+  const [showSignoff,  setShowSignoff]  = React.useState(false);
+  const [signoffForm,  setSignoffForm]  = React.useState({ name: '', title: '', declaration: false });
+  const [saving,       setSaving]       = React.useState(false);
+
+  const getToken = async () => {
+    const res = window.VQAuth ? await window.VQAuth.getSession() : null;
+    return res?.data?.session?.access_token || '';
+  };
+
+  // ── Load review workspace ───────────────────────────────────────────────
+  React.useEffect(() => {
+    if (!projectId) { setLoading(false); return; }
+    (async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${VQ_API}/projects/${projectId}/review`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error((await res.json()).error || 'Could not load review data.');
+        const data = await res.json();
+        setProject(data.project);
+        setBoqData(data.boq_data);
+        setReviewStates(data.review_states || {});
+        setAuditEvents(data.audit_events  || []);
+      } catch (e) {
+        toast(e.message, 'error');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [projectId]);
+
+  // Pre-fill sign-off name from auth session when modal opens
+  React.useEffect(() => {
+    if (!showSignoff || signoffForm.name) return;
+    (async () => {
+      try {
+        const sess = window.VQAuth ? await window.VQAuth.getSession() : null;
+        const meta = sess?.data?.session?.user?.user_metadata || {};
+        if (meta.full_name) setSignoffForm(f => ({ ...f, name: meta.full_name }));
+      } catch {}
+    })();
+  }, [showSignoff]);
+
+  // ── Derived: normalise boq groups, keyed items ──────────────────────────
+  const groups = React.useMemo(() => {
+    if (!boqData) return [];
+    const raw = boqData.bill_of_quantities || boqData.trades || (Array.isArray(boqData) ? boqData : []);
+    return raw.map((g, gi) => ({
+      trade: g.trade || g.name || 'General',
+      items: (g.items || g.line_items || []).map((item, ii) => ({
+        ...item,
+        // Use the stable ID the server injected (or derive the same way)
+        _key: item.id || item.item_code || `g${gi}_i${ii}`,
+      })),
+    }));
+  }, [boqData]);
+
+  const getRS = (key) => reviewStates[key] || { state: 'pending' };
+
+  const counts = React.useMemo(() => {
+    const c = { pending: 0, approved: 0, modified: 0, rejected: 0, total: 0 };
+    groups.forEach(g => g.items.forEach(item => {
+      const s = getRS(item._key).state || 'pending';
+      c[s] = (c[s] || 0) + 1;
+      c.total++;
+    }));
+    return c;
+  }, [groups, reviewStates]);
+
+  const grandTotal = React.useMemo(() => {
+    let sum = 0;
+    groups.forEach(g => g.items.forEach(item => {
+      const rs = reviewStates[item._key] || {};
+      if (rs.state === 'rejected') return;
+      const origQty = parseFloat(item.quantity ?? item.qty ?? 0);
+      const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
+                        parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+      const qty  = parseFloat(rs.qty  != null ? rs.qty  : origQty);
+      const rate = parseFloat(rs.rate != null ? rs.rate : origRate);
+      sum += qty * rate;
+    }));
+    return Math.round(sum * 100) / 100;
+  }, [groups, reviewStates]);
+
+  const pctDone = counts.total > 0
+    ? Math.round(((counts.approved + counts.modified) / counts.total) * 100)
+    : 0;
+
+  const signedOff = !!(project?.signed_off_at);
+
+  // ── API mutations ────────────────────────────────────────────────────────
+  const callLine = async (key, action, extra = {}) => {
+    if (signedOff) return;
+    const prevRS = { ...reviewStates };
+    const entry  = action === 'reopen'
+      ? { state: 'pending' }
+      : action === 'approve'
+        ? { state: 'approved' }
+        : action === 'reject'
+          ? { state: 'rejected', reason: extra.reason || '' }
+          : { state: 'modified',
+              ...(extra.qty  != null ? { qty:  extra.qty  } : {}),
+              ...(extra.rate != null ? { rate: extra.rate } : {}) };
+    setReviewStates(rs => ({ ...rs, [key]: entry }));
+    try {
+      const token = await getToken();
+      const res = await fetch(
+        `${VQ_API}/projects/${projectId}/review/line/${encodeURIComponent(key)}`,
+        {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body:    JSON.stringify({ action, ...extra }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Update failed.');
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+    } catch (e) {
+      setReviewStates(prevRS);
+      toast(e.message, 'error');
+    }
+  };
+
+  const callSection = async (tradeName) => {
+    if (signedOff) return;
+    const sec = groups.find(g => g.trade === tradeName);
+    if (!sec) return;
+    const prevRS = { ...reviewStates };
+    const updates = {};
+    sec.items.forEach(item => {
+      if ((reviewStates[item._key] || {}).state !== 'pending') return;
+      updates[item._key] = { state: 'approved' };
+    });
+    if (!Object.keys(updates).length) return;
+    setReviewStates(rs => ({ ...rs, ...updates }));
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/review/section`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ section: tradeName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Section approve failed.');
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+    } catch (e) {
+      setReviewStates(prevRS);
+      toast(e.message, 'error');
+    }
+  };
+
+  const handleSignoff = async () => {
+    if (!signoffForm.name.trim())  { toast('Full name is required.',                'error'); return; }
+    if (!signoffForm.title.trim()) { toast('Qualification / title is required.',    'error'); return; }
+    if (!signoffForm.declaration)  { toast('Please confirm the declaration first.', 'error'); return; }
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/signoff`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ name: signoffForm.name.trim(), title: signoffForm.title.trim(), declaration: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sign-off failed.');
+      setProject(p => ({
+        ...p,
+        signed_off_at:  data.signed_off_at,
+        signed_off_by:  data.signed_off_by,
+        signoff_title:  data.signoff_title,
+        signoff_hash:   data.signoff_hash,
+      }));
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      setShowSignoff(false);
+      toast('Bill signed off successfully.', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRevoke = async () => {
+    setSaving(true);
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/signoff`, {
+        method:  'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Revoke failed.');
+      setProject(p => ({
+        ...p,
+        signed_off_at: null, signed_off_by: null,
+        signoff_title: null, signoff_hash:  null,
+      }));
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      toast('Sign-off revoked.', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Review state display config ──────────────────────────────────────────
+  const RS_STYLE = {
+    pending:  { color: 'var(--c-400)',  label: 'Pending'  },
+    approved: { color: '#10B981',       label: 'Approved' },
+    modified: { color: 'var(--amber)',  label: 'Modified' },
+    rejected: { color: '#EF4444',       label: 'Rejected' },
+  };
+
+  // ── Loading / no-bill states ────────────────────────────────────────────
+  if (loading) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <p style={{ color:'var(--c-400)' }}>Loading review workspace…</p>
+      </div>
+    </div>
+  );
+
+  if (!projectId || !boqData) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
+        <p style={{ color:'var(--c-400)' }}>
+          {projectId ? 'No Bill of Quantities generated for this project yet.' : 'No project selected.'}
+        </p>
+        <button className="btn btn-amber btn-pill" onClick={() => go('projects')}>Go to Projects</button>
+      </div>
+    </div>
+  );
+
+  // ── Main render ─────────────────────────────────────────────────────────
+  return (
+    <div className="vd-root">
+      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', flexDirection:'column', overflow:'hidden', height:'100vh' }}>
+
+        {/* ── Topbar ── */}
+        <div className="vd-topbar" style={{ justifyContent:'space-between', flexShrink:0 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+            <span className="vd-link" onClick={() => go('workspace', { projectId })}>
+              ← {project?.name || 'Project'}
+            </span>
+            <span style={{ color:'var(--c-300)' }}>/</span>
+            <span className="vd-section-title">Review &amp; Sign-off</span>
+            {project?.client_name && (
+              <span style={{ fontSize:13, color:'var(--c-400)' }}>{project.client_name}</span>
+            )}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            {signedOff
+              ? <button className="btn btn-outline btn-pill btn-sm" onClick={handleRevoke} disabled={saving}>
+                  {saving ? 'Revoking…' : 'Revoke sign-off'}
+                </button>
+              : <button className="btn btn-amber btn-pill btn-sm"
+                  onClick={() => setShowSignoff(true)}
+                  disabled={counts.total === 0}>
+                  Sign off bill
+                </button>
+            }
+          </div>
+        </div>
+
+        {/* ── AI caveat strip ── */}
+        <div style={{
+          background:'rgba(215,117,85,0.1)', borderBottom:'1px solid rgba(215,117,85,0.22)',
+          padding:'8px 24px', fontSize:12, color:'var(--c-300)', flexShrink:0,
+          display:'flex', alignItems:'center', gap:8,
+        }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--amber)"
+               strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink:0 }}>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          AI-generated measurement draft — every line requires professional review and sign-off before issue for tender or contract.
+        </div>
+
+        {/* ── Sign-off success banner ── */}
+        {signedOff && (
+          <div style={{
+            background:'rgba(16,185,129,0.08)', borderBottom:'1px solid rgba(16,185,129,0.22)',
+            padding:'10px 24px', flexShrink:0,
+            display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:8,
+          }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#10B981"
+                   strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span style={{ fontWeight:600, color:'#10B981', fontSize:13 }}>
+                Signed off by {project.signed_off_by}
+                {project.signoff_title ? ` (${project.signoff_title})` : ''} on{' '}
+                {new Date(project.signed_off_at).toLocaleDateString('en-GB',
+                  { day:'numeric', month:'long', year:'numeric' })}
+              </span>
+            </div>
+            <span style={{ fontFamily:'monospace', fontSize:10, color:'var(--c-400)', userSelect:'all' }}>
+              {(project.signoff_hash || '').slice(0, 16)}…
+            </span>
+          </div>
+        )}
+
+        {/* ── Progress header ── */}
+        <div style={{
+          padding:'14px 24px', borderBottom:'1px solid rgba(255,255,255,0.08)',
+          flexShrink:0, display:'flex', alignItems:'center', gap:16, flexWrap:'wrap',
+        }}>
+          {/* Progress bar */}
+          <div style={{ flex:1, minWidth:180 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', marginBottom:4 }}>
+              <span style={{ fontSize:12, color:'var(--c-400)' }}>
+                {counts.approved + counts.modified} of {counts.total} lines reviewed
+              </span>
+              <span style={{ fontSize:12, fontWeight:700,
+                color: pctDone === 100 ? '#10B981' : 'var(--c-400)' }}>
+                {pctDone}%
+              </span>
+            </div>
+            <div style={{ height:4, background:'rgba(255,255,255,0.08)', borderRadius:2, overflow:'hidden' }}>
+              <div style={{
+                height:'100%', width:`${pctDone}%`, borderRadius:2, transition:'width 0.3s ease',
+                background: pctDone === 100 ? '#10B981' : 'var(--amber)',
+              }} />
+            </div>
+          </div>
+
+          {/* Filter chips */}
+          <div style={{ display:'flex', gap:5, flexWrap:'wrap', flexShrink:0 }}>
+            {[
+              { k:'all',      label:`All (${counts.total})`,           c:'var(--c-300)' },
+              { k:'pending',  label:`Pending (${counts.pending})`,     c:'var(--c-400)' },
+              { k:'modified', label:`Modified (${counts.modified})`,   c:'var(--amber)' },
+              { k:'rejected', label:`Rejected (${counts.rejected})`,   c:'#EF4444'      },
+            ].map(chip => (
+              <button key={chip.k} onClick={() => setFilter(chip.k)} style={{
+                fontSize:11.5, padding:'3px 11px', borderRadius:999, cursor:'pointer',
+                background: filter === chip.k ? 'rgba(255,255,255,0.1)' : 'transparent',
+                border:     filter === chip.k ? '1px solid rgba(255,255,255,0.2)' : '1px solid transparent',
+                color: chip.c, transition:'background 0.15s, border-color 0.15s',
+              }}>{chip.label}</button>
+            ))}
+          </div>
+
+          {/* Effective grand total */}
+          <div style={{ flexShrink:0, fontSize:13 }}>
+            <span style={{ color:'var(--c-400)' }}>Effective total: </span>
+            <span style={{ fontWeight:700, color:'rgba(255,255,255,0.85)' }}>{vqMoney(grandTotal)}</span>
+          </div>
+
+          <button onClick={() => setAuditOpen(o => !o)} style={{
+            background:'none', border:'1px solid rgba(255,255,255,0.1)', borderRadius:6,
+            cursor:'pointer', color:'var(--c-400)', fontSize:11.5, padding:'4px 10px', flexShrink:0,
+          }}>
+            {auditOpen ? 'Hide audit ›' : '‹ Show audit'}
+          </button>
+        </div>
+
+        {/* ── Main content ── */}
+        <div style={{ flex:1, display:'flex', overflow:'hidden' }}>
+
+          {/* BoQ review table */}
+          <div style={{ flex:1, overflowY:'auto', padding:'24px 24px 64px' }}>
+            {groups.map(section => {
+              const visItems = filter === 'all'
+                ? section.items
+                : section.items.filter(item => getRS(item._key).state === filter);
+              if (visItems.length === 0 && filter !== 'all') return null;
+
+              const pendingCt = section.items.filter(
+                item => getRS(item._key).state === 'pending'
+              ).length;
+
+              const secTotal = section.items.reduce((acc, item) => {
+                const rs = reviewStates[item._key] || {};
+                if (rs.state === 'rejected') return acc;
+                const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
+                                  parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+                const qty  = parseFloat(rs.qty  != null ? rs.qty  : (item.quantity ?? item.qty ?? 0));
+                const rate = parseFloat(rs.rate != null ? rs.rate : origRate);
+                return acc + qty * rate;
+              }, 0);
+
+              return (
+                <div key={section.trade} style={{ marginBottom:32 }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                    <span style={{ fontWeight:700, fontSize:13.5, color:'rgba(255,255,255,0.85)' }}>
+                      {section.trade}
+                    </span>
+                    {!signedOff && pendingCt > 0 && (
+                      <button className="btn btn-outline btn-pill btn-sm"
+                        onClick={() => callSection(section.trade)}>
+                        Approve section ({pendingCt} pending)
+                      </button>
+                    )}
+                  </div>
+
+                  <table className="rboq" style={{ width:'100%' }}>
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th className="r">Qty</th>
+                        <th className="r">Unit</th>
+                        <th className="r">Rate</th>
+                        <th className="r">Line total</th>
+                        <th style={{ width:86, textAlign:'center' }}>Status</th>
+                        {!signedOff && <th style={{ width:148 }}></th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(filter === 'all' ? section.items : visItems).map((item, idx) => {
+                        const rs        = reviewStates[item._key] || { state:'pending' };
+                        const st        = RS_STYLE[rs.state] || RS_STYLE.pending;
+                        const isEditing   = editingId  === item._key;
+                        const isRejecting = rejectId   === item._key;
+
+                        const origQty  = parseFloat(item.quantity ?? item.qty ?? 0);
+                        const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
+                                          parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+                        const effQty   = parseFloat(rs.qty  != null ? rs.qty  : origQty);
+                        const effRate  = parseFloat(rs.rate != null ? rs.rate : origRate);
+                        const effTotal = rs.state === 'rejected' ? 0 : Math.round(effQty * effRate * 100) / 100;
+
+                        const rowBg = rs.state === 'approved' ? 'rgba(16,185,129,0.05)'
+                                    : rs.state === 'modified' ? 'rgba(215,117,85,0.07)'
+                                    : rs.state === 'rejected' ? 'rgba(239,68,68,0.05)'
+                                    : idx % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent';
+
+                        return (
+                          <React.Fragment key={item._key}>
+                            <tr className="rboq-item" style={{
+                              background: rowBg,
+                              opacity: rs.state === 'rejected' ? 0.6 : 1,
+                            }}>
+                              <td>
+                                <div>{item.description || item.desc || '—'}</div>
+                                {rs.state === 'rejected' && rs.reason && (
+                                  <div style={{ fontSize:11, color:'#EF4444', marginTop:2 }}>
+                                    Rejected: {rs.reason}
+                                  </div>
+                                )}
+                                {rs.state === 'modified' && (rs.qty != null || rs.rate != null) && (
+                                  <div style={{ fontSize:11, color:'var(--c-400)', marginTop:2 }}>
+                                    AI: {origQty}{item.unit ? ` ${item.unit}` : ''} @ {vqMoney(origRate)}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="r">
+                                {rs.state === 'modified' && rs.qty != null
+                                  ? <span style={{ color:'var(--amber)' }}>{effQty}</span>
+                                  : origQty}
+                              </td>
+                              <td className="r">{item.unit || '—'}</td>
+                              <td className="r">
+                                {rs.state === 'modified' && rs.rate != null
+                                  ? <span style={{ color:'var(--amber)' }}>{vqMoney(effRate)}</span>
+                                  : vqMoney(origRate)}
+                              </td>
+                              <td className="r" style={{ fontWeight:600 }}>
+                                {rs.state === 'rejected'
+                                  ? <span style={{ color:'#EF4444', textDecoration:'line-through' }}>
+                                      {vqMoney(origQty * origRate)}
+                                    </span>
+                                  : vqMoney(effTotal)}
+                              </td>
+                              <td style={{ textAlign:'center' }}>
+                                <span style={{
+                                  fontSize:10.5, fontWeight:700, padding:'2px 8px', borderRadius:999,
+                                  border:`1px solid ${st.color}`, color: st.color,
+                                }}>
+                                  {st.label}
+                                </span>
+                              </td>
+                              {!signedOff && (
+                                <td style={{ textAlign:'right', whiteSpace:'nowrap' }}>
+                                  {rs.state === 'pending' && !isEditing && !isRejecting && (
+                                    <div style={{ display:'flex', gap:3, justifyContent:'flex-end' }}>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'#10B981' }}
+                                        onClick={() => callLine(item._key, 'approve')}>✓</button>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--amber)' }}
+                                        onClick={() => {
+                                          setEditingId(item._key);
+                                          setEditForm({ qty: String(origQty), rate: String(origRate) });
+                                        }}>Edit</button>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'#EF4444' }}
+                                        onClick={() => { setRejectId(item._key); setRejectReason(''); }}>Reject</button>
+                                    </div>
+                                  )}
+                                  {(rs.state === 'approved' || rs.state === 'modified') && (
+                                    <div style={{ display:'flex', gap:3, justifyContent:'flex-end' }}>
+                                      {rs.state === 'modified' && (
+                                        <button className="btn btn-ghost btn-sm"
+                                          style={{ fontSize:11, padding:'3px 7px', color:'var(--amber)' }}
+                                          onClick={() => {
+                                            setEditingId(item._key);
+                                            setEditForm({ qty: String(effQty), rate: String(effRate) });
+                                          }}>Edit</button>
+                                      )}
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--c-400)' }}
+                                        onClick={() => callLine(item._key, 'reopen')}>Reopen</button>
+                                    </div>
+                                  )}
+                                  {rs.state === 'rejected' && (
+                                    <button className="btn btn-ghost btn-sm"
+                                      style={{ fontSize:11, padding:'3px 7px', color:'var(--c-400)' }}
+                                      onClick={() => callLine(item._key, 'reopen')}>Reopen</button>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+
+                            {/* Inline quantity / rate edit */}
+                            {isEditing && (
+                              <tr style={{ background:'rgba(215,117,85,0.07)' }}>
+                                <td colSpan={signedOff ? 6 : 7} style={{ padding:'12px 16px' }}>
+                                  <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
+                                    <div className="fld" style={{ marginBottom:0 }}>
+                                      <label className="flbl" style={{ fontSize:11 }}>Quantity</label>
+                                      <input className="finp" type="number" min="0" step="any"
+                                        style={{ width:100, fontSize:13 }}
+                                        value={editForm.qty}
+                                        onChange={e => setEditForm(f => ({ ...f, qty: e.target.value }))} />
+                                    </div>
+                                    <div className="fld" style={{ marginBottom:0 }}>
+                                      <label className="flbl" style={{ fontSize:11 }}>Unit rate (£)</label>
+                                      <input className="finp" type="number" min="0" step="0.01"
+                                        style={{ width:120, fontSize:13 }}
+                                        value={editForm.rate}
+                                        onChange={e => setEditForm(f => ({ ...f, rate: e.target.value }))} />
+                                    </div>
+                                    <div style={{ fontSize:12, color:'var(--c-400)', paddingBottom:4 }}>
+                                      → {vqMoney(Math.round(parseFloat(editForm.qty  || 0) *
+                                                              parseFloat(editForm.rate || 0) * 100) / 100)}
+                                    </div>
+                                    <div style={{ display:'flex', gap:8, marginLeft:'auto' }}>
+                                      <button className="btn btn-amber btn-pill btn-sm"
+                                        onClick={() => {
+                                          const qty  = parseFloat(editForm.qty);
+                                          const rate = parseFloat(editForm.rate);
+                                          if (!isFinite(qty) || !isFinite(rate) || qty < 0 || rate < 0) {
+                                            toast('Enter a valid quantity and rate.', 'error'); return;
+                                          }
+                                          callLine(item._key, 'modify', { qty, rate });
+                                          setEditingId(null);
+                                        }}>Save</button>
+                                      <button className="btn btn-outline btn-pill btn-sm"
+                                        onClick={() => setEditingId(null)}>Cancel</button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+
+                            {/* Inline reject reason */}
+                            {isRejecting && (
+                              <tr style={{ background:'rgba(239,68,68,0.06)' }}>
+                                <td colSpan={signedOff ? 6 : 7} style={{ padding:'12px 16px' }}>
+                                  <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
+                                    <div className="fld" style={{ marginBottom:0, flex:1 }}>
+                                      <label className="flbl" style={{ fontSize:11 }}>
+                                        Reason for rejection <span style={{ color:'#EF4444' }}>*</span>
+                                      </label>
+                                      <input className="finp" style={{ fontSize:13 }}
+                                        placeholder="e.g. Included in contractor's preliminaries"
+                                        value={rejectReason}
+                                        onChange={e => setRejectReason(e.target.value)}
+                                        onKeyDown={e => {
+                                          if (e.key === 'Enter' && rejectReason.trim()) {
+                                            callLine(item._key, 'reject', { reason: rejectReason.trim() });
+                                            setRejectId(null); setRejectReason('');
+                                          }
+                                        }}
+                                        autoFocus />
+                                    </div>
+                                    <div style={{ display:'flex', gap:8 }}>
+                                      <button
+                                        style={{
+                                          background:'#EF4444', color:'white', border:'none',
+                                          borderRadius:999, padding:'8px 16px', fontSize:12,
+                                          cursor: rejectReason.trim() ? 'pointer' : 'not-allowed',
+                                          opacity: rejectReason.trim() ? 1 : 0.5,
+                                        }}
+                                        disabled={!rejectReason.trim()}
+                                        onClick={() => {
+                                          callLine(item._key, 'reject', { reason: rejectReason.trim() });
+                                          setRejectId(null); setRejectReason('');
+                                        }}>Reject</button>
+                                      <button className="btn btn-outline btn-pill btn-sm"
+                                        onClick={() => { setRejectId(null); setRejectReason(''); }}>Cancel</button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+
+                      {/* Section subtotal */}
+                      <tr className="rboq-sub">
+                        <td colSpan={4} style={{ textAlign:'right' }}>Subtotal — {section.trade}</td>
+                        <td className="r">{vqMoney(Math.round(secTotal * 100) / 100)}</td>
+                        <td colSpan={signedOff ? 1 : 2}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+
+            {/* Grand total */}
+            {groups.length > 0 && (
+              <table className="rboq" style={{ width:'100%' }}>
+                <tbody>
+                  <tr className="rboq-total">
+                    <td colSpan={4} style={{ textAlign:'right' }}>Grand Total (ex. VAT)</td>
+                    <td className="r">{vqMoney(grandTotal)}</td>
+                    <td colSpan={signedOff ? 1 : 2}></td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Audit trail rail */}
+          {auditOpen && (
+            <div style={{
+              width:272, flexShrink:0, borderLeft:'1px solid rgba(255,255,255,0.07)',
+              overflowY:'auto', padding:'16px',
+              background:'rgba(0,0,0,0.1)',
+            }}>
+              <p style={{ fontSize:11, fontWeight:700, color:'var(--c-400)', textTransform:'uppercase',
+                letterSpacing:'0.07em', marginBottom:14 }}>Audit Trail</p>
+              {auditEvents.length === 0
+                ? <p style={{ fontSize:12, color:'var(--c-400)', textAlign:'center', marginTop:32 }}>
+                    No actions recorded yet.
+                  </p>
+                : <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                    {auditEvents.map(ev => (
+                      <div key={ev.id} style={{
+                        padding:'9px 11px', borderRadius:8,
+                        background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.06)',
+                      }}>
+                        <div style={{ display:'flex', justifyContent:'space-between',
+                          alignItems:'flex-start', gap:4, marginBottom:2 }}>
+                          <span style={{ fontSize:11.5, fontWeight:600, color:'rgba(255,255,255,0.78)' }}>
+                            {(ev.action || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                          </span>
+                          <span style={{ fontSize:10, color:'var(--c-400)', flexShrink:0 }}>
+                            {vqTimeAgo(ev.created_at)}
+                          </span>
+                        </div>
+                        {ev.section && (
+                          <div style={{ fontSize:11, color:'var(--c-400)', marginTop:2 }}>
+                            {ev.section}
+                          </div>
+                        )}
+                        {ev.reason && (
+                          <div style={{ fontSize:11, color:'#EF4444', marginTop:2 }}>
+                            {ev.reason}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+              }
+            </div>
+          )}
+        </div>
+
+        {/* ── Sign-off modal ── */}
+        {showSignoff && (
+          <div style={{
+            position:'fixed', inset:0, background:'rgba(0,0,0,0.65)', zIndex:200,
+            display:'flex', alignItems:'center', justifyContent:'center', padding:24,
+          }}
+            onClick={e => { if (e.target === e.currentTarget && !saving) setShowSignoff(false); }}>
+            <div style={{
+              background:'var(--c-50)', border:'1px solid rgba(255,255,255,0.1)',
+              borderRadius:16, padding:32, maxWidth:480, width:'100%',
+            }}>
+              <h2 style={{ fontFamily:'var(--font-d)', fontSize:20, color:'rgba(255,255,255,0.92)', marginBottom:6 }}>
+                Sign off Bill of Quantities
+              </h2>
+              <p style={{ fontSize:13, color:'var(--c-400)', marginBottom:24, lineHeight:1.65 }}>
+                By signing off you confirm that you have reviewed this bill and accept professional
+                responsibility for its content.
+              </p>
+
+              {counts.pending > 0 && (
+                <div style={{
+                  background:'rgba(215,117,85,0.1)', border:'1px solid rgba(215,117,85,0.25)',
+                  borderRadius:8, padding:'9px 14px', marginBottom:20,
+                  fontSize:12, color:'var(--amber)',
+                }}>
+                  {counts.pending} line{counts.pending !== 1 ? 's are' : ' is'} still pending review.
+                </div>
+              )}
+
+              <div className="fld" style={{ marginBottom:16 }}>
+                <label className="flbl">
+                  Full name <span style={{ color:'var(--amber)' }}>*</span>
+                </label>
+                <input className="finp" value={signoffForm.name}
+                  onChange={e => setSignoffForm(f => ({ ...f, name: e.target.value }))}
+                  placeholder="e.g. James Henderson" autoFocus />
+              </div>
+
+              <div className="fld" style={{ marginBottom:20 }}>
+                <label className="flbl">
+                  Qualification / title <span style={{ color:'var(--amber)' }}>*</span>
+                </label>
+                <input className="finp" value={signoffForm.title}
+                  onChange={e => setSignoffForm(f => ({ ...f, title: e.target.value }))}
+                  placeholder="e.g. MRICS, FRICS, AssocRICS" />
+              </div>
+
+              <label style={{ display:'flex', gap:10, cursor:'pointer', marginBottom:24, userSelect:'none' }}>
+                <input type="checkbox" checked={signoffForm.declaration}
+                  onChange={e => setSignoffForm(f => ({ ...f, declaration: e.target.checked }))} />
+                <span style={{ fontSize:13, color:'var(--c-300)', lineHeight:1.65 }}>
+                  I confirm that I have reviewed every line in this Bill of Quantities, that the quantities
+                  and rates are correct to the best of my professional knowledge, and that I accept
+                  professional responsibility for the content of this bill.
+                </span>
+              </label>
+
+              <div style={{ display:'flex', gap:12 }}>
+                <button className="btn btn-amber btn-pill" style={{ flex:1 }}
+                  onClick={handleSignoff} disabled={saving}>
+                  {saving ? 'Signing off…' : 'Sign off bill'}
+                </button>
+                <button className="btn btn-outline btn-pill"
+                  onClick={() => setShowSignoff(false)} disabled={saving}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
 Object.assign(window, {
   LandingPage, ResultsPage, DashboardPage, UploadPage, SettingsPage,
   ProjectSetupPage, ProjectWorkspacePage, ProjectSettingsPage,
   ProjectsPage, ReportsPage, ExportsPage, HistoryPage,
   SignUpPage, SignInPage, PricingPage,
   ForgotPasswordPage, CheckEmailPage, ResetPasswordPage,
-  DemoPage, MeasurementHubPage,
+  DemoPage, MeasurementHubPage, ReviewWorkspacePage,
 });

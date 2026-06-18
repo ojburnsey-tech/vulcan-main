@@ -279,7 +279,7 @@ _PROJECT_EXTRA_FIELDS = {"client_name", "contract_type", "location_factor",
 # Statuses the app understands — kept in sync with the projects_status_check
 # constraint in supabase_schema.sql. Anything else is dropped so the column
 # default decides, rather than letting an unknown value hit the constraint.
-_PROJECT_STATUSES = {"draft", "processing", "completed", "archived"}
+_PROJECT_STATUSES = {"draft", "processing", "completed", "archived", "in_review", "signed_off"}
 
 
 def _insert_project(db, user_id, name, page_count, estimated_value, boq_data, status, extra=None):
@@ -1702,6 +1702,516 @@ Be concise and professional. Give specific figures from the BoQ where relevant.
         pass
 
     return jsonify({"reply": assistant_reply}), 200
+
+
+# ── QS Review & Sign-off workspace ──────────────────────────────────────────
+
+
+def _append_audit_event(project_id: str, user_id: str, action: str, **kwargs) -> None:
+    """Append one row to boq_audit_events.  Best-effort — never raises.
+
+    Called after every review action so the audit trail stays consistent even
+    when the table doesn't exist yet (pre-migration databases): the except block
+    logs a WARNING but lets the main response succeed.
+    """
+    try:
+        row = {"project_id": project_id, "user_id": user_id, "action": action}
+        for key, val in kwargs.items():
+            if val is not None:
+                row[key] = val
+        result = _db_client().table("boq_audit_events").insert(row).execute()
+        rows = getattr(result, "data", None) or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        app.logger.warning("_append_audit_event failed (non-fatal): %s", exc)
+        return None
+
+
+def _assign_item_ids(boq_data: dict) -> dict:
+    """Return a deep copy of boq_data with a stable 'id' field on every item.
+
+    The synthetic key  g{group_index}_i{item_index}  is only assigned when
+    the item carries no existing 'id' or 'item_code'.  Both the API and the
+    frontend apply this same derivation so review_states keys always match.
+    """
+    import copy
+    data = copy.deepcopy(boq_data)
+    groups = data.get("bill_of_quantities") or data.get("trades") or (data if isinstance(data, list) else [])
+    for gi, group in enumerate(groups):
+        if not isinstance(group, dict):
+            continue
+        items = group.get("items") or group.get("line_items") or []
+        for ii, item in enumerate(items):
+            if isinstance(item, dict) and not item.get("id"):
+                item["id"] = item.get("item_code") or f"g{gi}_i{ii}"
+    return data
+
+
+def _effective_line_total(item: dict, rs: dict) -> float:
+    """Compute the line total after applying review overrides.
+
+    When a QS modifies a line, rs carries 'qty' and/or 'rate' overrides.
+    Falls back to the item's enriched values so the formula is always:
+        effective_qty × effective_rate
+    which mirrors the _enrich_boq() convention (rate = sum of component rates).
+    """
+    qty = float(rs.get("qty") if rs.get("qty") is not None else
+                (item.get("quantity") or item.get("qty") or 0))
+    base_rate = (
+        float(item.get("material_rate")      or 0) +
+        float(item.get("labour_rate")        or 0) +
+        float(item.get("plant_rate")         or 0) +
+        float(item.get("waste_disposal_rate") or 0)
+    )
+    rate = float(rs.get("rate") if rs.get("rate") is not None else base_rate)
+    return round(qty * rate, 2)
+
+
+def _review_counts(boq_data: dict, review_states: dict) -> dict:
+    """Count items per review state across the full bill."""
+    counts: dict = {"pending": 0, "approved": 0, "modified": 0, "rejected": 0, "total": 0}
+    groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
+    for gi, group in enumerate(groups):
+        if not isinstance(group, dict):
+            continue
+        for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
+            if not isinstance(item, dict):
+                continue
+            key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
+            state = (review_states.get(key) or {}).get("state", "pending")
+            counts[state] = counts.get(state, 0) + 1
+            counts["total"] += 1
+    return counts
+
+
+def _review_grand_total(boq_data: dict, review_states: dict) -> float:
+    """Grand total with review overrides applied; rejected lines contribute £0."""
+    total = 0.0
+    groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
+    for gi, group in enumerate(groups):
+        if not isinstance(group, dict):
+            continue
+        for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
+            if not isinstance(item, dict):
+                continue
+            key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
+            rs = review_states.get(key) or {}
+            if rs.get("state") == "rejected":
+                continue
+            total += _effective_line_total(item, rs)
+    return round(total, 2)
+
+
+def _signoff_hash(boq_data: dict, review_states: dict) -> str:
+    """Compute a SHA-256 fingerprint of the effective reviewed bill.
+
+    The hash is computed over the canonical effective line data (trade, desc,
+    effective qty, effective rate, state) serialised as sorted-key JSON so the
+    same bill always produces the same hash regardless of dict ordering.
+    Rejected lines are excluded — they don't appear in the signed bill.
+    """
+    import hashlib
+    lines = []
+    groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
+    for gi, group in enumerate(groups):
+        if not isinstance(group, dict):
+            continue
+        trade = group.get("trade") or group.get("name") or "General"
+        for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
+            if not isinstance(item, dict):
+                continue
+            key   = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
+            rs    = review_states.get(key) or {}
+            state = rs.get("state", "pending")
+            if state == "rejected":
+                continue
+            base_rate = (
+                float(item.get("material_rate")      or 0) +
+                float(item.get("labour_rate")        or 0) +
+                float(item.get("plant_rate")         or 0) +
+                float(item.get("waste_disposal_rate") or 0)
+            )
+            lines.append({
+                "trade": trade,
+                "desc":  item.get("description") or item.get("desc") or "",
+                "qty":   float(rs["qty"])  if rs.get("qty")  is not None else float(item.get("quantity") or item.get("qty") or 0),
+                "unit":  item.get("unit") or "",
+                "rate":  float(rs["rate"]) if rs.get("rate") is not None else base_rate,
+                "state": state,
+            })
+    canonical = json.dumps(lines, sort_keys=True, ensure_ascii=True)
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _fetch_review_project(project_id: str, user_id: str):
+    """Fetch the project row for review endpoints; returns (row, error_response)."""
+    try:
+        res = (
+            _db_client()
+            .table("projects")
+            .select(
+                "id, name, client_name, status, boq_data, review_states, "
+                "signed_off_at, signed_off_by, signoff_title, signoff_hash"
+            )
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(res, "data", None) or []
+        if not rows:
+            return None, (jsonify({"error": "Project not found."}), 404)
+        return rows[0], None
+    except Exception as exc:
+        return None, (jsonify({"error": f"Database error: {exc}"}), 500)
+
+
+@app.route("/projects/<project_id>/review", methods=["GET"])
+def review_get(project_id):
+    """Return the full review workspace payload for a project.
+
+    Response shape:
+    {
+      "project":      { id, name, client_name, status, signed_off_at, ... },
+      "boq_data":     { ... },   // with stable 'id' injected on every item
+      "review_states": { item_id: {state, qty?, rate?, reason?}, ... },
+      "audit_events": [ ... ]    // newest first, up to 100 rows
+    }
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    boq_data = project.get("boq_data")
+    if not boq_data:
+        return jsonify({"error": "No Bill of Quantities has been generated for this project yet."}), 422
+
+    boq_with_ids = _assign_item_ids(boq_data)
+
+    # Audit trail — newest first, limit 100
+    audit_events: list = []
+    try:
+        ae_res = (
+            _db_client()
+            .table("boq_audit_events")
+            .select("id, action, item_id, section, prev_state, new_state, reason, created_at")
+            .eq("project_id", project_id)
+            .order("created_at", desc=True)
+            .limit(100)
+            .execute()
+        )
+        audit_events = getattr(ae_res, "data", None) or []
+    except Exception as exc:
+        app.logger.warning("Could not load audit events for project %s: %s", project_id, exc)
+
+    return jsonify({
+        "project": {
+            "id":           project["id"],
+            "name":         project.get("name") or "",
+            "client_name":  project.get("client_name") or "",
+            "status":       project.get("status") or "draft",
+            "signed_off_at":   project.get("signed_off_at"),
+            "signed_off_by":   project.get("signed_off_by"),
+            "signoff_title":   project.get("signoff_title"),
+            "signoff_hash":    project.get("signoff_hash"),
+        },
+        "boq_data":     boq_with_ids,
+        "review_states": project.get("review_states") or {},
+        "audit_events":  audit_events,
+    }), 200
+
+
+@app.route("/projects/<project_id>/review/line/<item_id>", methods=["PATCH"])
+def review_line_update(project_id, item_id):
+    """Update one line's review state.
+
+    Body: { action: "approve"|"modify"|"reject"|"reopen", qty?, rate?, reason? }
+    Returns: { item_id, state, grand_total, counts, audit_event? }
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body   = request.get_json(force=True, silent=True) or {}
+    action = (body.get("action") or "").strip()
+
+    if action not in ("approve", "modify", "reject", "reopen"):
+        return jsonify({"error": "action must be one of: approve, modify, reject, reopen"}), 400
+    if action == "reject" and not (body.get("reason") or "").strip():
+        return jsonify({"error": "reason is required when rejecting a line."}), 400
+    if action == "modify":
+        if body.get("qty") is None and body.get("rate") is None:
+            return jsonify({"error": "modify requires at least one of qty or rate."}), 400
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    boq_data      = project.get("boq_data") or {}
+    review_states = dict(project.get("review_states") or {})
+
+    prev_state = review_states.get(item_id, {})
+
+    if action == "approve":
+        new_state: dict = {"state": "approved"}
+    elif action == "reopen":
+        new_state = {"state": "pending"}
+    elif action == "reject":
+        new_state = {"state": "rejected", "reason": body["reason"].strip()}
+    else:  # modify
+        new_state = {"state": "modified"}
+        if body.get("qty") is not None:
+            new_state["qty"] = float(body["qty"])
+        if body.get("rate") is not None:
+            new_state["rate"] = float(body["rate"])
+
+    review_states[item_id] = new_state
+
+    try:
+        _db_client().table("projects").update({
+            "review_states": review_states,
+            "status": "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to save review state: {exc}"}), 500
+
+    audit_action = {
+        "approve": "line_approved",
+        "modify":  "line_modified",
+        "reject":  "line_rejected",
+        "reopen":  "line_reopened",
+    }[action]
+
+    audit_row = _append_audit_event(
+        project_id, user.id, audit_action,
+        item_id=item_id,
+        prev_state=prev_state if prev_state else None,
+        new_state=new_state,
+        reason=body.get("reason") or None,
+    )
+
+    return jsonify({
+        "item_id":    item_id,
+        "state":      new_state,
+        "grand_total": _review_grand_total(boq_data, review_states),
+        "counts":     _review_counts(boq_data, review_states),
+        "audit_event": audit_row,
+    }), 200
+
+
+@app.route("/projects/<project_id>/review/section", methods=["POST"])
+def review_section_approve(project_id):
+    """Bulk-approve all pending lines in one NRM2 section.
+
+    Body: { section: "<trade name>" }
+    Returns: { approved_count, grand_total, counts, audit_event? }
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body    = request.get_json(force=True, silent=True) or {}
+    section = (body.get("section") or "").strip()
+    if not section:
+        return jsonify({"error": "section is required."}), 400
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    boq_data      = project.get("boq_data") or {}
+    review_states = dict(project.get("review_states") or {})
+
+    # Walk the matching section and approve every pending item
+    approved_count = 0
+    groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
+    for gi, group in enumerate(groups):
+        if not isinstance(group, dict):
+            continue
+        trade = group.get("trade") or group.get("name") or "General"
+        if trade != section:
+            continue
+        for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
+            if not isinstance(item, dict):
+                continue
+            key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
+            if (review_states.get(key) or {}).get("state", "pending") == "pending":
+                review_states[key] = {"state": "approved"}
+                approved_count += 1
+
+    if approved_count:
+        try:
+            _db_client().table("projects").update({
+                "review_states": review_states,
+                "status": "in_review",
+            }).eq("id", project_id).eq("user_id", user.id).execute()
+        except Exception as exc:
+            return jsonify({"error": f"Failed to save section approval: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "section_approved",
+        section=section,
+        new_state={"approved_count": approved_count},
+    )
+
+    return jsonify({
+        "approved_count": approved_count,
+        "grand_total":    _review_grand_total(boq_data, review_states),
+        "counts":         _review_counts(boq_data, review_states),
+        "audit_event":    audit_row,
+    }), 200
+
+
+@app.route("/projects/<project_id>/signoff", methods=["POST"])
+def review_signoff(project_id):
+    """Sign off the bill.
+
+    Body: { name, title, declaration: true }
+    Computes a SHA-256 content hash, stamps signed_off_at/by/title/hash, and
+    transitions status to 'signed_off'.  Does not enforce that every line is
+    reviewed — the modal warns the user but allows sign-off with pending lines.
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body = request.get_json(force=True, silent=True) or {}
+    name  = (body.get("name")  or "").strip()
+    title = (body.get("title") or "").strip()
+    declaration = bool(body.get("declaration"))
+
+    if not name:
+        return jsonify({"error": "name is required."}), 400
+    if not title:
+        return jsonify({"error": "title is required."}), 400
+    if not declaration:
+        return jsonify({"error": "declaration must be accepted."}), 400
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is already signed off."}), 409
+
+    boq_data      = project.get("boq_data") or {}
+    review_states = project.get("review_states") or {}
+
+    content_hash  = _signoff_hash(boq_data, review_states)
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+
+    update_payload = {
+        "signed_off_at":          now,
+        "signed_off_by":          name,
+        "signoff_title":          title,
+        "signoff_declaration":    True,
+        "signoff_hash":           content_hash,
+        "status":                 "signed_off",
+    }
+    try:
+        _db_client().table("projects").update(update_payload).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to record sign-off: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "signed_off",
+        new_state={"signed_off_by": name, "signoff_title": title, "signoff_hash": content_hash},
+    )
+
+    return jsonify({
+        "signed_off_at":  now,
+        "signed_off_by":  name,
+        "signoff_title":  title,
+        "signoff_hash":   content_hash,
+        "audit_event":    audit_row,
+    }), 200
+
+
+@app.route("/projects/<project_id>/signoff", methods=["DELETE"])
+def review_signoff_revoke(project_id):
+    """Revoke an existing sign-off, returning the bill to 'in_review' status."""
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if not project.get("signed_off_at"):
+        return jsonify({"error": "Bill is not signed off."}), 409
+
+    try:
+        _db_client().table("projects").update({
+            "signed_off_at":         None,
+            "signed_off_by":         None,
+            "signoff_title":         None,
+            "signoff_declaration":   None,
+            "signoff_hash":          None,
+            "status":                "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to revoke sign-off: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "signoff_revoked",
+        prev_state={
+            "signed_off_by": project.get("signed_off_by"),
+            "signoff_hash":  project.get("signoff_hash"),
+        },
+    )
+
+    return jsonify({"ok": True, "audit_event": audit_row}), 200
+
+
+@app.route("/projects/<project_id>/audit", methods=["GET"])
+def review_audit(project_id):
+    """Return the audit trail for a project (newest first, up to 200 rows)."""
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    # Verify the user owns this project
+    try:
+        proj_res = (
+            _db_client()
+            .table("projects")
+            .select("id")
+            .eq("id", project_id)
+            .eq("user_id", user.id)
+            .limit(1)
+            .execute()
+        )
+        if not (getattr(proj_res, "data", None) or []):
+            return jsonify({"error": "Project not found."}), 404
+    except Exception as exc:
+        return jsonify({"error": f"Database error: {exc}"}), 500
+
+    try:
+        res = (
+            _db_client()
+            .table("boq_audit_events")
+            .select("id, action, item_id, section, prev_state, new_state, reason, created_at")
+            .eq("project_id", project_id)
+            .order("created_at", desc=True)
+            .limit(200)
+            .execute()
+        )
+        return jsonify({"audit_events": getattr(res, "data", None) or []}), 200
+    except Exception as exc:
+        return jsonify({"error": f"Could not load audit trail: {exc}"}), 500
 
 
 def _run_boq_pipeline(user=None):

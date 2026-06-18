@@ -1286,6 +1286,64 @@ def _build_grand_summary(prelim_total: float, measured_total: float, prov_total:
     return story
 
 
+def _build_signoff_block(signoff: dict) -> list:
+    """Sign-off certificate appended after Grand Summary when a project is signed off.
+
+    signoff keys: signed_off_by (str), signoff_title (str),
+                  signed_off_at (ISO 8601 str), signoff_hash (hex str).
+    """
+    import datetime as _dt
+
+    name  = str(signoff.get("signed_off_by") or "")
+    title = str(signoff.get("signoff_title") or "")
+    raw_at = signoff.get("signed_off_at") or ""
+    h     = str(signoff.get("signoff_hash") or "")
+
+    # Format the timestamp into a readable UK date/time string.
+    try:
+        dt = _dt.datetime.fromisoformat(raw_at.replace("Z", "+00:00"))
+        signed_at_str = dt.strftime("%-d %B %Y at %H:%M UTC")
+    except Exception:
+        signed_at_str = raw_at
+
+    story = _section_heading("SIGN-OFF CERTIFICATE")
+
+    col_w = [60 * mm, CONTENT_W - 60 * mm]
+    rows = [
+        [Paragraph("Signed off by",   S_BODY_BOLD), Paragraph(name,           S_BODY)],
+        [Paragraph("Qualification",   S_BODY_BOLD), Paragraph(title,          S_BODY)],
+        [Paragraph("Date & time",     S_BODY_BOLD), Paragraph(signed_at_str,  S_BODY)],
+        [Paragraph("Integrity hash",  S_BODY_BOLD), Paragraph(
+            f"SHA-256: {h[:16]}…{h[-8:]}",
+            _style('BoqHashCell', font='Courier', size=7.5,
+                   color=colors.Color(0.3, 0.3, 0.3)),
+        )],
+    ]
+
+    cmds = _base_table_cmds() + [
+        ('LINEABOVE',     (0, 0), (-1, 0),  0.6, _GREY_LINE),
+        ('LINEBELOW',     (0, -1), (-1, -1), 0.6, _GREY_LINE),
+        ('TOPPADDING',    (0, 0), (-1, -1),  5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1),  5),
+    ]
+    for i in range(0, len(rows), 2):
+        cmds.append(('BACKGROUND', (0, i), (-1, i), _GREY_ALT))
+
+    tbl = Table(rows, colWidths=col_w, hAlign='LEFT')
+    tbl.setStyle(TableStyle(cmds))
+    story.append(tbl)
+    story.append(Spacer(1, 4 * mm))
+    story.append(Paragraph(
+        "This certificate confirms that the above-named quantity surveyor has reviewed "
+        "every line item in this Bill of Quantities and accepts professional responsibility "
+        "for the measurements, descriptions, and rates herein. The integrity hash is a "
+        "SHA-256 fingerprint of the approved bill at the moment of sign-off; any subsequent "
+        "alteration to quantities or rates will invalidate this certificate.",
+        S_DISCLAIMER,
+    ))
+    return story
+
+
 # ── Main function ──────────────────────────────────────────────────────────────
 
 def _draw_watermark(canvas_obj, doc):
@@ -1405,6 +1463,11 @@ def generate_boq_pdf(boq_json: dict, watermark: bool = False, branding=None) -> 
         story += annex_flowables
     story.append(PageBreak())
     story += _build_grand_summary(prelim_total, measured_total, prov_total)
+
+    signoff = boq_json.get('signoff') if isinstance(boq_json, dict) else None
+    if isinstance(signoff, dict) and signoff.get('signed_off_by'):
+        story.append(PageBreak())
+        story += _build_signoff_block(signoff)
 
     def _first_page(canvas_obj, doc):
         _draw_chrome(canvas_obj, doc)
