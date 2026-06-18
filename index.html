@@ -1442,12 +1442,12 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const CHROME_EXCLUDED = ['signin','signup','dashboard','results','settings','upload',
                          'forgotpassword','checkemail','resetpassword','landing',
                          'projectsetup','workspace','projectsettings',
-                         'projects','reports','exports','history','measurehub'];
+                         'projects','reports','exports','history','measurehub','review'];
 
 // Pages that require an authenticated session
 const PROTECTED = ['dashboard','settings','results','upload',
                    'projectsetup','workspace','projectsettings',
-                   'projects','reports','exports','history','measurehub'];
+                   'projects','reports','exports','history','measurehub','review'];
 
 function App() {
   // Public deep link: /demo (or #demo) opens the interactive demo without an account.
@@ -1595,6 +1595,7 @@ function App() {
     projectsetup:    <ProjectSetupPage    go={go} toast={toast} />,
     workspace:       <ProjectWorkspacePage go={go} toast={toast} projectId={projectId} onBoqReady={setBoqData} />,
     projectsettings: <ProjectSettingsPage  go={go} toast={toast} projectId={projectId} />,
+    review:          <ReviewWorkspacePage  go={go} toast={toast} projectId={projectId} />,
     signin:         <SignInPage         go={go} toast={toast} user={user} />,
     signup:         <SignUpPage         go={go} toast={toast} />,
     pricing:        <PricingPage        go={go} toast={toast} />,

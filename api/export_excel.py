@@ -416,6 +416,49 @@ def generate_boq_excel(boq_data, firm_name="", project_name="", branding=None):
     ws[f"A{row}"].alignment = _left()
     ws.row_dimensions[row].height = 30
 
+    # ── Sign-off certificate (only written when the BoQ has been signed off) ──
+    signoff = boq_data.get('signoff') if isinstance(boq_data, dict) else None
+    if isinstance(signoff, dict) and signoff.get('signed_off_by'):
+        import datetime as _dt
+        row += 3
+
+        # Section heading
+        ws.merge_cells(f"A{row}:H{row}")
+        ws[f"A{row}"] = "SIGN-OFF CERTIFICATE"
+        ws[f"A{row}"].fill      = _fill(NAVY)
+        ws[f"A{row}"].font      = _font(bold=True, colour=GOLD, size=11)
+        ws[f"A{row}"].alignment = _centre()
+        ws.row_dimensions[row].height = 22
+        row += 1
+
+        name     = str(signoff.get("signed_off_by") or "")
+        title    = str(signoff.get("signoff_title")  or "")
+        raw_at   = signoff.get("signed_off_at") or ""
+        h        = str(signoff.get("signoff_hash") or "")
+
+        try:
+            dt = _dt.datetime.fromisoformat(raw_at.replace("Z", "+00:00"))
+            signed_at_str = dt.strftime("%-d %B %Y at %H:%M UTC")
+        except Exception:
+            signed_at_str = raw_at
+
+        cert_lines = [
+            ("Signed off by",  name),
+            ("Qualification",  title),
+            ("Date & time",    signed_at_str),
+            ("Integrity hash", f"SHA-256: {h[:16]}…{h[-8:]}"),
+        ]
+        for lbl, val in cert_lines:
+            ws[f"A{row}"] = lbl
+            ws[f"A{row}"].font      = _font(bold=True, size=9, colour="374151")
+            ws[f"A{row}"].alignment = _left()
+            ws.merge_cells(f"B{row}:H{row}")
+            ws[f"B{row}"] = val
+            ws[f"B{row}"].font      = _font(size=9, colour="111827")
+            ws[f"B{row}"].alignment = _left()
+            ws.row_dimensions[row].height = 16
+            row += 1
+
     # ── Freeze panes so headers stay visible when scrolling ───────────────────
     ws.freeze_panes = ws[f"A{header_row + 1}"]
 

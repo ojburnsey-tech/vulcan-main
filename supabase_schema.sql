@@ -217,3 +217,73 @@ grant execute on function public.delete_expired_projects(uuid) to authenticated,
 -- Supabase's API layer caches the schema; tell it to reload so new columns
 -- (e.g. branding.logo) are usable immediately without waiting or restarting.
 notify pgrst, 'reload schema';
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- QS Review & Sign-off workspace
+-- Run this block after the baseline schema above.
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- ── New columns on projects ─────────────────────────────────────────────────
+-- review_states: jsonb map of item_id → {state, qty?, rate?, reason?}
+-- signed_off_*:  immutable after sign-off; cleared on revoke
+alter table public.projects add column if not exists review_states        jsonb        not null default '{}'::jsonb;
+alter table public.projects add column if not exists signed_off_at        timestamptz;
+alter table public.projects add column if not exists signed_off_by        text;
+alter table public.projects add column if not exists signoff_title        text;
+alter table public.projects add column if not exists signoff_declaration  boolean;
+alter table public.projects add column if not exists signoff_hash         text;
+
+-- ── Widen status constraint to include review lifecycle values ───────────────
+-- Drop the existing constraint, normalise any stale rows, then recreate with
+-- the full vocabulary the app now uses.  This mirrors the pattern used above
+-- for the earlier 'draft' fix so it is safe to re-run.
+alter table public.projects drop constraint if exists projects_status_check;
+update public.projects
+   set status = 'draft'
+ where status is null
+    or status not in ('draft','processing','completed','archived','in_review','signed_off');
+alter table public.projects alter column status set default 'draft';
+alter table public.projects
+  add constraint projects_status_check
+  check (status in ('draft','processing','completed','archived','in_review','signed_off'));
+
+-- ── Audit trail ─────────────────────────────────────────────────────────────
+-- Append-only log of every review action (line approvals, modifications,
+-- rejections, section approvals, sign-offs, revocations).  Mirrors the
+-- privilege model of usage_events: only select + insert are granted so no
+-- row can ever be updated or deleted by accident.
+create table if not exists public.boq_audit_events (
+  id          uuid        primary key default gen_random_uuid(),
+  project_id  uuid        not null references public.projects(id) on delete cascade,
+  user_id     uuid        not null references auth.users(id)      on delete cascade,
+  action      text        not null,   -- e.g. 'line_approved', 'signed_off'
+  item_id     text,                   -- null for section / project-level actions
+  section     text,                   -- NRM2 section trade name
+  prev_state  jsonb,                  -- review state before this action
+  new_state   jsonb,                  -- review state after this action
+  reason      text,                   -- rejection reason, revocation note, etc.
+  created_at  timestamptz not null default now()
+);
+
+-- Sparse index for the common read path (load trail for one project).
+create index if not exists boq_audit_events_project_id
+  on public.boq_audit_events (project_id, created_at desc);
+
+grant select, insert on public.boq_audit_events to authenticated, service_role;
+
+alter table public.boq_audit_events enable row level security;
+
+drop policy if exists "Users read own audit events" on public.boq_audit_events;
+create policy "Users read own audit events"
+  on public.boq_audit_events for select
+  using (auth.uid() = user_id);
+
+-- Any authenticated role can insert (service_role bypasses RLS entirely, but
+-- authenticated requests from the frontend also work with with check (true)).
+drop policy if exists "Service role inserts audit events" on public.boq_audit_events;
+create policy "Service role inserts audit events"
+  on public.boq_audit_events for insert
+  with check (true);
+
+-- Reload schema so new columns and table are visible to the API immediately.
+notify pgrst, 'reload schema';
