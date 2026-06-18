@@ -4811,12 +4811,34 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   const [filter,     setFilter]     = React.useState('all');
   const [auditOpen,  setAuditOpen]  = React.useState(true);
   const [editingId,  setEditingId]  = React.useState(null);
-  const [editForm,   setEditForm]   = React.useState({ qty: '', rate: '' });
+  const [editForm,   setEditForm]   = React.useState({
+    description: '', unit: '', quantity: '',
+    material_rate: '', labour_rate: '', plant_rate: '', waste_disposal_rate: '',
+    rate: '', drawing_ref: '', dimension_string: '', rate_key: '',
+    _useComponents: false,
+  });
   const [rejectId,   setRejectId]   = React.useState(null);
   const [rejectReason, setRejectReason] = React.useState('');
+  const [removingId,   setRemovingId]   = React.useState(null);
+  const [removeReason, setRemoveReason] = React.useState('');
+  // Add-line state
+  const [addLineSectionId, setAddLineSectionId] = React.useState(null);
+  const [addLineForm,      setAddLineForm]       = React.useState({
+    description: '', unit: '', quantity: '', rate: '', drawing_ref: '', dimension_string: '', rate_key: '',
+  });
+  // Add-section state
+  const [addSectionOpen, setAddSectionOpen] = React.useState(false);
+  const [addSectionForm, setAddSectionForm] = React.useState({ trade: '', nrm2_section: '' });
+  // Removed-lines disclosure per section (set of section trade names that are expanded)
+  const [removedOpen, setRemovedOpen] = React.useState({});
   const [showSignoff,  setShowSignoff]  = React.useState(false);
   const [signoffForm,  setSignoffForm]  = React.useState({ name: '', title: '', declaration: false });
   const [saving,       setSaving]       = React.useState(false);
+  // Download states: 'idle' | 'generating'
+  const [dlPdfState,       setDlPdfState]       = React.useState('idle');
+  const [dlExcelState,     setDlExcelState]     = React.useState('idle');
+  const [dlOrigPdfState,   setDlOrigPdfState]   = React.useState('idle');
+  const [dlOrigExcelState, setDlOrigExcelState] = React.useState('idle');
 
   const getToken = async () => {
     const res = window.VQAuth ? await window.VQAuth.getSession() : null;
@@ -4846,6 +4868,51 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
     })();
   }, [projectId]);
 
+  // ── Helper: update an item in boqData by id ─────────────────────────────
+  const _updateBoqItem = (itemId, updatedFields) => {
+    setBoqData(prev => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      const groups = next.bill_of_quantities || next.trades || [];
+      for (const group of groups) {
+        const arr = group.items || group.line_items || [];
+        const idx = arr.findIndex(i => i && i.id === itemId);
+        if (idx >= 0) { arr[idx] = { ...arr[idx], ...updatedFields }; break; }
+      }
+      return next;
+    });
+  };
+
+  // ── Helper: add an item to a section in boqData ─────────────────────────
+  const _addBoqItem = (sectionId, newLine) => {
+    setBoqData(prev => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      const groups = next.bill_of_quantities || next.trades || [];
+      for (const group of groups) {
+        if (group.id === sectionId || group.trade === sectionId || group.name === sectionId) {
+          const key = 'items' in group ? 'items' : 'line_items';
+          if (!group[key]) group[key] = [];
+          group[key].push(newLine);
+          break;
+        }
+      }
+      return next;
+    });
+  };
+
+  // ── Helper: add a section to boqData ────────────────────────────────────
+  const _addBoqSection = (newSection) => {
+    setBoqData(prev => {
+      if (!prev) return prev;
+      const next = JSON.parse(JSON.stringify(prev));
+      const key = 'bill_of_quantities' in next ? 'bill_of_quantities' : 'trades';
+      if (!next[key]) next[key] = [];
+      next[key].push(newSection);
+      return next;
+    });
+  };
+
   // Pre-fill sign-off name from auth session when modal opens
   React.useEffect(() => {
     if (!showSignoff || signoffForm.name) return;
@@ -4862,21 +4929,32 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   const groups = React.useMemo(() => {
     if (!boqData) return [];
     const raw = boqData.bill_of_quantities || boqData.trades || (Array.isArray(boqData) ? boqData : []);
-    return raw.map((g, gi) => ({
-      trade: g.trade || g.name || 'General',
-      items: (g.items || g.line_items || []).map((item, ii) => ({
-        ...item,
-        // Use the stable ID the server injected (or derive the same way)
-        _key: item.id || item.item_code || `g${gi}_i${ii}`,
-      })),
-    }));
+    return raw.map((g, gi) => {
+      const sectionId = g.id || g.trade || g.name || `s${gi}`;
+      return {
+        trade:     g.trade || g.name || 'General',
+        sectionId,
+        items: (g.items || g.line_items || []).map((item, ii) => ({
+          ...item,
+          _key: item.id || item.item_code || `g${gi}_i${ii}`,
+        })),
+      };
+    });
   }, [boqData]);
 
   const getRS = (key) => reviewStates[key] || { state: 'pending' };
 
+  // Effective rate from item (component sum or flat rate field)
+  const _itemBaseRate = (item) => {
+    const comp = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
+                  parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+    return comp > 0 ? comp : parseFloat(item.rate || 0);
+  };
+
   const counts = React.useMemo(() => {
-    const c = { pending: 0, approved: 0, modified: 0, rejected: 0, total: 0 };
+    const c = { pending: 0, approved: 0, modified: 0, rejected: 0, removed: 0, total: 0 };
     groups.forEach(g => g.items.forEach(item => {
+      if (item.removed) { c.removed++; return; }
       const s = getRS(item._key).state || 'pending';
       c[s] = (c[s] || 0) + 1;
       c.total++;
@@ -4887,11 +4965,11 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   const grandTotal = React.useMemo(() => {
     let sum = 0;
     groups.forEach(g => g.items.forEach(item => {
+      if (item.removed) return;
       const rs = reviewStates[item._key] || {};
       if (rs.state === 'rejected') return;
-      const origQty = parseFloat(item.quantity ?? item.qty ?? 0);
-      const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
-                        parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+      const origQty  = parseFloat(item.quantity ?? item.qty ?? 0);
+      const origRate = _itemBaseRate(item);
       const qty  = parseFloat(rs.qty  != null ? rs.qty  : origQty);
       const rate = parseFloat(rs.rate != null ? rs.rate : origRate);
       sum += qty * rate;
@@ -4906,6 +4984,105 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   const signedOff = !!(project?.signed_off_at);
 
   // ── API mutations ────────────────────────────────────────────────────────
+
+  // Blob download helper (same pattern as ResultsPage)
+  const _triggerDownload = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPdf = async () => {
+    if (dlPdfState !== 'idle' || counts.pending > 0) return;
+    setDlPdfState('generating');
+    toast('Generating PDF…', 'info');
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/export/pdf`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'PDF generation failed.'); }
+      _triggerDownload(await res.blob(), 'bill-of-quantities.pdf');
+      toast('PDF downloaded.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setDlPdfState('idle'); }
+  };
+
+  const handleDownloadExcel = async () => {
+    if (dlExcelState !== 'idle' || counts.pending > 0) return;
+    setDlExcelState('generating');
+    toast('Generating Excel…', 'info');
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/export/excel`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Excel generation failed.'); }
+      _triggerDownload(await res.blob(), 'bill-of-quantities.xlsx');
+      toast('Excel downloaded.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setDlExcelState('idle'); }
+  };
+
+  const handleDownloadOriginalPdf = async () => {
+    if (dlOrigPdfState !== 'idle') return;
+    setDlOrigPdfState('generating');
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/export/pdf/original`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Download failed.'); }
+      _triggerDownload(await res.blob(), 'bill-of-quantities-AI-DRAFT.pdf');
+      toast('Original AI draft PDF downloaded.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setDlOrigPdfState('idle'); }
+  };
+
+  const handleDownloadOriginalExcel = async () => {
+    if (dlOrigExcelState !== 'idle') return;
+    setDlOrigExcelState('generating');
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/export/excel/original`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Download failed.'); }
+      _triggerDownload(await res.blob(), 'bill-of-quantities-AI-DRAFT.xlsx');
+      toast('Original AI draft Excel downloaded.', 'success');
+    } catch (e) { toast(e.message, 'error'); }
+    finally { setDlOrigExcelState('idle'); }
+  };
+
+  // Full-field edit save (PATCH field_edits)
+  const callFieldEdit = async (key, fieldEdits) => {
+    if (signedOff) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(
+        `${VQ_API}/projects/${projectId}/review/line/${encodeURIComponent(key)}`,
+        {
+          method:  'PATCH',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body:    JSON.stringify({ field_edits: fieldEdits }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Save failed.');
+      // Server is source of truth: update item in boqData + review states
+      if (data.item) _updateBoqItem(key, data.item);
+      if (data.state) setReviewStates(rs => ({ ...rs, [key]: data.state }));
+      const evts = data.audit_events || (data.audit_event ? [data.audit_event] : []);
+      if (evts.length) setAuditEvents(ae => [...evts.reverse(), ...ae]);
+      setEditingId(null);
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
+  // Review-state action (approve/reject/reopen) via PATCH action field
   const callLine = async (key, action, extra = {}) => {
     if (signedOff) return;
     const prevRS = { ...reviewStates };
@@ -4913,11 +5090,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
       ? { state: 'pending' }
       : action === 'approve'
         ? { state: 'approved' }
-        : action === 'reject'
-          ? { state: 'rejected', reason: extra.reason || '' }
-          : { state: 'modified',
-              ...(extra.qty  != null ? { qty:  extra.qty  } : {}),
-              ...(extra.rate != null ? { rate: extra.rate } : {}) };
+        : { state: 'rejected', reason: extra.reason || '' };
     setReviewStates(rs => ({ ...rs, [key]: entry }));
     try {
       const token = await getToken();
@@ -4931,7 +5104,9 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Update failed.');
-      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      if (data.state) setReviewStates(rs => ({ ...rs, [key]: data.state }));
+      const evts = data.audit_events || (data.audit_event ? [data.audit_event] : []);
+      if (evts.length) setAuditEvents(ae => [...evts, ...ae]);
     } catch (e) {
       setReviewStates(prevRS);
       toast(e.message, 'error');
@@ -4945,8 +5120,9 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
     const prevRS = { ...reviewStates };
     const updates = {};
     sec.items.forEach(item => {
-      if ((reviewStates[item._key] || {}).state !== 'pending') return;
-      updates[item._key] = { state: 'approved' };
+      if (item.removed) return;
+      const s = (reviewStates[item._key] || {}).state || 'pending';
+      if (s === 'pending' || s === 'modified') updates[item._key] = { state: 'approved' };
     });
     if (!Object.keys(updates).length) return;
     setReviewStates(rs => ({ ...rs, ...updates }));
@@ -4962,6 +5138,88 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
       if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
     } catch (e) {
       setReviewStates(prevRS);
+      toast(e.message, 'error');
+    }
+  };
+
+  const callAddLine = async (sectionId, lineData) => {
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/review/line`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ section_id: sectionId, line: lineData }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add line.');
+      _addBoqItem(sectionId, data.line);
+      setReviewStates(rs => ({ ...rs, [data.line.id]: { state: 'pending' } }));
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      setAddLineSectionId(null);
+      setAddLineForm({ description: '', unit: '', quantity: '', rate: '', drawing_ref: '', dimension_string: '', rate_key: '' });
+      toast('Line added.', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
+  const callAddSection = async (trade, nrm2Section) => {
+    if (!trade.trim()) { toast('Trade name is required.', 'error'); return; }
+    try {
+      const token = await getToken();
+      const res = await fetch(`${VQ_API}/projects/${projectId}/review/add-section`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body:    JSON.stringify({ trade: trade.trim(), nrm2_section: nrm2Section.trim() || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not add section.');
+      _addBoqSection(data.section);
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      setAddSectionOpen(false);
+      setAddSectionForm({ trade: '', nrm2_section: '' });
+      toast('Section added.', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
+  const callRemoveLine = async (key, reason) => {
+    _updateBoqItem(key, { removed: true });
+    try {
+      const token = await getToken();
+      const res = await fetch(
+        `${VQ_API}/projects/${projectId}/review/line/${encodeURIComponent(key)}`,
+        {
+          method:  'DELETE',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body:    JSON.stringify({ reason }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) { _updateBoqItem(key, { removed: false }); throw new Error(data.error || 'Remove failed.'); }
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+      setRemovingId(null); setRemoveReason('');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+  };
+
+  const callRestoreLine = async (key) => {
+    _updateBoqItem(key, { removed: false, removed_at: undefined, removed_reason: undefined });
+    try {
+      const token = await getToken();
+      const res = await fetch(
+        `${VQ_API}/projects/${projectId}/review/line/${encodeURIComponent(key)}/restore`,
+        {
+          method:  'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) { _updateBoqItem(key, { removed: true }); throw new Error(data.error || 'Restore failed.'); }
+      if (data.audit_event) setAuditEvents(ae => [data.audit_event, ...ae]);
+    } catch (e) {
       toast(e.message, 'error');
     }
   };
@@ -5029,6 +5287,9 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
     rejected: { color: '#EF4444',       label: 'Rejected' },
   };
 
+  // Whether the working bill has any pending lines (blocks download + sign-off)
+  const hasPending = counts.pending > 0;
+
   // ── Loading / no-bill states ────────────────────────────────────────────
   if (loading) return (
     <div className="vd-root">
@@ -5069,7 +5330,44 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
               <span style={{ fontSize:13, color:'var(--c-400)' }}>{project.client_name}</span>
             )}
           </div>
-          <div style={{ display:'flex', gap:8 }}>
+          <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+            {/* Original AI draft downloads — always active, visually secondary */}
+            <div style={{ display:'flex', flexDirection:'column', gap:2, marginRight:4 }}>
+              <div style={{ display:'flex', gap:4 }}>
+                <button className="btn btn-outline btn-pill btn-sm"
+                  onClick={handleDownloadOriginalPdf}
+                  disabled={dlOrigPdfState !== 'idle'}
+                  style={{ fontSize:11, padding:'3px 9px', opacity: dlOrigPdfState !== 'idle' ? 0.6 : 1 }}
+                  title="Download the unedited AI output (before any QS review)">
+                  {dlOrigPdfState !== 'idle' ? '…' : 'AI draft PDF'}
+                </button>
+                <button className="btn btn-outline btn-pill btn-sm"
+                  onClick={handleDownloadOriginalExcel}
+                  disabled={dlOrigExcelState !== 'idle'}
+                  style={{ fontSize:11, padding:'3px 9px', opacity: dlOrigExcelState !== 'idle' ? 0.6 : 1 }}
+                  title="Download the unedited AI output (before any QS review)">
+                  {dlOrigExcelState !== 'idle' ? '…' : 'AI draft XLS'}
+                </button>
+              </div>
+              <span style={{ fontSize:9.5, color:'var(--c-500)', textAlign:'center' }}>Unedited AI output, before review</span>
+            </div>
+
+            {/* Working-copy exports — disabled while pending */}
+            <button className="btn btn-amber btn-pill btn-sm"
+              onClick={handleDownloadPdf}
+              disabled={dlPdfState !== 'idle' || hasPending}
+              title={hasPending ? `${counts.pending} line(s) still pending — review all lines before downloading` : 'Download reviewed bill as PDF'}
+              style={{ opacity: hasPending ? 0.45 : 1 }}>
+              {dlPdfState !== 'idle' ? 'Generating…' : 'Download PDF'}
+            </button>
+            <button className="btn btn-outline btn-pill btn-sm"
+              onClick={handleDownloadExcel}
+              disabled={dlExcelState !== 'idle' || hasPending}
+              title={hasPending ? `${counts.pending} line(s) still pending — review all lines before downloading` : 'Download reviewed bill as Excel'}
+              style={{ opacity: hasPending ? 0.45 : 1 }}>
+              {dlExcelState !== 'idle' ? 'Generating…' : 'Download Excel'}
+            </button>
+
             {signedOff
               ? <button className="btn btn-outline btn-pill btn-sm" onClick={handleRevoke} disabled={saving}>
                   {saving ? 'Revoking…' : 'Revoke sign-off'}
@@ -5183,20 +5481,21 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
           {/* BoQ review table */}
           <div style={{ flex:1, overflowY:'auto', padding:'24px 24px 64px' }}>
             {groups.map(section => {
+              const activeItems  = section.items.filter(item => !item.removed);
+              const removedItems = section.items.filter(item =>  item.removed);
               const visItems = filter === 'all'
-                ? section.items
-                : section.items.filter(item => getRS(item._key).state === filter);
-              if (visItems.length === 0 && filter !== 'all') return null;
+                ? activeItems
+                : activeItems.filter(item => getRS(item._key).state === filter);
+              if (visItems.length === 0 && removedItems.length === 0 && filter !== 'all') return null;
 
-              const pendingCt = section.items.filter(
-                item => getRS(item._key).state === 'pending'
+              const pendingCt = activeItems.filter(
+                item => { const s = getRS(item._key).state || 'pending'; return s === 'pending' || s === 'modified'; }
               ).length;
 
-              const secTotal = section.items.reduce((acc, item) => {
+              const secTotal = activeItems.reduce((acc, item) => {
                 const rs = reviewStates[item._key] || {};
                 if (rs.state === 'rejected') return acc;
-                const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
-                                  parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+                const origRate = _itemBaseRate(item);
                 const qty  = parseFloat(rs.qty  != null ? rs.qty  : (item.quantity ?? item.qty ?? 0));
                 const rate = parseFloat(rs.rate != null ? rs.rate : origRate);
                 return acc + qty * rate;
@@ -5229,15 +5528,15 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {(filter === 'all' ? section.items : visItems).map((item, idx) => {
-                        const rs        = reviewStates[item._key] || { state:'pending' };
-                        const st        = RS_STYLE[rs.state] || RS_STYLE.pending;
+                      {(filter === 'all' ? activeItems : visItems).map((item, idx) => {
+                        const rs          = reviewStates[item._key] || { state:'pending' };
+                        const st          = RS_STYLE[rs.state] || RS_STYLE.pending;
                         const isEditing   = editingId  === item._key;
                         const isRejecting = rejectId   === item._key;
+                        const isRemoving  = removingId === item._key;
 
                         const origQty  = parseFloat(item.quantity ?? item.qty ?? 0);
-                        const origRate = (parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
-                                          parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0));
+                        const origRate = _itemBaseRate(item);
                         const effQty   = parseFloat(rs.qty  != null ? rs.qty  : origQty);
                         const effRate  = parseFloat(rs.rate != null ? rs.rate : origRate);
                         const effTotal = rs.state === 'rejected' ? 0 : Math.round(effQty * effRate * 100) / 100;
@@ -5246,6 +5545,12 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                                     : rs.state === 'modified' ? 'rgba(215,117,85,0.07)'
                                     : rs.state === 'rejected' ? 'rgba(239,68,68,0.05)'
                                     : idx % 2 === 1 ? 'rgba(255,255,255,0.02)' : 'transparent';
+
+                        // Determine if item has component rates (to choose editor mode)
+                        const hasComponents = (
+                          parseFloat(item.material_rate || 0) + parseFloat(item.labour_rate || 0) +
+                          parseFloat(item.plant_rate    || 0) + parseFloat(item.waste_disposal_rate || 0)
+                        ) > 0;
 
                         return (
                           <React.Fragment key={item._key}>
@@ -5260,20 +5565,20 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                                     Rejected: {rs.reason}
                                   </div>
                                 )}
-                                {rs.state === 'modified' && (rs.qty != null || rs.rate != null) && (
-                                  <div style={{ fontSize:11, color:'var(--c-400)', marginTop:2 }}>
-                                    AI: {origQty}{item.unit ? ` ${item.unit}` : ''} @ {vqMoney(origRate)}
+                                {rs.state === 'modified' && (
+                                  <div style={{ fontSize:11, color:'var(--amber)', marginTop:2 }}>
+                                    Modified
                                   </div>
                                 )}
                               </td>
                               <td className="r">
-                                {rs.state === 'modified' && rs.qty != null
+                                {rs.qty != null
                                   ? <span style={{ color:'var(--amber)' }}>{effQty}</span>
                                   : origQty}
                               </td>
                               <td className="r">{item.unit || '—'}</td>
                               <td className="r">
-                                {rs.state === 'modified' && rs.rate != null
+                                {rs.rate != null
                                   ? <span style={{ color:'var(--amber)' }}>{vqMoney(effRate)}</span>
                                   : vqMoney(origRate)}
                               </td>
@@ -5294,7 +5599,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                               </td>
                               {!signedOff && (
                                 <td style={{ textAlign:'right', whiteSpace:'nowrap' }}>
-                                  {rs.state === 'pending' && !isEditing && !isRejecting && (
+                                  {(rs.state === 'pending' || rs.state === 'modified') && !isEditing && !isRejecting && !isRemoving && (
                                     <div style={{ display:'flex', gap:3, justifyContent:'flex-end' }}>
                                       <button className="btn btn-ghost btn-sm"
                                         style={{ fontSize:11, padding:'3px 7px', color:'#10B981' }}
@@ -5303,78 +5608,223 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                                         style={{ fontSize:11, padding:'3px 7px', color:'var(--amber)' }}
                                         onClick={() => {
                                           setEditingId(item._key);
-                                          setEditForm({ qty: String(origQty), rate: String(origRate) });
+                                          setEditForm({
+                                            description:      item.description || item.desc || '',
+                                            unit:             item.unit || '',
+                                            quantity:         String(origQty),
+                                            material_rate:    String(parseFloat(item.material_rate || 0)),
+                                            labour_rate:      String(parseFloat(item.labour_rate   || 0)),
+                                            plant_rate:       String(parseFloat(item.plant_rate    || 0)),
+                                            waste_disposal_rate: String(parseFloat(item.waste_disposal_rate || 0)),
+                                            rate:             String(parseFloat(item.rate || origRate || 0)),
+                                            drawing_ref:      item.drawing_ref || '',
+                                            dimension_string: item.dimension_string || '',
+                                            rate_key:         item.rate_key || '',
+                                            _useComponents:   hasComponents,
+                                          });
                                         }}>Edit</button>
                                       <button className="btn btn-ghost btn-sm"
                                         style={{ fontSize:11, padding:'3px 7px', color:'#EF4444' }}
                                         onClick={() => { setRejectId(item._key); setRejectReason(''); }}>Reject</button>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--c-500)' }}
+                                        title="Remove this line (soft delete — restorable)"
+                                        onClick={() => { setRemovingId(item._key); setRemoveReason(''); }}>✕</button>
                                     </div>
                                   )}
-                                  {(rs.state === 'approved' || rs.state === 'modified') && (
+                                  {rs.state === 'approved' && !isEditing && !isRemoving && (
                                     <div style={{ display:'flex', gap:3, justifyContent:'flex-end' }}>
-                                      {rs.state === 'modified' && (
-                                        <button className="btn btn-ghost btn-sm"
-                                          style={{ fontSize:11, padding:'3px 7px', color:'var(--amber)' }}
-                                          onClick={() => {
-                                            setEditingId(item._key);
-                                            setEditForm({ qty: String(effQty), rate: String(effRate) });
-                                          }}>Edit</button>
-                                      )}
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--amber)' }}
+                                        onClick={() => {
+                                          setEditingId(item._key);
+                                          setEditForm({
+                                            description:      item.description || item.desc || '',
+                                            unit:             item.unit || '',
+                                            quantity:         String(origQty),
+                                            material_rate:    String(parseFloat(item.material_rate || 0)),
+                                            labour_rate:      String(parseFloat(item.labour_rate   || 0)),
+                                            plant_rate:       String(parseFloat(item.plant_rate    || 0)),
+                                            waste_disposal_rate: String(parseFloat(item.waste_disposal_rate || 0)),
+                                            rate:             String(parseFloat(item.rate || origRate || 0)),
+                                            drawing_ref:      item.drawing_ref || '',
+                                            dimension_string: item.dimension_string || '',
+                                            rate_key:         item.rate_key || '',
+                                            _useComponents:   hasComponents,
+                                          });
+                                        }}>Edit</button>
                                       <button className="btn btn-ghost btn-sm"
                                         style={{ fontSize:11, padding:'3px 7px', color:'var(--c-400)' }}
                                         onClick={() => callLine(item._key, 'reopen')}>Reopen</button>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--c-500)' }}
+                                        title="Remove this line (soft delete)"
+                                        onClick={() => { setRemovingId(item._key); setRemoveReason(''); }}>✕</button>
                                     </div>
                                   )}
                                   {rs.state === 'rejected' && (
-                                    <button className="btn btn-ghost btn-sm"
-                                      style={{ fontSize:11, padding:'3px 7px', color:'var(--c-400)' }}
-                                      onClick={() => callLine(item._key, 'reopen')}>Reopen</button>
+                                    <div style={{ display:'flex', gap:3, justifyContent:'flex-end' }}>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--c-400)' }}
+                                        onClick={() => callLine(item._key, 'reopen')}>Reopen</button>
+                                      <button className="btn btn-ghost btn-sm"
+                                        style={{ fontSize:11, padding:'3px 7px', color:'var(--c-500)' }}
+                                        title="Remove this line"
+                                        onClick={() => { setRemovingId(item._key); setRemoveReason(''); }}>✕</button>
+                                    </div>
                                   )}
                                 </td>
                               )}
                             </tr>
 
-                            {/* Inline quantity / rate edit */}
-                            {isEditing && (
-                              <tr style={{ background:'rgba(215,117,85,0.07)' }}>
-                                <td colSpan={signedOff ? 6 : 7} style={{ padding:'12px 16px' }}>
-                                  <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
-                                    <div className="fld" style={{ marginBottom:0 }}>
-                                      <label className="flbl" style={{ fontSize:11 }}>Quantity</label>
-                                      <input className="finp" type="number" min="0" step="any"
-                                        style={{ width:100, fontSize:13 }}
-                                        value={editForm.qty}
-                                        onChange={e => setEditForm(f => ({ ...f, qty: e.target.value }))} />
+                            {/* ── Full-field edit row ── */}
+                            {isEditing && (() => {
+                              const ef = editForm;
+                              const compRate = (
+                                parseFloat(ef.material_rate || 0) + parseFloat(ef.labour_rate    || 0) +
+                                parseFloat(ef.plant_rate    || 0) + parseFloat(ef.waste_disposal_rate || 0)
+                              );
+                              const effRatePreview = ef._useComponents
+                                ? compRate
+                                : parseFloat(ef.rate || 0);
+                              const totalPreview = Math.round(
+                                parseFloat(ef.quantity || 0) * effRatePreview * 100
+                              ) / 100;
+                              const fe = f => setEditForm(p => ({ ...p, ...f }));
+                              return (
+                                <tr style={{ background:'rgba(215,117,85,0.07)' }}>
+                                  <td colSpan={signedOff ? 6 : 7} style={{ padding:'14px 16px' }}>
+                                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'10px 16px', marginBottom:10 }}>
+                                      <div className="fld" style={{ marginBottom:0, gridColumn:'1/3' }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Description</label>
+                                        <textarea className="finp" rows={2}
+                                          style={{ fontSize:13, resize:'vertical', fontFamily:'inherit' }}
+                                          value={ef.description}
+                                          onChange={e => fe({ description: e.target.value })} />
+                                      </div>
+                                      <div className="fld" style={{ marginBottom:0 }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Unit</label>
+                                        <input className="finp" type="text" style={{ fontSize:13 }}
+                                          value={ef.unit} onChange={e => fe({ unit: e.target.value })} />
+                                      </div>
+                                      <div className="fld" style={{ marginBottom:0 }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Quantity</label>
+                                        <input className="finp" type="number" min="0" step="any"
+                                          style={{ fontSize:13 }}
+                                          value={ef.quantity} onChange={e => fe({ quantity: e.target.value })} />
+                                      </div>
+
+                                      {/* Rate toggle */}
+                                      <div style={{ gridColumn:'1/-1', display:'flex', alignItems:'center', gap:8, marginTop:2 }}>
+                                        <span style={{ fontSize:11, color:'var(--c-400)' }}>Rate mode:</span>
+                                        <label style={{ fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                                          <input type="radio" checked={!ef._useComponents}
+                                            onChange={() => fe({ _useComponents: false })} />
+                                          Single rate
+                                        </label>
+                                        <label style={{ fontSize:11, cursor:'pointer', display:'flex', alignItems:'center', gap:4 }}>
+                                          <input type="radio" checked={ef._useComponents}
+                                            onChange={() => fe({ _useComponents: true })} />
+                                          Component breakdown
+                                        </label>
+                                      </div>
+
+                                      {!ef._useComponents ? (
+                                        <div className="fld" style={{ marginBottom:0 }}>
+                                          <label className="flbl" style={{ fontSize:11 }}>Unit rate (£)</label>
+                                          <input className="finp" type="number" min="0" step="0.01"
+                                            style={{ fontSize:13 }}
+                                            value={ef.rate} onChange={e => fe({ rate: e.target.value })} />
+                                        </div>
+                                      ) : (
+                                        <>
+                                          <div className="fld" style={{ marginBottom:0 }}>
+                                            <label className="flbl" style={{ fontSize:11 }}>Material (£/unit)</label>
+                                            <input className="finp" type="number" min="0" step="0.01"
+                                              style={{ fontSize:13 }}
+                                              value={ef.material_rate} onChange={e => fe({ material_rate: e.target.value })} />
+                                          </div>
+                                          <div className="fld" style={{ marginBottom:0 }}>
+                                            <label className="flbl" style={{ fontSize:11 }}>Labour (£/unit)</label>
+                                            <input className="finp" type="number" min="0" step="0.01"
+                                              style={{ fontSize:13 }}
+                                              value={ef.labour_rate} onChange={e => fe({ labour_rate: e.target.value })} />
+                                          </div>
+                                          <div className="fld" style={{ marginBottom:0 }}>
+                                            <label className="flbl" style={{ fontSize:11 }}>Plant (£/unit)</label>
+                                            <input className="finp" type="number" min="0" step="0.01"
+                                              style={{ fontSize:13 }}
+                                              value={ef.plant_rate} onChange={e => fe({ plant_rate: e.target.value })} />
+                                          </div>
+                                          <div className="fld" style={{ marginBottom:0 }}>
+                                            <label className="flbl" style={{ fontSize:11 }}>Waste disposal (£/unit)</label>
+                                            <input className="finp" type="number" min="0" step="0.01"
+                                              style={{ fontSize:13 }}
+                                              value={ef.waste_disposal_rate} onChange={e => fe({ waste_disposal_rate: e.target.value })} />
+                                          </div>
+                                          <div style={{ fontSize:12, color:'var(--c-400)', alignSelf:'flex-end', paddingBottom:6 }}>
+                                            Total rate: {vqMoney(compRate)}
+                                          </div>
+                                        </>
+                                      )}
+
+                                      <div className="fld" style={{ marginBottom:0 }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Drawing ref</label>
+                                        <input className="finp" type="text" style={{ fontSize:13 }}
+                                          value={ef.drawing_ref} onChange={e => fe({ drawing_ref: e.target.value })} />
+                                      </div>
+                                      <div className="fld" style={{ marginBottom:0 }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Dimension string</label>
+                                        <input className="finp" type="text" style={{ fontSize:13 }}
+                                          value={ef.dimension_string} onChange={e => fe({ dimension_string: e.target.value })} />
+                                      </div>
+                                      <div className="fld" style={{ marginBottom:0 }}>
+                                        <label className="flbl" style={{ fontSize:11 }}>Rate key / category</label>
+                                        <input className="finp" type="text" style={{ fontSize:13 }}
+                                          value={ef.rate_key} onChange={e => fe({ rate_key: e.target.value })} />
+                                      </div>
                                     </div>
-                                    <div className="fld" style={{ marginBottom:0 }}>
-                                      <label className="flbl" style={{ fontSize:11 }}>Unit rate (£)</label>
-                                      <input className="finp" type="number" min="0" step="0.01"
-                                        style={{ width:120, fontSize:13 }}
-                                        value={editForm.rate}
-                                        onChange={e => setEditForm(f => ({ ...f, rate: e.target.value }))} />
+
+                                    <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:4 }}>
+                                      <span style={{ fontSize:12, color:'var(--c-400)' }}>
+                                        Preview total: <strong style={{ color:'rgba(255,255,255,0.85)' }}>{vqMoney(totalPreview)}</strong>
+                                      </span>
+                                      <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                                        <button className="btn btn-amber btn-pill btn-sm"
+                                          onClick={() => {
+                                            const fe2 = editForm;
+                                            const edits = {};
+                                            if (fe2.description !== (item.description || item.desc || '')) edits.description = fe2.description;
+                                            if (fe2.unit !== (item.unit || '')) edits.unit = fe2.unit;
+                                            const newQty = parseFloat(fe2.quantity);
+                                            if (isFinite(newQty) && newQty !== origQty) edits.quantity = newQty;
+                                            if (fe2._useComponents) {
+                                              const mr = parseFloat(fe2.material_rate || 0);
+                                              const lr = parseFloat(fe2.labour_rate   || 0);
+                                              const pr = parseFloat(fe2.plant_rate    || 0);
+                                              const wr = parseFloat(fe2.waste_disposal_rate || 0);
+                                              if (mr !== parseFloat(item.material_rate || 0)) edits.material_rate = mr;
+                                              if (lr !== parseFloat(item.labour_rate   || 0)) edits.labour_rate   = lr;
+                                              if (pr !== parseFloat(item.plant_rate    || 0)) edits.plant_rate    = pr;
+                                              if (wr !== parseFloat(item.waste_disposal_rate || 0)) edits.waste_disposal_rate = wr;
+                                            } else {
+                                              const nr = parseFloat(fe2.rate || 0);
+                                              if (nr !== origRate) edits.rate = nr;
+                                            }
+                                            if (fe2.drawing_ref      !== (item.drawing_ref      || '')) edits.drawing_ref      = fe2.drawing_ref;
+                                            if (fe2.dimension_string !== (item.dimension_string || '')) edits.dimension_string = fe2.dimension_string;
+                                            if (fe2.rate_key         !== (item.rate_key         || '')) edits.rate_key         = fe2.rate_key;
+                                            if (Object.keys(edits).length === 0) { setEditingId(null); return; }
+                                            callFieldEdit(item._key, edits);
+                                          }}>Save changes</button>
+                                        <button className="btn btn-outline btn-pill btn-sm"
+                                          onClick={() => setEditingId(null)}>Cancel</button>
+                                      </div>
                                     </div>
-                                    <div style={{ fontSize:12, color:'var(--c-400)', paddingBottom:4 }}>
-                                      → {vqMoney(Math.round(parseFloat(editForm.qty  || 0) *
-                                                              parseFloat(editForm.rate || 0) * 100) / 100)}
-                                    </div>
-                                    <div style={{ display:'flex', gap:8, marginLeft:'auto' }}>
-                                      <button className="btn btn-amber btn-pill btn-sm"
-                                        onClick={() => {
-                                          const qty  = parseFloat(editForm.qty);
-                                          const rate = parseFloat(editForm.rate);
-                                          if (!isFinite(qty) || !isFinite(rate) || qty < 0 || rate < 0) {
-                                            toast('Enter a valid quantity and rate.', 'error'); return;
-                                          }
-                                          callLine(item._key, 'modify', { qty, rate });
-                                          setEditingId(null);
-                                        }}>Save</button>
-                                      <button className="btn btn-outline btn-pill btn-sm"
-                                        onClick={() => setEditingId(null)}>Cancel</button>
-                                    </div>
-                                  </div>
-                                </td>
-                              </tr>
-                            )}
+                                  </td>
+                                </tr>
+                              );
+                            })()}
 
                             {/* Inline reject reason */}
                             {isRejecting && (
@@ -5417,6 +5867,35 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                                 </td>
                               </tr>
                             )}
+
+                            {/* Inline remove confirm */}
+                            {isRemoving && (
+                              <tr style={{ background:'rgba(100,100,100,0.07)' }}>
+                                <td colSpan={signedOff ? 6 : 7} style={{ padding:'12px 16px' }}>
+                                  <div style={{ display:'flex', gap:12, alignItems:'flex-end', flexWrap:'wrap' }}>
+                                    <div className="fld" style={{ marginBottom:0, flex:1 }}>
+                                      <label className="flbl" style={{ fontSize:11 }}>
+                                        Reason for removal <span style={{ color:'var(--c-400)' }}>(optional)</span>
+                                      </label>
+                                      <input className="finp" style={{ fontSize:13 }}
+                                        placeholder="e.g. Duplicate of line above"
+                                        value={removeReason}
+                                        onChange={e => setRemoveReason(e.target.value)}
+                                        autoFocus />
+                                    </div>
+                                    <div style={{ display:'flex', gap:8 }}>
+                                      <button className="btn btn-pill btn-sm"
+                                        style={{ background:'rgba(100,100,100,0.3)', color:'rgba(255,255,255,0.8)', border:'none' }}
+                                        onClick={() => callRemoveLine(item._key, removeReason.trim())}>
+                                        Remove line
+                                      </button>
+                                      <button className="btn btn-outline btn-pill btn-sm"
+                                        onClick={() => { setRemovingId(null); setRemoveReason(''); }}>Cancel</button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
                           </React.Fragment>
                         );
                       })}
@@ -5429,9 +5908,218 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                       </tr>
                     </tbody>
                   </table>
+
+                  {/* Removed lines disclosure */}
+                  {removedItems.length > 0 && (
+                    <div style={{ marginTop:8 }}>
+                      <button
+                        style={{
+                          background:'none', border:'none', cursor:'pointer',
+                          fontSize:12, color:'var(--c-400)', padding:'4px 0',
+                          display:'flex', alignItems:'center', gap:5,
+                        }}
+                        onClick={() => setRemovedOpen(o => ({
+                          ...o, [section.sectionId]: !o[section.sectionId],
+                        }))}>
+                        {removedOpen[section.sectionId] ? '▾' : '▸'}
+                        Removed lines ({removedItems.length})
+                      </button>
+                      {removedOpen[section.sectionId] && (
+                        <table className="rboq" style={{ width:'100%', opacity:0.6, marginTop:4 }}>
+                          <tbody>
+                            {removedItems.map(item => (
+                              <tr key={item._key}>
+                                <td style={{ textDecoration:'line-through', color:'var(--c-400)' }}>
+                                  <span style={{ fontSize:10, color:'var(--c-500)', textDecoration:'none' }}>REMOVED</span>{' '}
+                                  {item.description || item.desc || '—'}
+                                  {item.removed_reason && (
+                                    <span style={{ fontSize:11, color:'var(--c-500)', marginLeft:6, textDecoration:'none' }}>
+                                      — {item.removed_reason}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="r" style={{ color:'var(--c-400)', textDecoration:'line-through' }}>
+                                  {parseFloat(item.quantity ?? item.qty ?? 0)}
+                                </td>
+                                <td className="r" style={{ color:'var(--c-400)', textDecoration:'line-through' }}>
+                                  {item.unit || '—'}
+                                </td>
+                                <td className="r" style={{ color:'var(--c-400)', textDecoration:'line-through' }}>
+                                  {vqMoney(_itemBaseRate(item))}
+                                </td>
+                                <td className="r" style={{ color:'var(--c-500)', textDecoration:'line-through' }}>
+                                  {vqMoney(Math.round(
+                                    parseFloat(item.quantity ?? item.qty ?? 0) * _itemBaseRate(item) * 100
+                                  ) / 100)}
+                                </td>
+                                <td style={{ textAlign:'center' }}>
+                                  <span style={{ fontSize:10, color:'var(--c-500)' }}>Removed</span>
+                                </td>
+                                {!signedOff && (
+                                  <td>
+                                    <button className="btn btn-ghost btn-sm"
+                                      style={{ fontSize:11, color:'#10B981', padding:'3px 7px' }}
+                                      onClick={() => callRestoreLine(item._key)}>
+                                      Restore
+                                    </button>
+                                  </td>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  )}
+
+                  {/* + Add line (per section) */}
+                  {!signedOff && (
+                    <div style={{ marginTop:8 }}>
+                      {addLineSectionId === section.sectionId ? (
+                        <div style={{
+                          background:'rgba(255,255,255,0.03)',
+                          border:'1px solid rgba(255,255,255,0.08)',
+                          borderRadius:8, padding:'14px 16px', marginTop:4,
+                        }}>
+                          <p style={{ fontSize:12, fontWeight:600, color:'var(--c-300)', marginBottom:10 }}>
+                            Add line to {section.trade}
+                          </p>
+                          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'10px 16px', marginBottom:10 }}>
+                            <div className="fld" style={{ marginBottom:0, gridColumn:'1/3' }}>
+                              <label className="flbl" style={{ fontSize:11 }}>
+                                Description <span style={{ color:'var(--amber)' }}>*</span>
+                              </label>
+                              <textarea className="finp" rows={2}
+                                style={{ fontSize:13, resize:'vertical', fontFamily:'inherit' }}
+                                value={addLineForm.description}
+                                onChange={e => setAddLineForm(f => ({ ...f, description: e.target.value }))} />
+                            </div>
+                            <div className="fld" style={{ marginBottom:0 }}>
+                              <label className="flbl" style={{ fontSize:11 }}>Unit</label>
+                              <input className="finp" type="text" style={{ fontSize:13 }}
+                                value={addLineForm.unit}
+                                onChange={e => setAddLineForm(f => ({ ...f, unit: e.target.value }))} />
+                            </div>
+                            <div className="fld" style={{ marginBottom:0 }}>
+                              <label className="flbl" style={{ fontSize:11 }}>Quantity</label>
+                              <input className="finp" type="number" min="0" step="any" style={{ fontSize:13 }}
+                                value={addLineForm.quantity}
+                                onChange={e => setAddLineForm(f => ({ ...f, quantity: e.target.value }))} />
+                            </div>
+                            <div className="fld" style={{ marginBottom:0 }}>
+                              <label className="flbl" style={{ fontSize:11 }}>Unit rate (£)</label>
+                              <input className="finp" type="number" min="0" step="0.01" style={{ fontSize:13 }}
+                                value={addLineForm.rate}
+                                onChange={e => setAddLineForm(f => ({ ...f, rate: e.target.value }))} />
+                            </div>
+                            <div className="fld" style={{ marginBottom:0 }}>
+                              <label className="flbl" style={{ fontSize:11 }}>Drawing ref</label>
+                              <input className="finp" type="text" style={{ fontSize:13 }}
+                                value={addLineForm.drawing_ref}
+                                onChange={e => setAddLineForm(f => ({ ...f, drawing_ref: e.target.value }))} />
+                            </div>
+                            <div className="fld" style={{ marginBottom:0 }}>
+                              <label className="flbl" style={{ fontSize:11 }}>Rate key</label>
+                              <input className="finp" type="text" style={{ fontSize:13 }}
+                                value={addLineForm.rate_key}
+                                onChange={e => setAddLineForm(f => ({ ...f, rate_key: e.target.value }))} />
+                            </div>
+                          </div>
+                          <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+                            <button className="btn btn-amber btn-pill btn-sm"
+                              disabled={!addLineForm.description.trim()}
+                              onClick={() => callAddLine(section.sectionId, addLineForm)}>
+                              Add line
+                            </button>
+                            <button className="btn btn-outline btn-pill btn-sm"
+                              onClick={() => {
+                                setAddLineSectionId(null);
+                                setAddLineForm({ description:'', unit:'', quantity:'', rate:'', drawing_ref:'', dimension_string:'', rate_key:'' });
+                              }}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          style={{
+                            background:'none', width:'100%', marginTop:4,
+                            border:'1px dashed rgba(255,255,255,0.12)', cursor:'pointer',
+                            fontSize:12, color:'var(--c-400)', padding:'6px 14px', borderRadius:6,
+                            display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                          }}
+                          onClick={() => {
+                            setAddLineSectionId(section.sectionId);
+                            setEditingId(null); setRejectId(null); setRemovingId(null);
+                          }}>
+                          + Add line
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
+
+            {/* + Add section */}
+            {!signedOff && (
+              <div style={{ marginBottom:24 }}>
+                {addSectionOpen ? (
+                  <div style={{
+                    background:'rgba(255,255,255,0.03)',
+                    border:'1px solid rgba(255,255,255,0.08)',
+                    borderRadius:8, padding:'14px 16px',
+                  }}>
+                    <p style={{ fontSize:12, fontWeight:600, color:'var(--c-300)', marginBottom:10 }}>
+                      Add new section
+                    </p>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px 16px', marginBottom:10 }}>
+                      <div className="fld" style={{ marginBottom:0 }}>
+                        <label className="flbl" style={{ fontSize:11 }}>
+                          Trade name <span style={{ color:'var(--amber)' }}>*</span>
+                        </label>
+                        <input className="finp" type="text" style={{ fontSize:13 }}
+                          placeholder="e.g. Structural Steelwork"
+                          value={addSectionForm.trade}
+                          onChange={e => setAddSectionForm(f => ({ ...f, trade: e.target.value }))} />
+                      </div>
+                      <div className="fld" style={{ marginBottom:0 }}>
+                        <label className="flbl" style={{ fontSize:11 }}>NRM2 section (optional)</label>
+                        <input className="finp" type="text" style={{ fontSize:13 }}
+                          placeholder="e.g. 5.9"
+                          value={addSectionForm.nrm2_section}
+                          onChange={e => setAddSectionForm(f => ({ ...f, nrm2_section: e.target.value }))} />
+                      </div>
+                    </div>
+                    <div style={{ display:'flex', gap:8, justifyContent:'flex-end' }}>
+                      <button className="btn btn-amber btn-pill btn-sm"
+                        disabled={!addSectionForm.trade.trim()}
+                        onClick={() => callAddSection(addSectionForm.trade, addSectionForm.nrm2_section)}>
+                        Add section
+                      </button>
+                      <button className="btn btn-outline btn-pill btn-sm"
+                        onClick={() => {
+                          setAddSectionOpen(false);
+                          setAddSectionForm({ trade:'', nrm2_section:'' });
+                        }}>
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    style={{
+                      background:'none', width:'100%',
+                      border:'1px dashed rgba(255,255,255,0.12)', cursor:'pointer',
+                      fontSize:12, color:'var(--c-400)', padding:'8px 16px', borderRadius:6,
+                      display:'flex', alignItems:'center', justifyContent:'center', gap:5,
+                    }}
+                    onClick={() => setAddSectionOpen(true)}>
+                    + Add section
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Grand total */}
             {groups.length > 0 && (

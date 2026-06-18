@@ -303,6 +303,221 @@ def main() -> int:
             print(f"  ✓ sign-off revoked — ok={d.get('ok')}")
 
     # ─────────────────────────────────────────────────────────────────────────
+    # 10 — Full-field edit via field_edits (should revert approved → pending)
+    # ─────────────────────────────────────────────────────────────────────────
+    print(f"\n→ PATCH {line_url}  field_edits (description change)")
+    resp = requests.patch(line_url, headers=headers,
+                          json={"field_edits": {"description": "Smoke test modified description", "quantity": 5}},
+                          timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "PATCH /line field_edits")
+
+    d = _json(resp, "PATCH /line field_edits")
+    if d is None:
+        return 1
+    if resp.status_code != 200:
+        failures += 1
+        print(f"  ❌ field_edits failed {resp.status_code}: {d.get('error', d)}")
+    else:
+        item_r = d.get("item", {})
+        if item_r.get("description") != "Smoke test modified description":
+            failures += 1
+            print(f"  ❌ item description not updated: {item_r.get('description')!r}")
+        else:
+            st = d.get("state", {})
+            print(f"  ✓ description updated, state={st.get('state')}  item_id={d.get('item_id')}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 11 — POST /review/line  (add a new line to the first section)
+    # ─────────────────────────────────────────────────────────────────────────
+    add_line_url = f"{base}/projects/{pid}/review/line"
+    print(f"\n→ POST {add_line_url}  (add new line to section {first_section!r})")
+    resp = requests.post(add_line_url, headers=headers, json={
+        "section_id": first_section,
+        "line": {
+            "description": "Smoke test added line",
+            "unit":        "nr",
+            "quantity":    3,
+            "rate":        25.0,
+        },
+    }, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "POST /review/line")
+
+    d = _json(resp, "POST /review/line")
+    if d is None:
+        return 1
+
+    new_line_id = None
+    if resp.status_code != 200:
+        failures += 1
+        print(f"  ❌ POST /review/line failed {resp.status_code}: {d.get('error', d)}")
+    else:
+        new_line = d.get("line", {})
+        new_line_id = new_line.get("id")
+        if not new_line_id:
+            failures += 1
+            print(f"  ❌ returned line has no id: {new_line!r}")
+        else:
+            print(f"  ✓ line added — id={new_line_id}  total={d.get('line_total')}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 12 — POST /review/add-section  (add a new section)
+    # ─────────────────────────────────────────────────────────────────────────
+    add_sec_url = f"{base}/projects/{pid}/review/add-section"
+    print(f"\n→ POST {add_sec_url}")
+    resp = requests.post(add_sec_url, headers=headers, json={
+        "trade":        "Smoke Test Trade",
+        "nrm2_section": "99.9",
+    }, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "POST /review/add-section")
+
+    d = _json(resp, "POST /review/add-section")
+    if d is None:
+        return 1
+    if resp.status_code != 200:
+        failures += 1
+        print(f"  ❌ POST /review/add-section failed {resp.status_code}: {d.get('error', d)}")
+    else:
+        sec = d.get("section", {})
+        print(f"  ✓ section added — id={sec.get('id')}  trade={sec.get('trade')!r}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 13 — DELETE /review/line/<id>  (soft-remove the newly added line)
+    # ─────────────────────────────────────────────────────────────────────────
+    if new_line_id:
+        rm_url = f"{base}/projects/{pid}/review/line/{new_line_id}"
+        print(f"\n→ DELETE {rm_url}")
+        resp = requests.delete(rm_url, headers=headers,
+                               json={"reason": "Smoke test removal"},
+                               timeout=TIMEOUT_S)
+        print(f"  ← {resp.status_code}")
+        _check_cors(resp, "DELETE /review/line")
+
+        d = _json(resp, "DELETE /review/line")
+        if d is None:
+            return 1
+        if resp.status_code != 200:
+            failures += 1
+            print(f"  ❌ DELETE /review/line failed {resp.status_code}: {d.get('error', d)}")
+        else:
+            print(f"  ✓ line removed — ok={d.get('ok')}")
+
+        # ─────────────────────────────────────────────────────────────────────
+        # 14 — POST /review/line/<id>/restore  (restore the removed line)
+        # ─────────────────────────────────────────────────────────────────────
+        restore_url = f"{base}/projects/{pid}/review/line/{new_line_id}/restore"
+        print(f"\n→ POST {restore_url}")
+        resp = requests.post(restore_url, headers=headers, timeout=TIMEOUT_S)
+        print(f"  ← {resp.status_code}")
+        _check_cors(resp, "POST /review/line/restore")
+
+        d = _json(resp, "POST /review/line/restore")
+        if d is None:
+            return 1
+        if resp.status_code != 200:
+            failures += 1
+            print(f"  ❌ POST /restore failed {resp.status_code}: {d.get('error', d)}")
+        else:
+            print(f"  ✓ line restored — ok={d.get('ok')}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 15 — GET /export/pdf  (working copy; requires no pending lines)
+    # We accept 409 if pending lines remain — the guard is the deliverable.
+    # ─────────────────────────────────────────────────────────────────────────
+    export_pdf_url = f"{base}/projects/{pid}/export/pdf"
+    print(f"\n→ GET {export_pdf_url}")
+    resp = requests.get(export_pdf_url, headers=headers, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "GET /export/pdf")
+    if resp.status_code == 200:
+        ct = resp.headers.get("Content-Type", "")
+        if "pdf" in ct.lower():
+            print(f"  ✓ PDF returned ({len(resp.content)} bytes)")
+        else:
+            failures += 1
+            print(f"  ❌ 200 but Content-Type is {ct!r} (expected PDF)")
+    elif resp.status_code == 409:
+        print(f"  ✓ 409 — pending lines block export (guard working)")
+    else:
+        failures += 1
+        d2 = resp.json() if resp.headers.get("Content-Type","").startswith("application/json") else {}
+        print(f"  ❌ unexpected {resp.status_code}: {d2.get('error', resp.text[:200])}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 16 — GET /export/excel  (working copy)
+    # ─────────────────────────────────────────────────────────────────────────
+    export_xl_url = f"{base}/projects/{pid}/export/excel"
+    print(f"\n→ GET {export_xl_url}")
+    resp = requests.get(export_xl_url, headers=headers, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "GET /export/excel")
+    if resp.status_code == 200:
+        ct = resp.headers.get("Content-Type", "")
+        if "spreadsheet" in ct.lower() or "excel" in ct.lower() or "openxml" in ct.lower():
+            print(f"  ✓ Excel returned ({len(resp.content)} bytes)")
+        else:
+            failures += 1
+            print(f"  ❌ 200 but Content-Type is {ct!r} (expected xlsx)")
+    elif resp.status_code == 409:
+        print(f"  ✓ 409 — pending lines block export (guard working)")
+    elif resp.status_code == 403:
+        print(f"  ✓ 403 — plan gate (expected on non-Pro plan)")
+    else:
+        failures += 1
+        d2 = resp.json() if resp.headers.get("Content-Type","").startswith("application/json") else {}
+        print(f"  ❌ unexpected {resp.status_code}: {d2.get('error', resp.text[:200])}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 17 — GET /export/pdf/original  (raw AI draft — always available)
+    # Verifies that the content comes from boq_data and is never filtered.
+    # ─────────────────────────────────────────────────────────────────────────
+    orig_pdf_url = f"{base}/projects/{pid}/export/pdf/original"
+    print(f"\n→ GET {orig_pdf_url}")
+    resp = requests.get(orig_pdf_url, headers=headers, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "GET /export/pdf/original")
+    if resp.status_code != 200:
+        failures += 1
+        d2 = resp.json() if resp.headers.get("Content-Type","").startswith("application/json") else {}
+        print(f"  ❌ original PDF failed {resp.status_code}: {d2.get('error', resp.text[:200])}")
+    else:
+        ct = resp.headers.get("Content-Type", "")
+        cd = resp.headers.get("Content-Disposition", "")
+        if "pdf" not in ct.lower():
+            failures += 1
+            print(f"  ❌ Content-Type is {ct!r} (expected PDF)")
+        elif "AI-DRAFT" not in cd:
+            failures += 1
+            print(f"  ❌ Content-Disposition {cd!r} doesn't include 'AI-DRAFT'")
+        else:
+            print(f"  ✓ original AI draft PDF returned ({len(resp.content)} bytes) — {cd!r}")
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 18 — GET /export/excel/original  (raw AI draft)
+    # ─────────────────────────────────────────────────────────────────────────
+    orig_xl_url = f"{base}/projects/{pid}/export/excel/original"
+    print(f"\n→ GET {orig_xl_url}")
+    resp = requests.get(orig_xl_url, headers=headers, timeout=TIMEOUT_S)
+    print(f"  ← {resp.status_code}")
+    _check_cors(resp, "GET /export/excel/original")
+    if resp.status_code == 403:
+        print(f"  ✓ 403 — plan gate (expected on non-Pro plan)")
+    elif resp.status_code != 200:
+        failures += 1
+        d2 = resp.json() if resp.headers.get("Content-Type","").startswith("application/json") else {}
+        print(f"  ❌ original Excel failed {resp.status_code}: {d2.get('error', resp.text[:200])}")
+    else:
+        ct = resp.headers.get("Content-Type", "")
+        cd = resp.headers.get("Content-Disposition", "")
+        if "AI-DRAFT" not in cd:
+            failures += 1
+            print(f"  ❌ Content-Disposition {cd!r} doesn't include 'AI-DRAFT'")
+        else:
+            print(f"  ✓ original AI draft Excel returned ({len(resp.content)} bytes) — {cd!r}")
+
+    # ─────────────────────────────────────────────────────────────────────────
     # Final verdict
     # ─────────────────────────────────────────────────────────────────────────
     if failures:

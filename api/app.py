@@ -1750,32 +1750,44 @@ def _assign_item_ids(boq_data: dict) -> dict:
 def _effective_line_total(item: dict, rs: dict) -> float:
     """Compute the line total after applying review overrides.
 
-    When a QS modifies a line, rs carries 'qty' and/or 'rate' overrides.
-    Falls back to the item's enriched values so the formula is always:
-        effective_qty × effective_rate
-    which mirrors the _enrich_boq() convention (rate = sum of component rates).
+    When a QS modifies a line via the old review_states model, rs carries
+    'qty' and/or 'rate' overrides.  For items whose edits are baked directly
+    into working_boq, rs has no qty/rate so the item's own values are used.
+    Falls back through: component sum → flat item.rate → 0, so newly added
+    lines that carry only a flat 'rate' field still compute correctly.
     """
     qty = float(rs.get("qty") if rs.get("qty") is not None else
                 (item.get("quantity") or item.get("qty") or 0))
-    base_rate = (
+    component_total = (
         float(item.get("material_rate")      or 0) +
         float(item.get("labour_rate")        or 0) +
         float(item.get("plant_rate")         or 0) +
         float(item.get("waste_disposal_rate") or 0)
     )
+    # component total takes precedence; flat rate field is a fallback for newly
+    # added lines that carry only a single 'rate' value (no component breakdown).
+    base_rate = component_total if component_total > 0 else float(item.get("rate") or 0)
     rate = float(rs.get("rate") if rs.get("rate") is not None else base_rate)
     return round(qty * rate, 2)
 
 
 def _review_counts(boq_data: dict, review_states: dict) -> dict:
-    """Count items per review state across the full bill."""
-    counts: dict = {"pending": 0, "approved": 0, "modified": 0, "rejected": 0, "total": 0}
+    """Count items per review state across the full bill.
+
+    Soft-deleted items (removed: true) are tallied in the 'removed' key and
+    excluded from all other counts including 'total', so the review progress
+    percentage and sign-off gate only consider the live working bill.
+    """
+    counts: dict = {"pending": 0, "approved": 0, "modified": 0, "rejected": 0, "removed": 0, "total": 0}
     groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
     for gi, group in enumerate(groups):
         if not isinstance(group, dict):
             continue
         for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
             if not isinstance(item, dict):
+                continue
+            if item.get("removed"):
+                counts["removed"] += 1
                 continue
             key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
             state = (review_states.get(key) or {}).get("state", "pending")
@@ -1785,7 +1797,7 @@ def _review_counts(boq_data: dict, review_states: dict) -> dict:
 
 
 def _review_grand_total(boq_data: dict, review_states: dict) -> float:
-    """Grand total with review overrides applied; rejected lines contribute £0."""
+    """Grand total; rejected and soft-deleted lines contribute £0."""
     total = 0.0
     groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
     for gi, group in enumerate(groups):
@@ -1793,6 +1805,8 @@ def _review_grand_total(boq_data: dict, review_states: dict) -> float:
             continue
         for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
             if not isinstance(item, dict):
+                continue
+            if item.get("removed"):
                 continue
             key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
             rs = review_states.get(key) or {}
@@ -1803,12 +1817,13 @@ def _review_grand_total(boq_data: dict, review_states: dict) -> float:
 
 
 def _signoff_hash(boq_data: dict, review_states: dict) -> str:
-    """Compute a SHA-256 fingerprint of the effective reviewed bill.
+    """SHA-256 fingerprint of the effective reviewed bill.
 
-    The hash is computed over the canonical effective line data (trade, desc,
-    effective qty, effective rate, state) serialised as sorted-key JSON so the
-    same bill always produces the same hash regardless of dict ordering.
-    Rejected lines are excluded — they don't appear in the signed bill.
+    Operates on working_boq (passed by the caller) so the hash covers the
+    live, edited bill — not the original AI draft.  Rejected and soft-deleted
+    lines are excluded; they don't appear in the signed document.
+    The hash is over (trade, description, effective_qty, unit, effective_total)
+    sorted-key JSON so dict ordering never affects the value.
     """
     import hashlib
     lines = []
@@ -1820,24 +1835,20 @@ def _signoff_hash(boq_data: dict, review_states: dict) -> str:
         for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
             if not isinstance(item, dict):
                 continue
+            if item.get("removed"):
+                continue
             key   = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
             rs    = review_states.get(key) or {}
             state = rs.get("state", "pending")
             if state == "rejected":
                 continue
-            base_rate = (
-                float(item.get("material_rate")      or 0) +
-                float(item.get("labour_rate")        or 0) +
-                float(item.get("plant_rate")         or 0) +
-                float(item.get("waste_disposal_rate") or 0)
-            )
             lines.append({
-                "trade": trade,
-                "desc":  item.get("description") or item.get("desc") or "",
-                "qty":   float(rs["qty"])  if rs.get("qty")  is not None else float(item.get("quantity") or item.get("qty") or 0),
-                "unit":  item.get("unit") or "",
-                "rate":  float(rs["rate"]) if rs.get("rate") is not None else base_rate,
-                "state": state,
+                "trade":  trade,
+                "desc":   item.get("description") or item.get("desc") or "",
+                "qty":    float(rs["qty"]) if rs.get("qty") is not None else float(item.get("quantity") or item.get("qty") or 0),
+                "unit":   item.get("unit") or "",
+                "total":  _effective_line_total(item, rs),
+                "state":  state,
             })
     canonical = json.dumps(lines, sort_keys=True, ensure_ascii=True)
     return hashlib.sha256(canonical.encode()).hexdigest()
@@ -1850,7 +1861,7 @@ def _fetch_review_project(project_id: str, user_id: str):
             _db_client()
             .table("projects")
             .select(
-                "id, name, client_name, status, boq_data, review_states, "
+                "id, name, client_name, status, boq_data, working_boq, review_states, "
                 "signed_off_at, signed_off_by, signoff_title, signoff_hash"
             )
             .eq("id", project_id)
@@ -1870,12 +1881,19 @@ def _fetch_review_project(project_id: str, user_id: str):
 def review_get(project_id):
     """Return the full review workspace payload for a project.
 
+    On first open (working_boq is null), bootstraps working_boq as a deep copy
+    of boq_data with stable UUIDs injected, persists it, and returns it.
+    Subsequent opens return working_boq as-is — it is never re-derived from
+    boq_data again so QS edits are never overwritten.
+
     Response shape:
     {
-      "project":      { id, name, client_name, status, signed_off_at, ... },
-      "boq_data":     { ... },   // with stable 'id' injected on every item
-      "review_states": { item_id: {state, qty?, rate?, reason?}, ... },
-      "audit_events": [ ... ]    // newest first, up to 100 rows
+      "project":       { id, name, client_name, status, signed_off_at, ... },
+      "boq_data":      { ... },   // working_boq (or bootstrapped copy) — the live bill
+      "review_states": { item_id: {state, reason?}, ... },
+      "counts":        { pending, approved, modified, rejected, removed, total },
+      "grand_total":   float,
+      "audit_events":  [ ... ]    // newest first, up to 100 rows
     }
     """
     user, err = _authenticated_user()
@@ -1890,7 +1908,16 @@ def review_get(project_id):
     if not boq_data:
         return jsonify({"error": "No Bill of Quantities has been generated for this project yet."}), 422
 
-    boq_with_ids = _assign_item_ids(boq_data)
+    working_boq = project.get("working_boq")
+    if not working_boq:
+        # First open: bootstrap working_boq from boq_data with stable IDs assigned.
+        working_boq = _assign_item_ids(boq_data)
+        try:
+            _db_client().table("projects").update({
+                "working_boq": working_boq,
+            }).eq("id", project_id).eq("user_id", user.id).execute()
+        except Exception as exc:
+            app.logger.warning("Could not persist working_boq bootstrap for %s: %s", project_id, exc)
 
     # Audit trail — newest first, limit 100
     audit_events: list = []
@@ -1908,6 +1935,7 @@ def review_get(project_id):
     except Exception as exc:
         app.logger.warning("Could not load audit events for project %s: %s", project_id, exc)
 
+    review_states = project.get("review_states") or {}
     return jsonify({
         "project": {
             "id":           project["id"],
@@ -1919,33 +1947,62 @@ def review_get(project_id):
             "signoff_title":   project.get("signoff_title"),
             "signoff_hash":    project.get("signoff_hash"),
         },
-        "boq_data":     boq_with_ids,
-        "review_states": project.get("review_states") or {},
+        "boq_data":      working_boq,   # key kept as boq_data for frontend compatibility
+        "review_states": review_states,
+        "counts":        _review_counts(working_boq, review_states),
+        "grand_total":   _review_grand_total(working_boq, review_states),
         "audit_events":  audit_events,
     }), 200
 
 
+_EDITABLE_LINE_FIELDS = frozenset({
+    "description", "trade", "unit", "quantity", "rate",
+    "material_rate", "labour_rate", "plant_rate", "waste_disposal_rate",
+    "drawing_ref", "dimension_string", "rate_key",
+})
+
+
 @app.route("/projects/<project_id>/review/line/<item_id>", methods=["PATCH"])
 def review_line_update(project_id, item_id):
-    """Update one line's review state.
+    """Update one line: field edits and/or review-state action.
 
-    Body: { action: "approve"|"modify"|"reject"|"reopen", qty?, rate?, reason? }
-    Returns: { item_id, state, grand_total, counts, audit_event? }
+    Body: {
+      field_edits?: { description?, trade?, unit?, quantity?, rate?,
+                      material_rate?, labour_rate?, plant_rate?,
+                      waste_disposal_rate?, drawing_ref?, dimension_string?,
+                      rate_key? },
+      action?: "approve"|"reject"|"reopen",
+      reason?:  str  (required when action=reject)
+    }
+
+    Backward compat: action="modify" with qty/rate is translated to field_edits
+    so old clients and tests continue to work.
+
+    Returns: { item_id, item, state, grand_total, counts, audit_events }
     """
     user, err = _authenticated_user()
     if err:
         return err
 
-    body   = request.get_json(force=True, silent=True) or {}
-    action = (body.get("action") or "").strip()
+    body        = request.get_json(force=True, silent=True) or {}
+    action      = (body.get("action") or "").strip()
+    field_edits = dict(body.get("field_edits") or {})
+    reason      = (body.get("reason") or "").strip()
 
-    if action not in ("approve", "modify", "reject", "reopen"):
-        return jsonify({"error": "action must be one of: approve, modify, reject, reopen"}), 400
-    if action == "reject" and not (body.get("reason") or "").strip():
-        return jsonify({"error": "reason is required when rejecting a line."}), 400
+    # Backward compat: old action="modify" with qty/rate → field_edits
     if action == "modify":
-        if body.get("qty") is None and body.get("rate") is None:
-            return jsonify({"error": "modify requires at least one of qty or rate."}), 400
+        if body.get("qty") is not None:
+            field_edits.setdefault("quantity", float(body["qty"]))
+        if body.get("rate") is not None:
+            field_edits.setdefault("rate", float(body["rate"]))
+        action = ""
+
+    if action and action not in ("approve", "reject", "reopen"):
+        return jsonify({"error": "action must be one of: approve, reject, reopen"}), 400
+    if action == "reject" and not reason:
+        return jsonify({"error": "reason is required when rejecting a line."}), 400
+    if not field_edits and not action:
+        return jsonify({"error": "Provide field_edits and/or action."}), 400
 
     project, err = _fetch_review_project(project_id, user.id)
     if err:
@@ -1954,55 +2011,101 @@ def review_line_update(project_id, item_id):
     if project.get("signed_off_at"):
         return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
 
-    boq_data      = project.get("boq_data") or {}
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
     review_states = dict(project.get("review_states") or {})
 
-    prev_state = review_states.get(item_id, {})
+    # Locate the line in working_boq
+    found_item = None
+    for group in (working_boq.get("bill_of_quantities") or working_boq.get("trades") or []):
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get("items") or group.get("line_items") or []):
+            if isinstance(item, dict) and item.get("id") == item_id:
+                found_item = item
+                break
+        if found_item is not None:
+            break
 
-    if action == "approve":
-        new_state: dict = {"state": "approved"}
-    elif action == "reopen":
-        new_state = {"state": "pending"}
-    elif action == "reject":
-        new_state = {"state": "rejected", "reason": body["reason"].strip()}
-    else:  # modify
-        new_state = {"state": "modified"}
-        if body.get("qty") is not None:
-            new_state["qty"] = float(body["qty"])
-        if body.get("rate") is not None:
-            new_state["rate"] = float(body["rate"])
+    if found_item is None:
+        return jsonify({"error": f"Line {item_id!r} not found in working bill."}), 404
 
-    review_states[item_id] = new_state
+    audit_rows: list = []
 
+    # ── Apply field edits ────────────────────────────────────────────────────
+    if field_edits:
+        for field, new_val in field_edits.items():
+            if field not in _EDITABLE_LINE_FIELDS:
+                continue
+            if field in ("quantity", "rate", "material_rate", "labour_rate",
+                         "plant_rate", "waste_disposal_rate"):
+                new_val = float(new_val) if new_val is not None else 0.0
+            old_val = found_item.get(field)
+            if old_val == new_val:
+                continue
+            found_item[field] = new_val
+            audit_row = _append_audit_event(
+                project_id, user.id, "line_edited",
+                item_id=item_id,
+                prev_state={"field": field, "old_value": old_val},
+                new_state={"field": field, "new_value": new_val},
+            )
+            if audit_row:
+                audit_rows.append(audit_row)
+
+        # Recompute stored total so the item is self-consistent
+        rs = review_states.get(item_id) or {}
+        found_item["total"] = _effective_line_total(found_item, rs)
+
+        # State transition: approved → pending (edit invalidates prior approval);
+        # rejected stays rejected (QS must explicitly Reopen); others → modified.
+        current_state = rs.get("state", "pending")
+        if current_state == "approved":
+            review_states[item_id] = {**rs, "state": "pending"}
+        elif current_state != "rejected":
+            review_states[item_id] = {**rs, "state": "modified"}
+
+    # ── Apply review action ──────────────────────────────────────────────────
+    if action:
+        prev_rs = review_states.get(item_id, {})
+        if action == "approve":
+            new_rs: dict = {"state": "approved"}
+        elif action == "reopen":
+            new_rs = {"state": "pending"}
+        else:  # reject
+            new_rs = {"state": "rejected", "reason": reason}
+        review_states[item_id] = new_rs
+
+        audit_row = _append_audit_event(
+            project_id, user.id,
+            {"approve": "line_approved", "reject": "line_rejected", "reopen": "line_reopened"}[action],
+            item_id=item_id,
+            prev_state=prev_rs if prev_rs else None,
+            new_state=new_rs,
+            reason=reason or None,
+        )
+        if audit_row:
+            audit_rows.append(audit_row)
+
+    # ── Persist ──────────────────────────────────────────────────────────────
     try:
         _db_client().table("projects").update({
+            "working_boq":   working_boq,
             "review_states": review_states,
-            "status": "in_review",
+            "status":        "in_review",
         }).eq("id", project_id).eq("user_id", user.id).execute()
     except Exception as exc:
-        return jsonify({"error": f"Failed to save review state: {exc}"}), 500
+        return jsonify({"error": f"Failed to save changes: {exc}"}), 500
 
-    audit_action = {
-        "approve": "line_approved",
-        "modify":  "line_modified",
-        "reject":  "line_rejected",
-        "reopen":  "line_reopened",
-    }[action]
-
-    audit_row = _append_audit_event(
-        project_id, user.id, audit_action,
-        item_id=item_id,
-        prev_state=prev_state if prev_state else None,
-        new_state=new_state,
-        reason=body.get("reason") or None,
-    )
-
+    final_rs = review_states.get(item_id, {"state": "pending"})
     return jsonify({
-        "item_id":    item_id,
-        "state":      new_state,
-        "grand_total": _review_grand_total(boq_data, review_states),
-        "counts":     _review_counts(boq_data, review_states),
-        "audit_event": audit_row,
+        "item_id":      item_id,
+        "item":         found_item,
+        "state":        final_rs,
+        "grand_total":  _review_grand_total(working_boq, review_states),
+        "counts":       _review_counts(working_boq, review_states),
+        "audit_events": audit_rows,
+        # legacy key so old callers that read audit_event (singular) still work
+        "audit_event":  audit_rows[0] if audit_rows else None,
     }), 200
 
 
@@ -2029,12 +2132,12 @@ def review_section_approve(project_id):
     if project.get("signed_off_at"):
         return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
 
-    boq_data      = project.get("boq_data") or {}
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
     review_states = dict(project.get("review_states") or {})
 
-    # Walk the matching section and approve every pending item
+    # Walk the matching section and approve every non-removed pending item
     approved_count = 0
-    groups = boq_data.get("bill_of_quantities") or boq_data.get("trades") or []
+    groups = working_boq.get("bill_of_quantities") or working_boq.get("trades") or []
     for gi, group in enumerate(groups):
         if not isinstance(group, dict):
             continue
@@ -2044,8 +2147,11 @@ def review_section_approve(project_id):
         for ii, item in enumerate(group.get("items") or group.get("line_items") or []):
             if not isinstance(item, dict):
                 continue
+            if item.get("removed"):
+                continue
             key = item.get("id") or item.get("item_code") or f"g{gi}_i{ii}"
-            if (review_states.get(key) or {}).get("state", "pending") == "pending":
+            cur_state = (review_states.get(key) or {}).get("state", "pending")
+            if cur_state in ("pending", "modified"):
                 review_states[key] = {"state": "approved"}
                 approved_count += 1
 
@@ -2066,8 +2172,8 @@ def review_section_approve(project_id):
 
     return jsonify({
         "approved_count": approved_count,
-        "grand_total":    _review_grand_total(boq_data, review_states),
-        "counts":         _review_counts(boq_data, review_states),
+        "grand_total":    _review_grand_total(working_boq, review_states),
+        "counts":         _review_counts(working_boq, review_states),
         "audit_event":    audit_row,
     }), 200
 
@@ -2104,10 +2210,18 @@ def review_signoff(project_id):
     if project.get("signed_off_at"):
         return jsonify({"error": "Bill is already signed off."}), 409
 
-    boq_data      = project.get("boq_data") or {}
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
     review_states = project.get("review_states") or {}
 
-    content_hash  = _signoff_hash(boq_data, review_states)
+    # Pending-gate: all lines must be reviewed before sign-off.
+    counts = _review_counts(working_boq, review_states)
+    if counts.get("pending", 0) > 0:
+        return jsonify({
+            "error":         f"{counts['pending']} line(s) still pending review.",
+            "pending_count": counts["pending"],
+        }), 409
+
+    content_hash  = _signoff_hash(working_boq, review_states)
 
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc).isoformat()
@@ -2212,6 +2326,506 @@ def review_audit(project_id):
         return jsonify({"audit_events": getattr(res, "data", None) or []}), 200
     except Exception as exc:
         return jsonify({"error": f"Could not load audit trail: {exc}"}), 500
+
+
+@app.route("/projects/<project_id>/review/line", methods=["POST"])
+def review_line_create(project_id):
+    """Add a new line to an existing section in working_boq.
+
+    Body: {
+      section_id: str,          // section UUID or trade name
+      line: {
+        description: str,       // required
+        unit?: str,
+        quantity?: float,
+        rate? | material_rate?/labour_rate?/plant_rate?/waste_disposal_rate?: float,
+        drawing_ref?: str,
+        dimension_string?: str,
+        rate_key?: str,
+      }
+    }
+    Returns: { line, grand_total, counts, audit_event }
+    """
+    from uuid import uuid4
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body       = request.get_json(force=True, silent=True) or {}
+    section_id = (body.get("section_id") or "").strip()
+    line_data  = body.get("line") or {}
+
+    if not section_id:
+        return jsonify({"error": "section_id is required."}), 400
+    if not (line_data.get("description") or "").strip():
+        return jsonify({"error": "line.description is required."}), 400
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
+    review_states = dict(project.get("review_states") or {})
+
+    # Locate target section by UUID id or trade/name
+    target_group = None
+    groups = working_boq.get("bill_of_quantities") or working_boq.get("trades") or []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        if group.get("id") == section_id:
+            target_group = group
+            break
+        if group.get("trade") == section_id or group.get("name") == section_id:
+            target_group = group
+            break
+
+    if target_group is None:
+        return jsonify({"error": f"Section {section_id!r} not found."}), 404
+
+    new_id   = str(uuid4())
+    new_line: dict = {
+        "id":               new_id,
+        "description":      (line_data.get("description") or "").strip(),
+        "unit":             line_data.get("unit") or "",
+        "quantity":         float(line_data.get("quantity") or 0),
+        "drawing_ref":      line_data.get("drawing_ref") or "",
+        "dimension_string": line_data.get("dimension_string") or "",
+        "rate_key":         line_data.get("rate_key") or "",
+    }
+    for rfield in ("rate", "material_rate", "labour_rate", "plant_rate", "waste_disposal_rate"):
+        if line_data.get(rfield) is not None:
+            new_line[rfield] = float(line_data[rfield])
+    new_line["total"] = _effective_line_total(new_line, {})
+
+    key_name = "items" if "items" in target_group else "line_items"
+    if key_name not in target_group:
+        target_group["items"] = []
+        key_name = "items"
+    target_group[key_name].append(new_line)
+    review_states[new_id] = {"state": "pending"}
+
+    try:
+        _db_client().table("projects").update({
+            "working_boq":   working_boq,
+            "review_states": review_states,
+            "status":        "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to save new line: {exc}"}), 500
+
+    trade_name = target_group.get("trade") or target_group.get("name") or ""
+    audit_row = _append_audit_event(
+        project_id, user.id, "line_added",
+        item_id=new_id,
+        section=trade_name,
+        new_state={"description": new_line["description"], "total": new_line["total"]},
+    )
+
+    return jsonify({
+        "line":        new_line,
+        "grand_total": _review_grand_total(working_boq, review_states),
+        "counts":      _review_counts(working_boq, review_states),
+        "audit_event": audit_row,
+    }), 200
+
+
+@app.route("/projects/<project_id>/review/add-section", methods=["POST"])
+def review_add_section(project_id):
+    """Add a new section (trade) to working_boq.
+
+    Body: { trade: str, nrm2_section?: str }
+    Returns: { section, audit_event }
+    """
+    from uuid import uuid4
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body  = request.get_json(force=True, silent=True) or {}
+    trade = (body.get("trade") or "").strip()
+    if not trade:
+        return jsonify({"error": "trade is required."}), 400
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    working_boq = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
+    nrm2        = (body.get("nrm2_section") or "").strip()
+
+    new_section: dict = {"id": str(uuid4()), "trade": trade, "items": []}
+    if nrm2:
+        new_section["nrm2_section"] = nrm2
+
+    bill_key = "bill_of_quantities" if "bill_of_quantities" in working_boq else "trades"
+    if bill_key not in working_boq:
+        working_boq[bill_key] = []
+    working_boq[bill_key].append(new_section)
+
+    try:
+        _db_client().table("projects").update({
+            "working_boq": working_boq,
+            "status":      "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to save new section: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "section_added",
+        section=trade,
+        new_state={"trade": trade, "nrm2_section": nrm2 or None},
+    )
+
+    return jsonify({"section": new_section, "audit_event": audit_row}), 200
+
+
+@app.route("/projects/<project_id>/review/line/<item_id>", methods=["DELETE"])
+def review_line_remove(project_id, item_id):
+    """Soft-delete a line (sets removed: true; never erases data).
+
+    Body (optional): { reason: str }
+    Returns: { grand_total, counts, audit_event }
+    """
+    from datetime import datetime, timezone
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    body   = request.get_json(force=True, silent=True) or {}
+    reason = (body.get("reason") or "").strip()
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
+    review_states = dict(project.get("review_states") or {})
+
+    now   = datetime.now(timezone.utc).isoformat()
+    found = False
+    for group in (working_boq.get("bill_of_quantities") or working_boq.get("trades") or []):
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get("items") or group.get("line_items") or []):
+            if isinstance(item, dict) and item.get("id") == item_id:
+                item["removed"]        = True
+                item["removed_at"]     = now
+                item["removed_reason"] = reason or None
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        return jsonify({"error": f"Line {item_id!r} not found."}), 404
+
+    try:
+        _db_client().table("projects").update({
+            "working_boq":   working_boq,
+            "review_states": review_states,
+            "status":        "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to remove line: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "line_removed",
+        item_id=item_id,
+        reason=reason or None,
+        new_state={"removed": True, "removed_at": now},
+    )
+
+    return jsonify({
+        "grand_total": _review_grand_total(working_boq, review_states),
+        "counts":      _review_counts(working_boq, review_states),
+        "audit_event": audit_row,
+    }), 200
+
+
+@app.route("/projects/<project_id>/review/line/<item_id>/restore", methods=["POST"])
+def review_line_restore(project_id, item_id):
+    """Restore a soft-deleted line (clears removed flag).
+
+    Returns: { grand_total, counts, audit_event }
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    if project.get("signed_off_at"):
+        return jsonify({"error": "Bill is signed off. Revoke sign-off before making changes."}), 409
+
+    working_boq   = project.get("working_boq") or _assign_item_ids(project.get("boq_data") or {})
+    review_states = dict(project.get("review_states") or {})
+
+    found = False
+    for group in (working_boq.get("bill_of_quantities") or working_boq.get("trades") or []):
+        if not isinstance(group, dict):
+            continue
+        for item in (group.get("items") or group.get("line_items") or []):
+            if isinstance(item, dict) and item.get("id") == item_id:
+                item.pop("removed", None)
+                item.pop("removed_at", None)
+                item.pop("removed_reason", None)
+                found = True
+                break
+        if found:
+            break
+
+    if not found:
+        return jsonify({"error": f"Line {item_id!r} not found."}), 404
+
+    try:
+        _db_client().table("projects").update({
+            "working_boq":   working_boq,
+            "review_states": review_states,
+            "status":        "in_review",
+        }).eq("id", project_id).eq("user_id", user.id).execute()
+    except Exception as exc:
+        return jsonify({"error": f"Failed to restore line: {exc}"}), 500
+
+    audit_row = _append_audit_event(
+        project_id, user.id, "line_restored",
+        item_id=item_id,
+        new_state={"removed": False},
+    )
+
+    return jsonify({
+        "grand_total": _review_grand_total(working_boq, review_states),
+        "counts":      _review_counts(working_boq, review_states),
+        "audit_event": audit_row,
+    }), 200
+
+
+def _build_export_payload(live_boq: dict, review_states: dict, project: dict) -> dict:
+    """Build a filtered BoQ dict for export.
+
+    Copies live_boq, removes rejected and soft-deleted lines from each group,
+    recomputes every line's total, attaches the signoff block when applicable,
+    and drops empty sections.  Does NOT mutate the original live_boq dict.
+    """
+    payload   = copy.deepcopy(live_boq)
+    bill_key  = "bill_of_quantities" if "bill_of_quantities" in payload else "trades"
+    groups    = payload.get(bill_key) or []
+    for group in groups:
+        if not isinstance(group, dict):
+            continue
+        items_key = "items" if "items" in group else "line_items"
+        kept: list = []
+        for item in (group.get(items_key) or []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("removed"):
+                continue
+            key = item.get("id") or item.get("item_code") or ""
+            rs  = (review_states or {}).get(key) or {}
+            if rs.get("state") == "rejected":
+                continue
+            item["total"] = _effective_line_total(item, rs)
+            kept.append(item)
+        group[items_key] = kept
+    # Drop sections that have no remaining items after filtering
+    payload[bill_key] = [
+        g for g in groups
+        if isinstance(g, dict) and (g.get("items") or g.get("line_items"))
+    ]
+    if project.get("signed_off_at"):
+        payload["signoff"] = {
+            "signed_off_by": project.get("signed_off_by"),
+            "signoff_title":  project.get("signoff_title"),
+            "signed_off_at":  project.get("signed_off_at"),
+            "signoff_hash":   project.get("signoff_hash"),
+        }
+    return payload
+
+
+@app.route("/projects/<project_id>/export/pdf", methods=["GET"])
+def export_project_pdf(project_id):
+    """Export the live, QS-edited working bill as PDF.
+
+    Uses working_boq when present; falls back to boq_data for projects that
+    pre-date this column (so old projects still export correctly).
+    Excluded: rejected lines, soft-deleted lines.  Attached: signoff block
+    when the bill has been signed off.
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    live_boq = project.get("working_boq") or project.get("boq_data")
+    if not live_boq:
+        return jsonify({"error": "No Bill of Quantities for this project."}), 422
+
+    review_states  = project.get("review_states") or {}
+    _exp_watermark = True
+    try:
+        if _supabase:
+            _plan = ((user.user_metadata or {}).get("plan", "free") or "free").lower()
+            _exp_watermark = _plan not in ("pro", "studio")
+    except Exception as _we:
+        app.logger.warning("Watermark check failed: %s", _we)
+
+    branding = _load_user_branding()
+    payload  = _build_export_payload(live_boq, review_states, project)
+    try:
+        pdf_bytes = generate_boq_pdf(payload, watermark=_exp_watermark, branding=branding)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"error": f"PDF generation failed: {exc}"}), 500
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name='bill-of-quantities.pdf',
+    )
+
+
+@app.route("/projects/<project_id>/export/excel", methods=["GET"])
+def export_project_excel(project_id):
+    """Export the live, QS-edited working bill as Excel.  Pro/Studio only."""
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    try:
+        if _supabase:
+            _plan = ((user.user_metadata or {}).get("plan", "free") or "free").lower()
+            if _plan not in ("pro", "studio"):
+                return jsonify({"error": "Excel export is available on Pro and Studio plans."}), 403
+    except Exception as _xlge:
+        app.logger.warning("Plan gate check failed for Excel export: %s", _xlge)
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    live_boq = project.get("working_boq") or project.get("boq_data")
+    if not live_boq:
+        return jsonify({"error": "No Bill of Quantities for this project."}), 422
+
+    review_states = project.get("review_states") or {}
+    branding      = _load_user_branding()
+    firm_name     = branding.get("company_name", "")
+    project_name  = project.get("name") or ""
+    payload       = _build_export_payload(live_boq, review_states, project)
+    try:
+        excel_bytes = generate_boq_excel(payload, firm_name, project_name, branding=branding)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"error": f"Excel generation failed: {exc}"}), 500
+
+    return send_file(
+        io.BytesIO(excel_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="bill-of-quantities.xlsx",
+    )
+
+
+@app.route("/projects/<project_id>/export/pdf/original", methods=["GET"])
+def export_project_pdf_original(project_id):
+    """Export the original, untouched AI draft as PDF.
+
+    Reads boq_data only — never working_boq, never review_states.  No sign-off
+    block (the original draft is never signed; only the reviewed copy can be).
+    The filename makes it unmistakable that this is the pre-review AI output.
+    """
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    boq_data = project.get("boq_data")
+    if not boq_data:
+        return jsonify({"error": "No AI draft exists for this project yet."}), 404
+
+    _exp_watermark = True
+    try:
+        if _supabase:
+            _plan = ((user.user_metadata or {}).get("plan", "free") or "free").lower()
+            _exp_watermark = _plan not in ("pro", "studio")
+    except Exception as _we:
+        app.logger.warning("Watermark check failed: %s", _we)
+
+    branding = _load_user_branding()
+    try:
+        pdf_bytes = generate_boq_pdf(boq_data, watermark=_exp_watermark, branding=branding)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"error": f"PDF generation failed: {exc}"}), 500
+
+    return send_file(
+        io.BytesIO(pdf_bytes),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name='bill-of-quantities-AI-DRAFT.pdf',
+    )
+
+
+@app.route("/projects/<project_id>/export/excel/original", methods=["GET"])
+def export_project_excel_original(project_id):
+    """Export the original, untouched AI draft as Excel.  Pro/Studio only."""
+    user, err = _authenticated_user()
+    if err:
+        return err
+
+    try:
+        if _supabase:
+            _plan = ((user.user_metadata or {}).get("plan", "free") or "free").lower()
+            if _plan not in ("pro", "studio"):
+                return jsonify({"error": "Excel export is available on Pro and Studio plans."}), 403
+    except Exception as _xlge:
+        app.logger.warning("Plan gate check failed for Excel export: %s", _xlge)
+
+    project, err = _fetch_review_project(project_id, user.id)
+    if err:
+        return err
+
+    boq_data = project.get("boq_data")
+    if not boq_data:
+        return jsonify({"error": "No AI draft exists for this project yet."}), 404
+
+    branding     = _load_user_branding()
+    firm_name    = branding.get("company_name", "")
+    project_name = project.get("name") or ""
+    try:
+        excel_bytes = generate_boq_excel(boq_data, firm_name, project_name, branding=branding)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 422
+    except Exception as exc:
+        return jsonify({"error": f"Excel generation failed: {exc}"}), 500
+
+    return send_file(
+        io.BytesIO(excel_bytes),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name="bill-of-quantities-AI-DRAFT.xlsx",
+    )
 
 
 def _run_boq_pipeline(user=None):
