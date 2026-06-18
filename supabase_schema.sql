@@ -287,3 +287,11 @@ create policy "Service role inserts audit events"
 
 -- Reload schema so new columns and table are visible to the API immediately.
 notify pgrst, 'reload schema';
+
+-- ── Editable working copy of the bill ──────────────────────────────────────
+-- boq_data remains the untouched AI output (read-only reference for diffing).
+-- working_boq is the live, QS-editable bill: every Review workspace edit,
+-- added line, added section and soft-delete happens here. Exports render
+-- working_boq when present, falling back to boq_data for projects that
+-- predate this column (so old projects don't break).
+alter table public.projects add column if not exists working_boq jsonb;
