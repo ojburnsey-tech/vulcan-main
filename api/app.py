@@ -12,6 +12,7 @@ from supabase import create_client # supabase-py v2 — wraps the Supabase REST 
 from rates import RATES_DB         # our local dict of 2025-2026 UK construction rates (material + labour per unit)
 from export_pdf import generate_boq_pdf  # ReportLab PDF generator for the /export endpoint
 from export_excel import generate_boq_excel
+from totals import _effective_line_total  # canonical line-total — single source of truth
 from measurement_import import parse_measurements, MeasurementImportError  # CSV/XLSX measurement parser
 from classification import classify_measurements, classification_options, MeasurementClassificationError  # deterministic NRM2/rate classifier
 from measurement_hub import build_boq_from_measurements, validate_boq_structure  # measurement → BoQ conversion
@@ -343,7 +344,7 @@ def _sum_line_totals(boq_data) -> float:
             continue
         for item in (group.get('items') or group.get('line_items') or []):
             if isinstance(item, dict):
-                total += float(item.get('line_total') or 0)
+                total += _effective_line_total(item, {})
     return round(total, 2)
 
 
@@ -1356,6 +1357,7 @@ def _enrich_boq(boq_data):
                 item['waste_disposal_rate'] = waste
                 item['rate']                = round(mat + lab + plant + waste, 2)
                 item['line_total']          = round(item['rate'] * qty, 2)
+                item['total']               = item['line_total']
                 item['rate_source']         = matched_key
             else:
                 # No match found — leave rates at zero so the QS can fill them in manually
@@ -1365,6 +1367,7 @@ def _enrich_boq(boq_data):
                 item['waste_disposal_rate'] = 0.00
                 item['rate']                = 0.00
                 item['line_total']          = 0.00
+                item['total']               = 0.00
                 item['rate_source']         = None
 
             # Assign item_code in {section}/{sequence} format; do not overwrite if already set.
@@ -1745,30 +1748,6 @@ def _assign_item_ids(boq_data: dict) -> dict:
             if isinstance(item, dict) and not item.get("id"):
                 item["id"] = item.get("item_code") or f"g{gi}_i{ii}"
     return data
-
-
-def _effective_line_total(item: dict, rs: dict) -> float:
-    """Compute the line total after applying review overrides.
-
-    When a QS modifies a line via the old review_states model, rs carries
-    'qty' and/or 'rate' overrides.  For items whose edits are baked directly
-    into working_boq, rs has no qty/rate so the item's own values are used.
-    Falls back through: component sum → flat item.rate → 0, so newly added
-    lines that carry only a flat 'rate' field still compute correctly.
-    """
-    qty = float(rs.get("qty") if rs.get("qty") is not None else
-                (item.get("quantity") or item.get("qty") or 0))
-    component_total = (
-        float(item.get("material_rate")      or 0) +
-        float(item.get("labour_rate")        or 0) +
-        float(item.get("plant_rate")         or 0) +
-        float(item.get("waste_disposal_rate") or 0)
-    )
-    # component total takes precedence; flat rate field is a fallback for newly
-    # added lines that carry only a single 'rate' value (no component breakdown).
-    base_rate = component_total if component_total > 0 else float(item.get("rate") or 0)
-    rate = float(rs.get("rate") if rs.get("rate") is not None else base_rate)
-    return round(qty * rate, 2)
 
 
 def _review_counts(boq_data: dict, review_states: dict) -> dict:

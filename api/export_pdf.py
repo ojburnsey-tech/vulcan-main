@@ -9,6 +9,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from datetime import date
+from totals import _effective_line_total
 
 from reportlab.platypus import (
     SimpleDocTemplate,
@@ -825,8 +826,9 @@ def _build_measured_works(trade_groups) -> tuple:
             lab   = float(item.get('labour_rate')        or 0)
             plant = float(item.get('plant_rate')         or 0)
             waste = float(item.get('waste_disposal_rate') or 0)
-            # Always recalculate — never trust a stored line_total
-            line_tot = round(qty * (mat + lab + plant + waste), 2)
+            # Trust pre-computed total (set by _build_export_payload); fall back to
+            # _effective_line_total so flat-rate-only lines aren't silently zeroed.
+            line_tot = float(item['total']) if 'total' in item else _effective_line_total(item, {})
             trade_total += line_tot
 
             dim_str  = item.get('dimension_string', '')

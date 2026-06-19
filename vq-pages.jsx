@@ -471,7 +471,7 @@ function normaliseBoq(raw) {
 
   let id = 0;
   // flatMap is like SelectMany in C# LINQ — it flattens one level of nesting
-  return groups.flatMap(g => {
+  return groups.flatMap((g, gi) => {
     if (!g || typeof g !== 'object' || Array.isArray(g)) return [];
     const trade = g.trade || g.name || 'General';
     const items = Array.isArray(g.items) ? g.items
@@ -479,17 +479,28 @@ function normaliseBoq(raw) {
                 : [];
     return items
       .filter(it => it && typeof it === 'object')
-      .map(it => ({
-        id:   ++id,
-        trade,
-        desc: it.description || it.desc || '',
-        qty:  parseFloat(it.quantity ?? it.qty ?? 0),
-        unit: it.unit || '',
-        rate: parseFloat(it.rate ?? 0),
-        flag: false,
-      }));
+      .map((it, ii) => {
+        const comp = (parseFloat(it.material_rate || 0) + parseFloat(it.labour_rate || 0) +
+                      parseFloat(it.plant_rate    || 0) + parseFloat(it.waste_disposal_rate || 0));
+        return {
+          id:      ++id,
+          _gi:     gi,
+          _ii:     ii,
+          _origId: it.id || it.item_code || `g${gi}_i${ii}`,
+          trade,
+          desc:    it.description || it.desc || '',
+          qty:     parseFloat(it.quantity ?? it.qty ?? 0),
+          unit:    it.unit || '',
+          rate:    comp > 0 ? comp : parseFloat(it.rate ?? 0),
+          flag:    false,
+        };
+      });
   });
 }
+
+// Stepper step sizes — change here to affect every stepper in the app
+const STEP_QTY  = 1;
+const STEP_RATE = 1;
 
 // ─── RESULTS ───────────────────────────────────────────────────────────────────────
 // boqData is the raw JSON object returned by POST /process (null when demo mode)
@@ -501,6 +512,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
   const [pdfState, setPdfState] = useState('idle');
   const [excelState, setExcelState] = useState('idle');
   const [contingency, setContingency] = useState(10);
+  const reviewBootstrappedRef = useRef(false);
 
   // Demo items shown when no real upload has been processed yet
   const mockItems = [
@@ -518,15 +530,43 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
   // If the API returned data normalise it; otherwise fall back to demo items
   const baseItems = boqData ? normaliseBoq(boqData) : mockItems;
 
-  // qtys holds the editable quantity for each line, keyed by item id
-  // useState lazy initialiser (the arrow function) only runs once on mount,
-  // at which point boqData is already resolved — equivalent to a C# field initialiser
-  const [qtys, setQtys] = useState(() => Object.fromEntries(baseItems.map(i => [i.id, i.qty])));
+  // qtys / rates hold editable values keyed by item id; lazy-initialised once on mount
+  const [qtys,  setQtys]  = useState(() => Object.fromEntries(baseItems.map(i => [i.id, i.qty])));
+  const [rates, setRates] = useState(() => Object.fromEntries(baseItems.map(i => [i.id, i.rate])));
+
+  const getToken = async () => {
+    const res = window.VQAuth ? await window.VQAuth.getSession() : null;
+    return res?.data?.session?.access_token || '';
+  };
+
+  // Lazily bootstrap working_boq on first field edit, then PATCH each change
+  const patchField = async (item, fieldEdits) => {
+    if (!projectId) return;
+    try {
+      const token = await getToken();
+      if (!reviewBootstrappedRef.current) {
+        await fetch(`${VQ_API}/projects/${projectId}/review`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        reviewBootstrappedRef.current = true;
+      }
+      await fetch(`${VQ_API}/projects/${projectId}/review/line/${item._origId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ field_edits: fieldEdits }),
+      });
+    } catch (e) {
+      // Non-fatal — local state already reflects the change
+      console.warn('ResultsPage patchField:', e);
+    }
+  };
+
   const fmt = n => `£${n.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  const calc = (id, rate) => (qtys[id] || 0) * rate;
+  const calc = (id, rt) => (qtys[id] || 0) * (rates[id] != null ? rates[id] : rt);
   // Derive trade list from the actual items in order of first appearance, deduped with Set
   const trades = [...new Set(baseItems.map(i => i.trade))];
   const subtotal = baseItems.reduce((s, i) => s + calc(i.id, i.rate), 0);
+  const isDemo = !projectId || demo || sample;
   const contAmt = subtotal * (contingency / 100);
   const grandTotal = subtotal + contAmt;
   const flagCount = baseItems.filter(i => i.flag).length;
@@ -553,27 +593,33 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
     return Object.entries(byTrade).map(([trade, items]) => ({ trade, items }));
   };
 
+  const _triggerDownload = (blob, filename) => {
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
   const handleDownload = async () => {
     if (pdfState !== 'idle') return;
     setPdfState('generating');
     toast('Generating PDF…', 'info');
 
     try {
-      const { data: { session: vqSession } } = window.VQAuth
-        ? await window.VQAuth.getSession()
-        : { data: { session: null } };
-      const token = vqSession?.access_token || '';
+      const token = await getToken();
 
-      // POST the BoQ JSON to the server; Flask calls generate_boq_pdf() and streams the result back.
-      const res = await fetch('https://vulcan-production-d039.up.railway.app/download', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(buildPayload()),
-        credentials: 'include',
-      });
+      // When a real project backs this bill, export from working_boq so edits are reflected.
+      const res = projectId
+        ? await fetch(`${VQ_API}/projects/${projectId}/export/pdf`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        : await fetch('https://vulcan-production-d039.up.railway.app/download', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(buildPayload()),
+            credentials: 'include',
+          });
 
       if (!res.ok) {
         // Try to read a JSON error body from Flask; fall back to the HTTP status text
@@ -583,29 +629,14 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
         return;
       }
 
-      // Convert the HTTP response body to a Blob (binary large object).
-      // There is no direct filesystem API in the browser, so we:
-      //   1. Create a temporary object URL pointing to the Blob in memory
-      //   2. Programmatically click a hidden <a> element with that URL as href
-      //   3. Revoke the URL immediately after to free memory
-      // This is the standard cross-browser pattern for downloading fetch() responses as files.
       const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);    // like a temporary in-memory file path
-      const a    = document.createElement('a');  // create an invisible anchor element
-      a.href     = url;
-      a.download = 'bill-of-quantities.pdf';     // suggested filename shown in the Save dialog
-      document.body.appendChild(a);             // must be in the DOM for Firefox to trigger the download
-      a.click();                                 // fires the download
-      document.body.removeChild(a);             // clean up immediately
-      URL.revokeObjectURL(url);                  // release the Blob from memory
+      _triggerDownload(blob, 'bill-of-quantities.pdf');
 
       setPdfState('done');
       toast('PDF downloaded.', 'success');
       setTimeout(() => setPdfState('idle'), 3000);
 
     } catch (err) {
-      // fetch() only throws on network failure (DNS error, no connection, etc.)
-      // HTTP 4xx/5xx responses do NOT throw — they are handled by the !res.ok branch above
       toast('Network error — could not reach the server.', 'error');
       setPdfState('idle');
     }
@@ -617,20 +648,18 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
     toast('Generating Excel…', 'info');
 
     try {
-      const { data: { session: vqSession } } = window.VQAuth
-        ? await window.VQAuth.getSession()
-        : { data: { session: null } };
-      const token = vqSession?.access_token || '';
+      const token = await getToken();
 
-      const res = await fetch('https://vulcan-production-d039.up.railway.app/export-excel', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify(buildPayload()),
-        credentials: 'include',
-      });
+      const res = projectId
+        ? await fetch(`${VQ_API}/projects/${projectId}/export/excel`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        : await fetch('https://vulcan-production-d039.up.railway.app/export-excel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify(buildPayload()),
+            credentials: 'include',
+          });
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -640,14 +669,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
       }
 
       const blob = await res.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href     = url;
-      a.download = 'bill-of-quantities.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      _triggerDownload(blob, 'bill-of-quantities.xlsx');
 
       setExcelState('done');
       toast('Excel downloaded.', 'success');
@@ -705,6 +727,11 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
           {flagCount > 0 && <span className="conf-note">— {flagCount} item{flagCount !== 1 ? 's' : ''} flagged for review</span>}
         </div>
         <p className="res-disclaimer">AI-generated draft — professional review required before issue to client. Edit inline, then export.</p>
+        {isDemo && (
+          <p style={{ fontSize:11, color:'rgba(255,255,255,0.35)', margin:'-4px 0 8px' }}>
+            Demo bill — sign in and upload a real document to save your edits.
+          </p>
+        )}
         {boqData && boqData._truncated && (
           /* Durable caveat when the backend salvaged a bill that hit Claude's
              output-token ceiling. The (partial) bill still renders in full below —
@@ -756,16 +783,47 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
                   <tr className="rboq-trade"><td colSpan="5">{trade}</td></tr>
                   {tItems.map(item => {
                     rowIdx++;
+                    const effRate = rates[item.id] != null ? rates[item.id] : item.rate;
+                    const stepQty = (delta) => {
+                      const next = Math.max(0, (qtys[item.id] || 0) + delta);
+                      setQtys(p => ({ ...p, [item.id]: next }));
+                      patchField(item, { quantity: next });
+                    };
+                    const stepRate = (delta) => {
+                      const next = Math.max(0, +(effRate + delta).toFixed(2));
+                      setRates(p => ({ ...p, [item.id]: next }));
+                      patchField(item, { rate: next });
+                    };
                     return (
                       <tr key={item.id} className={`rboq-item${rowIdx % 2 === 0 ? ' alt' : ''}${item.flag ? ' flagged' : ''}`}>
                         <td>{item.desc}{item.flag && <span className="flag-chip">⚠ Verify</span>}</td>
-                        <td className="r">
-                          <input className="edit-inp" type="number"
-                            value={qtys[item.id]}
-                            onChange={e => setQtys(p => ({ ...p, [item.id]: parseFloat(e.target.value) || 0 }))} />
+                        <td className="r" style={{ whiteSpace:'nowrap' }}>
+                          <span className="vq-step-wrap">
+                            <button className="vq-step" onClick={() => stepQty(-STEP_QTY)}>−</button>
+                            <input className="edit-inp" type="number"
+                              value={qtys[item.id]}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value) || 0;
+                                setQtys(p => ({ ...p, [item.id]: v }));
+                                patchField(item, { quantity: v });
+                              }} />
+                            <button className="vq-step" onClick={() => stepQty(STEP_QTY)}>+</button>
+                          </span>
                         </td>
                         <td className="r">{item.unit}</td>
-                        <td className="r">{fmt(item.rate)}</td>
+                        <td className="r" style={{ whiteSpace:'nowrap' }}>
+                          <span className="vq-step-wrap">
+                            <button className="vq-step" onClick={() => stepRate(-STEP_RATE)}>−</button>
+                            <input className="edit-inp" type="number" step="0.01"
+                              value={effRate}
+                              onChange={e => {
+                                const v = parseFloat(e.target.value) || 0;
+                                setRates(p => ({ ...p, [item.id]: v }));
+                                patchField(item, { rate: v });
+                              }} />
+                            <button className="vq-step" onClick={() => stepRate(STEP_RATE)}>+</button>
+                          </span>
+                        </td>
                         <td className="r fw">{fmt(calc(item.id, item.rate))}</td>
                       </tr>
                     );
@@ -4839,11 +4897,30 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   const [dlExcelState,     setDlExcelState]     = React.useState('idle');
   const [dlOrigPdfState,   setDlOrigPdfState]   = React.useState('idle');
   const [dlOrigExcelState, setDlOrigExcelState] = React.useState('idle');
+  // Project picker (shown when projectId is null)
+  const [pickerProjects, setPickerProjects] = React.useState(null);
+  const pickerFetchedRef = React.useRef(false);
 
   const getToken = async () => {
     const res = window.VQAuth ? await window.VQAuth.getSession() : null;
     return res?.data?.session?.access_token || '';
   };
+
+  // ── Load project list for picker when no projectId ─────────────────────
+  React.useEffect(() => {
+    if (projectId || pickerFetchedRef.current) return;
+    pickerFetchedRef.current = true;
+    (async () => {
+      try {
+        const token = await getToken();
+        const res = await fetch(`${VQ_API}/projects`, { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        setPickerProjects((data.projects || []).filter(p => p.boq_data != null));
+      } catch {
+        setPickerProjects([]);
+      }
+    })();
+  }, [projectId]);
 
   // ── Load review workspace ───────────────────────────────────────────────
   React.useEffect(() => {
@@ -5300,13 +5377,54 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
     </div>
   );
 
-  if (!projectId || !boqData) return (
+  if (!projectId) return (
+    <div className="vd-root">
+      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <div className="vd-main" style={{ display:'flex', flexDirection:'column', overflow:'hidden', height:'100vh' }}>
+        <div className="vd-topbar" style={{ flexShrink:0 }}>
+          <span className="vd-section-title">Review &amp; Sign-off</span>
+        </div>
+        <div style={{ flex:1, overflowY:'auto', padding:'24px 32px' }}>
+          <p style={{ fontWeight:600, fontSize:15, marginBottom:16 }}>Select a project to review</p>
+          {pickerProjects === null ? (
+            <p style={{ color:'var(--c-400)' }}>Loading projects…</p>
+          ) : pickerProjects.length === 0 ? (
+            <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-start', gap:12 }}>
+              <p style={{ color:'var(--c-400)' }}>No projects with a generated Bill of Quantities yet.</p>
+              <button className="btn btn-amber btn-pill" onClick={() => go('upload')}>↑ Upload Drawing</button>
+            </div>
+          ) : (
+            <div className="vd-proj-list">
+              {pickerProjects.map(p => {
+                const badge = vqBadge(p.status);
+                return (
+                  <div key={p.id} className="vd-proj-row clickable" onClick={() => go('review', { projectId: p.id })}>
+                    <div className="vd-thumb" />
+                    <div className="vd-proj-main">
+                      <div className="vd-proj-name">{p.name || 'Untitled project'}</div>
+                      <div className="vd-proj-time">{vqTimeAgo(p.created_at) || 'Recently'}</div>
+                    </div>
+                    <div className="vd-proj-right">
+                      <span className={`vd-badge ${badge.cls}`}>{badge.label}</span>
+                      {p.estimated_value != null && Number(p.estimated_value) > 0 && (
+                        <span className="vd-proj-meta">{vqMoney(p.estimated_value)} estimate</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!boqData) return (
     <div className="vd-root">
       <AppSidebar currentPage="review" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
-        <p style={{ color:'var(--c-400)' }}>
-          {projectId ? 'No Bill of Quantities generated for this project yet.' : 'No project selected.'}
-        </p>
+        <p style={{ color:'var(--c-400)' }}>No Bill of Quantities generated for this project yet.</p>
         <button className="btn btn-amber btn-pill" onClick={() => go('projects')}>Go to Projects</button>
       </div>
     </div>
@@ -5571,16 +5689,44 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
                                   </div>
                                 )}
                               </td>
-                              <td className="r">
-                                {rs.qty != null
-                                  ? <span style={{ color:'var(--amber)' }}>{effQty}</span>
-                                  : origQty}
+                              <td className="r" style={{ whiteSpace:'nowrap' }}>
+                                {!signedOff && !isEditing ? (
+                                  <span className="vq-step-wrap">
+                                    <button className="vq-step" onClick={() => {
+                                      const next = Math.max(0, effQty - STEP_QTY);
+                                      callFieldEdit(item._key, { quantity: next });
+                                    }}>−</button>
+                                    <span style={rs.qty != null ? { color:'var(--amber)' } : undefined}>{effQty}</span>
+                                    <button className="vq-step" onClick={() => {
+                                      const next = effQty + STEP_QTY;
+                                      callFieldEdit(item._key, { quantity: next });
+                                    }}>+</button>
+                                  </span>
+                                ) : (
+                                  rs.qty != null
+                                    ? <span style={{ color:'var(--amber)' }}>{effQty}</span>
+                                    : origQty
+                                )}
                               </td>
                               <td className="r">{item.unit || '—'}</td>
-                              <td className="r">
-                                {rs.rate != null
-                                  ? <span style={{ color:'var(--amber)' }}>{vqMoney(effRate)}</span>
-                                  : vqMoney(origRate)}
+                              <td className="r" style={{ whiteSpace:'nowrap' }}>
+                                {!signedOff && !isEditing && !hasComponents ? (
+                                  <span className="vq-step-wrap">
+                                    <button className="vq-step" onClick={() => {
+                                      const next = Math.max(0, +(effRate - STEP_RATE).toFixed(2));
+                                      callFieldEdit(item._key, { rate: next });
+                                    }}>−</button>
+                                    <span style={rs.rate != null ? { color:'var(--amber)' } : undefined}>{vqMoney(effRate)}</span>
+                                    <button className="vq-step" onClick={() => {
+                                      const next = +(effRate + STEP_RATE).toFixed(2);
+                                      callFieldEdit(item._key, { rate: next });
+                                    }}>+</button>
+                                  </span>
+                                ) : (
+                                  rs.rate != null
+                                    ? <span style={{ color:'var(--amber)' }}>{vqMoney(effRate)}</span>
+                                    : vqMoney(origRate)
+                                )}
                               </td>
                               <td className="r" style={{ fontWeight:600 }}>
                                 {rs.state === 'rejected'
