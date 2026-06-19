@@ -101,9 +101,11 @@ function LandingPage({ go, tweaks = {}, toast }) {
 
   const faqs = [
     { q: 'How accurate is Vulcan Quanta?',
-      a: 'Our AI is trained on thousands of professional BoQs and UK drawings. Accuracy is 94% on standard projects. Every item is confidence-scored so you know exactly where to focus your review.' },
-    { q: 'What drawing formats does it accept?',
-      a: 'Currently PDF — raster and vector, single or multi-page. JPG and PNG support is planned.' },
+      a: "Vulcan produces a measured, priced draft — not a finished bill. Every line is confidence-scored so you can see exactly where to focus, and you approve, edit or reject each item before sign-off. It removes the measurement and rate-application work; the professional judgement stays with you." },
+    { q: 'What can I put into Vulcan?',
+      a: "Drawings as PDF — raster or vector, single or multi-page. Or, if you've already done the take-off, import your measurements as CSV or Excel (for example, a Bluebeam markups export). JPG and PNG drawing support is planned." },
+    { q: 'Can I use my existing Bluebeam take-off?',
+      a: "Yes — that's the point. Export your measurements from Bluebeam as CSV or Excel, and Vulcan classifies each line to NRM2 and applies current rates. You keep your take-off; Vulcan handles the billing. You're never forced to re-measure inside Vulcan." },
     { q: 'Is my data secure?',
       a: 'Drawings are encrypted in transit and at rest, deleted after 30 days, and never used for model training. GDPR-compliant, UK-hosted.' },
     { q: 'Do I still need a qualified quantity surveyor?',
@@ -200,8 +202,8 @@ function LandingPage({ go, tweaks = {}, toast }) {
         <div className="inner">
           <p className="cin-section-label">The work</p>
           <p className="cin-statement-text">
-            Vulcan reads your drawings. Every wall, every span, every height.
-            Priced to BCIS. Structured to NRM2. Ready to issue.
+            Vulcan reads your drawings — or imports a take-off you've already done.
+            Measured, classified to NRM2, priced to BCIS. Ready to issue.
           </p>
         </div>
       </section>
@@ -213,10 +215,10 @@ function LandingPage({ go, tweaks = {}, toast }) {
           <h2 className="cin-section-h">From drawing to priced BoQ.</h2>
           <div className="cin-process-grid">
             {[
-              { n: '01', title: 'Upload your drawing',
-                desc: 'Drag a PDF — single or multi-page, raster or vector. Takes seconds.' },
-              { n: '02', title: 'Vulcan measures and prices',
-                desc: 'AI reads every element, applies current BCIS rates, and produces a fully itemised BoQ. Under 2 minutes.' },
+              { n: '01', title: 'Start from a drawing — or a take-off',
+                desc: "Drag in a PDF drawing, or import measurements you've already taken off in Bluebeam (CSV or Excel). Takes seconds." },
+              { n: '02', title: 'Vulcan measures, classifies and prices',
+                desc: 'It measures from the drawing — or classifies your imported measurements to NRM2 — then applies current BCIS rates to produce a fully itemised BoQ. Under 2 minutes.' },
               { n: '03', title: 'Review, edit, export',
                 desc: 'Edit any item inline. Export as PDF or Excel, ready to issue under your own branding.' },
             ].map((s, i) => (
@@ -271,8 +273,8 @@ function LandingPage({ go, tweaks = {}, toast }) {
                 desc: 'PDF and Excel output. Your branding on Pro and Studio plans. Ready to issue.' },
               { name: 'Variation orders',
                 desc: 'Duplicate, edit and track additions with a timestamped audit trail.' },
-              { name: 'Your branding',
-                desc: 'Add your logo, address and colours to every output on Pro and Studio plans.' },
+              { name: 'Import your take-off',
+                desc: "Already measured in Bluebeam? Import your CSV or Excel export — Vulcan classifies every line to NRM2 and applies current rates. No re-measuring." },
             ].map((f, i) => (
               <div key={i} className="cin-feat-item">
                 <p className="cin-feat-name">{f.name}</p>
@@ -290,9 +292,9 @@ function LandingPage({ go, tweaks = {}, toast }) {
           <h2 className="cin-section-h">Methodology and data.</h2>
           <div className="cin-proof-grid">
             {[
-              { label: 'Accuracy',
-                claim: '94% accuracy on standard UK construction projects.',
-                note: 'Trained on thousands of professional BoQs and UK drawings. Every item is confidence-scored.' },
+              { label: 'Review',
+                claim: 'Every line is confidence-scored.',
+                note: "Low-confidence items are flagged so your review goes where it matters. You approve, edit or reject each line before sign-off." },
               { label: 'Rates',
                 claim: 'BCIS Q2 2026 labour and material rates.',
                 note: 'National schedule with regional variations. Updated quarterly to reflect current market costs.' },
