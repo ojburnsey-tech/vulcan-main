@@ -152,7 +152,7 @@ function Header({ page, go, toast, user }) {
           {logoOk ? (
             <img src="logo-transparent.png" alt="Vulcan Quanta"
               onError={() => setLogoOk(false)}
-              style={{ height: '34px', display: 'block', filter: 'drop-shadow(0 0 1px rgba(255,255,255,0.15)) brightness(1.15)' }} />
+              style={{ height: '48px', display: 'block', filter: 'drop-shadow(0 0 1px rgba(255,255,255,0.15)) brightness(1.15)' }} />
           ) : (
             <span style={{ fontFamily: 'var(--font-d)', fontSize: '17px', fontWeight: 700, color: '#fff', letterSpacing: '0.08em' }}>VULCAN QUANTA</span>
           )}
@@ -224,7 +224,7 @@ function Footer({ go }) {
       <div className="inner">
         <div className="ftr-grid">
           <div>
-            <img src="logo-transparent.png" alt="Vulcan Quanta" style={{ height: '52px', filter: 'brightness(0) invert(1)', marginBottom: '14px', display: 'block' }} />
+            <img src="logo-transparent.png" alt="Vulcan Quanta" style={{ height: '72px', filter: 'brightness(0) invert(1)', marginBottom: '14px', display: 'block' }} />
             <p className="ftr-desc">AI-powered quantity surveying for UK builders and contractors. A priced Bill of Quantities in under 2 minutes.</p>
           </div>
           <div>
@@ -359,10 +359,10 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
             src="logo-transparent.png"
             alt="Vulcan Quanta"
             onError={() => setLogoOk(false)}
-            style={{ height: '28px', display: 'block' }}
+            style={{ height: '40px', display: 'block' }}
           />
         ) : (
-          <span style={{ fontFamily: "'Cinzel', serif", fontSize: '13px', fontWeight: 700, color: 'white', letterSpacing: '0.15em' }}>VQ</span>
+          <span style={{ fontFamily: "'Cinzel', serif", fontSize: '18px', fontWeight: 700, color: 'white', letterSpacing: '0.15em' }}>VQ</span>
         )}
       </div>
       <p className="app-side-lbl">Navigation</p>
