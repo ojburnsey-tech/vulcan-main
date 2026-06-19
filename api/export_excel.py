@@ -11,6 +11,7 @@
 
 import io
 from openpyxl import Workbook
+from totals import _effective_line_total
 from openpyxl.styles import (
     PatternFill, Font, Alignment, Border, Side, numbers
 )
@@ -66,8 +67,8 @@ def _right():
 # Col D: Quantity          ← QS edits this
 # Col E: Material Rate     ← QS edits this
 # Col F: Labour Rate       ← QS edits this
-# Col G: Rate (=E+F)       formula — auto-updates
-# Col H: Total (=D*G)      formula — auto-updates
+# Col G: Rate              pre-computed value (all 4 components, or flat rate fallback)
+# Col H: Total (=D*G)      formula — auto-updates when QS edits D
 
 COL_WIDTHS = {
     "A": 8,    # Item ref
@@ -281,14 +282,19 @@ def generate_boq_excel(boq_data, firm_name="", project_name="", branding=None):
             desc     = item.get("description") or item.get("desc") or ""
             unit     = item.get("unit", "")
             qty      = item.get("quantity") or item.get("qty") or 0
-            mat_rate = item.get("material_rate", 0) or 0
-            lab_rate = item.get("labour_rate",   0) or 0
+            mat_rate  = float(item.get("material_rate",       0) or 0)
+            lab_rate  = float(item.get("labour_rate",         0) or 0)
+            plant_rate = float(item.get("plant_rate",         0) or 0)
+            waste_rate = float(item.get("waste_disposal_rate",0) or 0)
+            comp_sum  = mat_rate + lab_rate + plant_rate + waste_rate
+            flat_rate = float(item.get("rate", 0) or 0)
+            eff_rate  = comp_sum if comp_sum > 0 else flat_rate
 
             bg = LIGHT_GREY if shade else WHITE
             shade = not shade
 
             # Flag items with zero rate so QS notices immediately
-            if (mat_rate + lab_rate) == 0:
+            if eff_rate == 0:
                 bg = AMBER_LIGHT
 
             # Col A — item reference
@@ -336,11 +342,10 @@ def generate_boq_excel(boq_data, firm_name="", project_name="", branding=None):
             ws[f"F{row}"].border         = _border()
             ws[f"F{row}"].number_format  = GBP
 
-            # Col G — combined rate formula: =E+F
-            # This means if the QS changes E or F, G updates automatically
-            ws[f"G{row}"] = f"=E{row}+F{row}"
+            # Col G — effective rate as a pre-computed value (all 4 components, or flat rate)
+            ws[f"G{row}"] = eff_rate
             ws[f"G{row}"].fill           = _fill(bg)
-            ws[f"G{row}"].font           = _font(size=9, colour="1D4ED8")  # blue = formula cell
+            ws[f"G{row}"].font           = _font(size=9)
             ws[f"G{row}"].alignment      = _right()
             ws[f"G{row}"].border         = _border()
             ws[f"G{row}"].number_format  = GBP
