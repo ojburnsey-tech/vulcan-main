@@ -561,7 +561,7 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
               <span className="app-topbar-chev">▾</span>
             </button>
             {profileOpen && (
-              <div className="app-menu-drop app-profile-drop">
+              <div className="app-profile-drop">
                 <div className="app-profile-head">
                   <div className="app-profile-name">{profileName}</div>
                   <div className="app-profile-plan">{planLabel}</div>

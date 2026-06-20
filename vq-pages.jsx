@@ -2318,13 +2318,13 @@ function SettingsPage({ go, toast, user: userProp }) {
       <main className="app-main dash-main">
         <VQParticleField />
         {/* Horizontal tab bar */}
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '28px', paddingTop: '8px' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-soft)', marginBottom: '28px', paddingTop: '8px' }}>
           {tabs.map(t => (
             <button key={t.id}
               style={{
                 background: 'none', border: 'none', outline: 'none',
                 borderBottom: `2px solid ${tab === t.id ? 'var(--amber)' : 'transparent'}`,
-                color: tab === t.id ? 'white' : 'rgba(255,255,255,0.45)',
+                color: tab === t.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 padding: '8px 20px 14px',
                 fontSize: '14px', fontWeight: tab === t.id ? 600 : 500,
                 cursor: 'pointer', transition: 'all 0.15s ease',
@@ -2350,7 +2350,7 @@ function SettingsPage({ go, toast, user: userProp }) {
                 <div className="fld"><label className="flbl">Phone</label>
                   <input className="finp" type="tel" value={acct.phone} onChange={e => setA('phone', e.target.value)} placeholder="Optional" /></div>
               </div>
-              <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.35)', marginBottom: '16px' }}>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px' }}>
                 Changing your email sends a confirmation link to the new address before it takes effect.
               </p>
               <button className="btn btn-amber btn-pill" onClick={saveAccount} disabled={acctSaving}>
@@ -2375,7 +2375,7 @@ function SettingsPage({ go, toast, user: userProp }) {
 
             <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
               <p className="scard-title" style={{ color: 'var(--red)' }}>Danger zone</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '16px' }}>
                 Permanently delete your account and all project data. Cannot be undone.
               </p>
               <button className="btn btn-danger btn-pill"
@@ -2397,7 +2397,7 @@ function SettingsPage({ go, toast, user: userProp }) {
             <div className="dash-hd"><h1 className="dash-h1">Branding</h1></div>
             <div className="scard vd-rise">
               <p className="scard-title">Company identity</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>Appears on all exported BoQs. Available on Pro and Studio plans.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Company name</label>
                   <input className="finp" value={brand.company_name} onChange={e => setB('company_name', e.target.value)} placeholder="Your company name" /></div>
@@ -2443,7 +2443,7 @@ function SettingsPage({ go, toast, user: userProp }) {
             <div className="dash-hd"><h1 className="dash-h1">Rate overrides</h1></div>
             <div className="scard vd-rise">
               <p className="scard-title">Regional settings</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.42)', marginBottom: '20px' }}>Base rates follow BCIS Q2 2026. Override individual trades below. Leave blank to use BCIS defaults.</p>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '20px' }}>Base rates follow BCIS Q2 2026. Override individual trades below. Leave blank to use BCIS defaults.</p>
               <div className="form-grid">
                 <div className="fld"><label className="flbl">Region</label>
                   <select className="finp" value={rates.region} onChange={e => setRates(f => ({ ...f, region: e.target.value }))}>
@@ -4416,13 +4416,13 @@ function MeasurementHubPage({ go, toast, onBoqReady }) {
         </p>
 
         {/* Workspace tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid rgba(255,255,255,0.08)', marginBottom: '24px' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--border-soft)', marginBottom: '24px' }}>
           {[{ id: 'measurements', label: 'Measurements' }, { id: 'classification', label: 'Classification' }].map(tb => (
             <button key={tb.id} onClick={() => setTab(tb.id)} data-testid={`mhub-tab-${tb.id}`}
               style={{
                 background: 'none', border: 'none', outline: 'none',
                 borderBottom: `2px solid ${tab === tb.id ? 'var(--amber)' : 'transparent'}`,
-                color: tab === tb.id ? 'white' : 'rgba(255,255,255,0.45)',
+                color: tab === tb.id ? 'var(--text-primary)' : 'var(--text-secondary)',
                 padding: '8px 20px 14px', fontSize: '14px', fontWeight: tab === tb.id ? 600 : 500,
                 cursor: 'pointer', marginBottom: '-1px', fontFamily: 'var(--font-b)',
               }}>{tb.label}</button>
