@@ -706,7 +706,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
     if (embedded) return empty;
     return (
       <div className="app-wrap">
-        <AppSidebar currentPage="results" go={go} toast={toast} />
+        <AppTopBar currentPage="results" go={go} toast={toast} />
         <div className="app-main">{empty}</div>
       </div>
     );
@@ -872,7 +872,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="results" go={go} toast={toast} />
+      <AppTopBar currentPage="results" go={go} toast={toast} />
       <div className="app-main">{inner}</div>
     </div>
   );
@@ -1255,7 +1255,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="dashboard" go={go} user={user} toast={toast} />
+      <AppTopBar currentPage="dashboard" go={go} user={user} toast={toast} />
       <main className="app-main vd-main">
         <VQParticleField />
         {/* ── Top bar ── */}
@@ -1681,7 +1681,7 @@ function ProjectsPage({ go, toast, onBoqReady }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <main className="app-main vd-main">
         <VQParticleField />
         <div className="vd-top vd-rise">
@@ -1808,7 +1808,7 @@ function ReportsPage({ go, toast }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="reports" go={go} toast={toast} />
+      <AppTopBar currentPage="reports" go={go} toast={toast} />
       <main className="app-main vd-main">
         <VQParticleField />
         <div className="vd-top vd-rise">
@@ -1931,7 +1931,7 @@ function ExportsPage({ go, toast }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="exports" go={go} toast={toast} />
+      <AppTopBar currentPage="exports" go={go} toast={toast} />
       <main className="app-main vd-main">
         <VQParticleField />
         <div className="vd-top vd-rise">
@@ -1991,7 +1991,7 @@ function HistoryPage({ go, toast }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="history" go={go} toast={toast} />
+      <AppTopBar currentPage="history" go={go} toast={toast} />
       <main className="app-main vd-main">
         <VQParticleField />
         <div className="vd-top vd-rise">
@@ -2165,7 +2165,7 @@ function UploadPage({ go, toast, onBoqReady }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="upload" go={go} toast={toast} />
+      <AppTopBar currentPage="upload" go={go} toast={toast} />
       <div className="app-main upload-page">
         <VQParticleField />
         <div className="upload-wrap">
@@ -2449,7 +2449,7 @@ function SettingsPage({ go, toast, user: userProp }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="settings" go={go} user={user} toast={toast} />
+      <AppTopBar currentPage="settings" go={go} user={user} toast={toast} />
       <main className="app-main dash-main">
         <VQParticleField />
         {/* Horizontal tab bar */}
@@ -2707,7 +2707,7 @@ function ProjectSetupPage({ go, toast }) {
   return (
     <div style={{ background: 'var(--vd-bg, #0f1117)', minHeight: '100vh' }}>
     <div className="vd-root">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main">
         <div className="vd-topbar">
           <span className="vd-section-title">New Project</span>
@@ -2928,7 +2928,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
 
   if (loading) return (
     <div className="vd-root">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
         <p style={{ color:'var(--c-400)' }}>Loading project…</p>
       </div>
@@ -2937,7 +2937,7 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
 
   return (
     <div className="vd-root">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main">
 
         {/* Topbar */}
@@ -3166,7 +3166,7 @@ function ProjectSettingsPage({ go, toast, projectId }) {
 
   if (loading) return (
     <div className="vd-root">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
         <p style={{ color:'var(--c-400)' }}>Loading…</p>
       </div>
@@ -3175,7 +3175,7 @@ function ProjectSettingsPage({ go, toast, projectId }) {
 
   return (
     <div className="vd-root">
-      <AppSidebar currentPage="projects" go={go} toast={toast} />
+      <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main">
 
         <div className="vd-topbar">
@@ -4540,7 +4540,7 @@ function MeasurementHubPage({ go, toast, onBoqReady }) {
 
   return (
     <div className="app-wrap">
-      <AppSidebar currentPage="measurehub" go={go} toast={toast} />
+      <AppTopBar currentPage="measurehub" go={go} toast={toast} />
       <main className="app-main dash-main">
         <VQParticleField />
         <div className="dash-hd">
@@ -5372,7 +5372,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   // ── Loading / no-bill states ────────────────────────────────────────────
   if (loading) return (
     <div className="vd-root">
-      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <AppTopBar currentPage="review" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', alignItems:'center', justifyContent:'center' }}>
         <p style={{ color:'var(--c-400)' }}>Loading review workspace…</p>
       </div>
@@ -5381,7 +5381,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
 
   if (!projectId) return (
     <div className="vd-root">
-      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <AppTopBar currentPage="review" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', flexDirection:'column', overflow:'hidden', height:'100vh' }}>
         <div className="vd-topbar" style={{ flexShrink:0 }}>
           <span className="vd-section-title">Review &amp; Sign-off</span>
@@ -5424,7 +5424,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
 
   if (!boqData) return (
     <div className="vd-root">
-      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <AppTopBar currentPage="review" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16 }}>
         <p style={{ color:'var(--c-400)' }}>No Bill of Quantities generated for this project yet.</p>
         <button className="btn btn-amber btn-pill" onClick={() => go('projects')}>Go to Projects</button>
@@ -5435,7 +5435,7 @@ function ReviewWorkspacePage({ go, toast, projectId }) {
   // ── Main render ─────────────────────────────────────────────────────────
   return (
     <div className="vd-root">
-      <AppSidebar currentPage="review" go={go} toast={toast} />
+      <AppTopBar currentPage="review" go={go} toast={toast} />
       <div className="vd-main" style={{ display:'flex', flexDirection:'column', overflow:'hidden', height:'100vh' }}>
 
         {/* ── Topbar ── */}

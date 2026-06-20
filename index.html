@@ -68,6 +68,17 @@
       --px: 80px;
       --ease: cubic-bezier(0.4, 0, 0.2, 1);
       --t: 200ms var(--ease);
+      --topbar-bg: var(--c-950);
+      --topbar-fg: rgba(255,255,255,0.92);
+      --topbar-fg-dim: rgba(255,255,255,0.55);
+      --topbar-hover: rgba(255,255,255,0.08);
+      --topbar-border: rgba(255,255,255,0.08);
+      --winbar-bg: var(--c-100);
+      --winbar-border: var(--c-200);
+      --menu-bg: #ffffff;
+      --menu-fg: var(--c-800);
+      --menu-hover: var(--c-50);
+      --menu-border: var(--c-200);
     }
 
     /* ── BASE ────────────────────────────────────────────────────────────────── */
@@ -1001,10 +1012,203 @@
     /* ── App shell ───────────────────────────────────────────────────────── */
     .app-wrap {
       display: flex;
-      min-height: 100vh;
+      flex-direction: column;
+      height: 100vh;
       background: #1d2127;
     }
     .app-main { flex: 1; overflow: auto; min-width: 0; }
+
+    /* ── Top bar ─────────────────────────────────────────────────────────── */
+    .app-topbar-wrap {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      z-index: 200;
+    }
+    .app-topbar {
+      background: var(--topbar-bg);
+      border-bottom: 1px solid var(--topbar-border);
+      display: flex;
+      align-items: center;
+      gap: 0;
+      height: 38px;
+      padding: 0 12px 0 0;
+      user-select: none;
+    }
+    .app-topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px;
+      height: 100%;
+      cursor: pointer;
+      border-right: 1px solid var(--topbar-border);
+      flex-shrink: 0;
+    }
+    .app-topbar-brand:hover { background: var(--topbar-hover); }
+    .app-topbar-logo { width: 22px; height: 22px; border-radius: 4px; object-fit: contain; }
+    .app-topbar-title {
+      font-family: var(--font-d);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--topbar-fg);
+      letter-spacing: -0.01em;
+    }
+    .app-topbar-menus {
+      display: flex;
+      align-items: stretch;
+      height: 100%;
+      flex: 1;
+    }
+    .app-menu { position: relative; }
+    .app-menu-label {
+      display: flex;
+      align-items: center;
+      padding: 0 11px;
+      height: 100%;
+      font-size: 12.5px;
+      font-weight: 500;
+      color: var(--topbar-fg-dim);
+      cursor: pointer;
+      transition: background var(--t), color var(--t);
+      white-space: nowrap;
+    }
+    .app-menu-label:hover,
+    .app-menu.open .app-menu-label {
+      background: var(--topbar-hover);
+      color: var(--topbar-fg);
+    }
+    .app-menu-drop {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 180px;
+      background: var(--menu-bg);
+      border: 1px solid var(--menu-border);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+      padding: 4px 0;
+      z-index: 300;
+    }
+    .app-menu.open .app-menu-drop { display: block; }
+    .app-menu-item {
+      display: block;
+      width: 100%;
+      padding: 7px 16px;
+      font-size: 13px;
+      color: var(--menu-fg);
+      background: none;
+      border: none;
+      text-align: left;
+      cursor: pointer;
+      transition: background var(--t);
+      white-space: nowrap;
+    }
+    .app-menu-item:hover { background: var(--menu-hover); }
+    .app-menu-div {
+      height: 1px;
+      background: var(--menu-border);
+      margin: 4px 0;
+    }
+    .app-topbar-right {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+    }
+    .app-topbar-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: none;
+      border: none;
+      color: var(--topbar-fg-dim);
+      font-size: 15px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background var(--t), color var(--t);
+    }
+    .app-topbar-icon:hover { background: var(--topbar-hover); color: var(--topbar-fg); }
+    .app-topbar-profile { position: relative; }
+    .app-topbar-avatar-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 6px;
+      height: 28px;
+      background: none;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background var(--t);
+    }
+    .app-topbar-avatar-btn:hover { background: var(--topbar-hover); }
+    .app-topbar-avatar {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--amber);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: white;
+      flex-shrink: 0;
+    }
+    .app-topbar-name { font-size: 12px; font-weight: 500; color: var(--topbar-fg-dim); }
+    .app-topbar-chev { font-size: 9px; color: var(--topbar-fg-dim); }
+    .app-profile-drop {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 200px;
+      background: var(--menu-bg);
+      border: 1px solid var(--menu-border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+      overflow: hidden;
+      z-index: 300;
+    }
+    .app-topbar-profile.open .app-profile-drop { display: block; }
+    .app-profile-head {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--menu-border);
+    }
+    .app-profile-name { font-size: 13px; font-weight: 600; color: var(--menu-fg); }
+    .app-profile-plan { font-size: 11px; color: var(--c-500); margin-top: 2px; }
+    .app-winbar {
+      background: var(--winbar-bg);
+      border-bottom: 1px solid var(--winbar-border);
+      height: 28px;
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+    }
+    .app-lights { display: flex; align-items: center; gap: 7px; }
+    .app-light {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      transition: opacity var(--t), transform var(--t);
+      flex-shrink: 0;
+    }
+    .app-light:hover { opacity: 0.8; transform: scale(1.15); }
+    .app-light-red   { background: #FF5F57; }
+    .app-light-amber { background: #FEBC2E; }
+    .app-light-green { background: #28C840; }
+    @media (max-width: 768px) {
+      .app-topbar-menus { display: none; }
+      .app-topbar-name  { display: none; }
+      .app-topbar-chev  { display: none; }
+      .app-winbar       { display: none; }
+    }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────── */
     .app-side {
