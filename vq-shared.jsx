@@ -401,6 +401,170 @@ function AppSidebar({ currentPage, go, user: userProp, toast }) {
   );
 }
 
+// ─── APP TOP BAR ──────────────────────────────────────────────────────────────
+// Replaces AppSidebar. Two-row application chrome:
+//   Row 1 (navy)  : logo + "VQ Estimating" + menu headings (hover dropdowns) + search/bell/avatar
+//   Row 2 (strip) : three macOS-style window controls at the left
+// Window controls:  red → sign out to landing,  amber → enter fullscreen,  green → exit fullscreen
+// All navigation goes through go() using the same targets the old sidebar used.
+function AppTopBar({ currentPage, go, user: userProp, toast }) {
+  const [user, setUser]               = useState(userProp || null);
+  const [openMenu, setOpenMenu]       = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const closeTimer = useRef(null);
+
+  useEffect(() => {
+    if (userProp) { setUser(userProp); return; }
+    let active = true;
+    if (window.VQAuth) {
+      window.VQAuth.getSession()
+        .then(({ data }) => { if (active && data && data.session) setUser(data.session.user); })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [userProp]);
+
+  const handleSignOut = async () => {
+    if (window.VQAuth) { await window.VQAuth.signOut(); } else { go('landing'); }
+  };
+  const enterFullscreen = () => {
+    const el = document.documentElement;
+    const req = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (req) { try { req.call(el); } catch (e) {} }
+  };
+  const exitFullscreen = () => {
+    if (!document.fullscreenElement && !document.webkitFullscreenElement) return;
+    const exit = document.exitFullscreen || document.webkitExitFullscreen || document.msExitFullscreen;
+    if (exit) { try { exit.call(document); } catch (e) {} }
+  };
+
+  const NAV = (t) => () => { setOpenMenu(null); go(t); };
+  const FS  = (fn) => () => { setOpenMenu(null); fn(); };
+  const menus = [
+    { label: 'File', items: [
+      { label: 'New project',     onClick: NAV('projectsetup') },
+      { label: 'Open projects',   onClick: NAV('projects') },
+      { label: 'Upload drawings', onClick: NAV('upload') },
+      { divider: true },
+      { label: 'Sign out',        onClick: () => { setOpenMenu(null); handleSignOut(); } },
+    ]},
+    { label: 'Edit',         items: [ { label: 'Settings', onClick: NAV('settings') } ]},
+    { label: 'View',         items: [
+      { label: 'Dashboard',        onClick: NAV('dashboard') },
+      { label: 'Enter fullscreen', onClick: FS(enterFullscreen) },
+      { label: 'Exit fullscreen',  onClick: FS(exitFullscreen) },
+    ]},
+    { label: 'Project',      items: [
+      { label: 'Dashboard',    onClick: NAV('dashboard') },
+      { label: 'All projects', onClick: NAV('projects') },
+      { label: 'New project',  onClick: NAV('projectsetup') },
+    ]},
+    { label: 'Drawings',     items: [ { label: 'Upload drawings', onClick: NAV('upload') } ]},
+    { label: 'Measurements', items: [ { label: 'Measurement Hub', onClick: NAV('measurehub') } ]},
+    { label: 'BOQs',         items: [
+      { label: 'All projects',      onClick: NAV('projects') },
+      { label: 'Review & sign-off', onClick: NAV('review') },
+    ]},
+    { label: 'Reviews',      items: [ { label: 'Review & sign-off', onClick: NAV('review') } ]},
+    { label: 'Reports',      items: [
+      { label: 'Reports', onClick: NAV('reports') },
+      { label: 'History', onClick: NAV('history') },
+    ]},
+    { label: 'Tools',        items: [
+      { label: 'Exports',  onClick: NAV('exports') },
+      { label: 'Settings', onClick: NAV('settings') },
+    ]},
+    { label: 'Window',       items: [
+      { label: 'Enter fullscreen', onClick: FS(enterFullscreen) },
+      { label: 'Exit fullscreen',  onClick: FS(exitFullscreen) },
+    ]},
+    { label: 'Help',         items: [
+      { label: 'Help & support', onClick: () => { setOpenMenu(null); toast && toast('Get in touch: hello@vulcanquanta.com', 'info'); } },
+      { label: 'Privacy',        onClick: NAV('landing') },
+    ]},
+  ];
+
+  const openOn    = (label) => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpenMenu(label); };
+  const closeSoon = () => { closeTimer.current = setTimeout(() => setOpenMenu(null), 120); };
+
+  const email      = user?.email || '';
+  const meta       = user?.user_metadata || {};
+  const fullName   = meta.full_name || '';
+  const initials   = vqInitials(fullName, email);
+  const planLabel  = vqPlanLabel(meta.plan);
+  const profileName = fullName || email || 'Account';
+
+  return (
+    <div className="app-topbar-wrap">
+      {/* Row 1 — navy menu bar */}
+      <header className="app-topbar">
+        <div className="app-topbar-brand" onClick={() => go('landing')}>
+          <span className="app-topbar-logo">VQ</span>
+          <span className="app-topbar-title">VQ Estimating</span>
+        </div>
+
+        <nav className="app-topbar-menus">
+          {menus.map(m => (
+            <div
+              key={m.label}
+              className={`app-menu${openMenu === m.label ? ' open' : ''}`}
+              onMouseEnter={() => openOn(m.label)}
+              onMouseLeave={closeSoon}
+            >
+              <button className="app-menu-label" onClick={() => setOpenMenu(openMenu === m.label ? null : m.label)}>
+                {m.label}
+              </button>
+              {openMenu === m.label && (
+                <div className="app-menu-drop" onMouseEnter={() => openOn(m.label)} onMouseLeave={closeSoon}>
+                  {m.items.map((it, i) => it.divider
+                    ? <div key={i} className="app-menu-div" />
+                    : <button key={i} className="app-menu-item" onClick={it.onClick}>{it.label}</button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </nav>
+
+        <div className="app-topbar-right">
+          <button className="app-topbar-icon" title="Search" aria-label="Search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
+          <button className="app-topbar-icon" title="Notifications" aria-label="Notifications">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          </button>
+          <div className="app-topbar-profile" onMouseEnter={() => setProfileOpen(true)} onMouseLeave={() => setProfileOpen(false)}>
+            <button className="app-topbar-avatar-btn" onClick={() => setProfileOpen(o => !o)}>
+              <span className="app-topbar-avatar">{initials}</span>
+              <span className="app-topbar-name">{profileName}</span>
+              <span className="app-topbar-chev">▾</span>
+            </button>
+            {profileOpen && (
+              <div className="app-menu-drop app-profile-drop">
+                <div className="app-profile-head">
+                  <div className="app-profile-name">{profileName}</div>
+                  <div className="app-profile-plan">{planLabel}</div>
+                </div>
+                <button className="app-menu-item" onClick={() => { setProfileOpen(false); go('settings'); }}>Settings</button>
+                <button className="app-menu-item" onClick={() => { setProfileOpen(false); handleSignOut(); }}>Sign out</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Row 2 — window-control strip */}
+      <div className="app-winbar">
+        <div className="app-lights">
+          <button className="app-light app-light-red"   title="Sign out"        aria-label="Sign out"        onClick={handleSignOut} />
+          <button className="app-light app-light-amber" title="Fullscreen"      aria-label="Fullscreen"      onClick={enterFullscreen} />
+          <button className="app-light app-light-green" title="Exit fullscreen" aria-label="Exit fullscreen" onClick={exitFullscreen} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToastContainer({ toasts }) {
   if (!toasts.length) return null;
   return (
@@ -412,4 +576,4 @@ function ToastContainer({ toasts }) {
   );
 }
 
-Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer, AppSidebar, VQParticleField });
+Object.assign(window, { AnnouncementBar, Header, Footer, BoQMockup, ToastContainer, AppSidebar, AppTopBar, VQParticleField });
