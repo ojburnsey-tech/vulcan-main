@@ -1030,9 +1030,9 @@
       border-bottom: 1px solid var(--topbar-border);
       display: flex;
       align-items: center;
-      gap: 0;
-      height: 38px;
-      padding: 0 12px 0 0;
+      gap: 18px;
+      height: 48px;
+      padding: 0 14px;
       user-select: none;
     }
     .app-topbar-brand {
@@ -1181,15 +1181,7 @@
     }
     .app-profile-name { font-size: 13px; font-weight: 600; color: var(--menu-fg); }
     .app-profile-plan { font-size: 11px; color: var(--c-500); margin-top: 2px; }
-    .app-winbar {
-      background: var(--winbar-bg);
-      border-bottom: 1px solid var(--winbar-border);
-      height: 28px;
-      display: flex;
-      align-items: center;
-      padding: 0 14px;
-    }
-    .app-lights { display: flex; align-items: center; gap: 7px; }
+    .app-lights { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-right: 14px; margin-right: 4px; border-right: 1px solid var(--topbar-border); }
     .app-light {
       width: 12px;
       height: 12px;
@@ -1207,7 +1199,6 @@
       .app-topbar-menus { display: none; }
       .app-topbar-name  { display: none; }
       .app-topbar-chev  { display: none; }
-      .app-winbar       { display: none; }
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────── */

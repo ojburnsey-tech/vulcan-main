@@ -496,8 +496,13 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
 
   return (
     <div className="app-topbar-wrap">
-      {/* Row 1 — navy menu bar */}
       <header className="app-topbar">
+        <div className="app-lights">
+          <button className="app-light app-light-red"   title="Sign out"        aria-label="Sign out"        onClick={handleSignOut} />
+          <button className="app-light app-light-amber" title="Fullscreen"      aria-label="Fullscreen"      onClick={enterFullscreen} />
+          <button className="app-light app-light-green" title="Exit fullscreen" aria-label="Exit fullscreen" onClick={exitFullscreen} />
+        </div>
+
         <div className="app-topbar-brand" onClick={() => go('landing')}>
           <span className="app-topbar-logo">VQ</span>
           <span className="app-topbar-title">VQ Estimating</span>
@@ -552,15 +557,6 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
           </div>
         </div>
       </header>
-
-      {/* Row 2 — window-control strip */}
-      <div className="app-winbar">
-        <div className="app-lights">
-          <button className="app-light app-light-red"   title="Sign out"        aria-label="Sign out"        onClick={handleSignOut} />
-          <button className="app-light app-light-amber" title="Fullscreen"      aria-label="Fullscreen"      onClick={enterFullscreen} />
-          <button className="app-light app-light-green" title="Exit fullscreen" aria-label="Exit fullscreen" onClick={exitFullscreen} />
-        </div>
-      </div>
     </div>
   );
 }
