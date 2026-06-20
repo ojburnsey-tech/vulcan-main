@@ -730,7 +730,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
         </div>
         <p className="res-disclaimer">AI-generated draft — professional review required before issue to client. Edit inline, then export.</p>
         {isDemo && (
-          <p style={{ fontSize:11, color:'rgba(255,255,255,0.35)', margin:'-4px 0 8px' }}>
+          <p style={{ fontSize:11, color:'var(--text-muted)', margin:'-4px 0 8px' }}>
             Demo bill — sign in and upload a real document to save your edits.
           </p>
         )}
@@ -748,7 +748,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
             <>
               <button className="btn btn-amber btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Download PDF</button>
               <button className="btn btn-outline btn-pill" disabled title="Create a free account to export" style={{ opacity: 0.45, cursor: 'not-allowed' }}>🔒 Excel</button>
-              <span style={{ alignSelf: 'center', fontSize: '12px', color: 'rgba(255,255,255,0.4)' }}>Exports are unavailable in the demo.</span>
+              <span style={{ alignSelf: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>Exports are unavailable in the demo.</span>
             </>
           ) : (
             <>
@@ -861,7 +861,7 @@ function ResultsPage({ go, toast, boqData, embedded, demo, sample, projectId }) 
             )}
           </tbody>
         </table>
-        <p style={{ marginTop: '20px', fontSize: '12px', color: 'rgba(255,255,255,0.32)', fontStyle: 'italic' }}>
+        <p style={{ marginTop: '20px', fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
           AI-estimated using BCIS Q2 2026 rates. Subject to market variation and supplier pricing. Professional QS review recommended before tender or client issue.
         </p>
       </div>
@@ -1827,13 +1827,13 @@ function ExportsPage({ go, toast }) {
                 </div>
                 <div className="vd-proj-right">
                   <button className="btn btn-outline btn-pill btn-sm"
-                    style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.75)' }}
+                    style={{ borderColor: 'var(--border-soft)', color: 'var(--text-secondary)' }}
                     disabled={busy !== null}
                     onClick={() => handleExport(p, 'pdf')}>
                     {busy === `${p.id}-pdf` ? 'Generating…' : '↓ PDF'}
                   </button>
                   <button className="btn btn-outline btn-pill btn-sm"
-                    style={{ borderColor: 'rgba(255,255,255,0.18)', color: 'rgba(255,255,255,0.75)' }}
+                    style={{ borderColor: 'var(--border-soft)', color: 'var(--text-secondary)' }}
                     disabled={busy !== null}
                     onClick={() => handleExport(p, 'excel')}>
                     {busy === `${p.id}-excel` ? 'Generating…' : '↓ Excel'}
@@ -2035,8 +2035,8 @@ function UploadPage({ go, toast, onBoqReady }) {
         <VQParticleField />
         <div className="upload-wrap">
           <div style={{ textAlign: 'center', marginBottom: '40px', paddingTop: '40px' }}>
-            <h2 className="display-md" style={{ marginBottom: '8px', color: 'white' }}>Upload a drawing</h2>
-            <p style={{ color: 'rgba(255,255,255,0.42)', fontSize: '15px' }}>PDF, single or multi-page. Raster or vector. Up to 50 MB.</p>
+            <h2 className="display-md" style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>Upload a drawing</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '15px' }}>PDF, single or multi-page. Raster or vector. Up to 50 MB.</p>
           </div>
           <div
             className={`upload-zone${dragOver ? ' drag' : ''}`}
@@ -2458,14 +2458,14 @@ function SettingsPage({ go, toast, user: userProp }) {
             <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Trade overrides (£/unit)</p>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '14px' }}>
-                <thead><tr style={{ background: 'rgba(15,20,28,0.7)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                  {['Trade','BCIS default','Your override'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'rgba(255,255,255,0.45)', fontSize: '13px' }}>{h}</th>)}
+                <thead><tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border-soft)' }}>
+                  {['Trade','BCIS default','Your override'].map(h => <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', fontSize: '13px' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {VQ_RATE_TRADES.map(([trade, bcis]) => (
-                    <tr key={trade} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.65)' }}>{trade}</td>
-                      <td style={{ padding: '12px 16px', color: 'rgba(255,255,255,0.38)' }}>{bcis}</td>
+                    <tr key={trade} style={{ borderBottom: '1px solid var(--border-soft)' }}>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>{trade}</td>
+                      <td style={{ padding: '12px 16px', color: 'var(--text-muted)' }}>{bcis}</td>
                       <td style={{ padding: '12px 16px' }}>
                         <input type="text" placeholder="e.g. 0.70" className="finp" style={{ width: '120px' }}
                           value={rates.overrides[trade] || ''}
@@ -2489,10 +2489,10 @@ function SettingsPage({ go, toast, user: userProp }) {
             <div className="dash-hd"><h1 className="dash-h1">Billing</h1></div>
             <div className="scard vd-rise">
               <p className="scard-title">Current plan</p>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', background: 'var(--surface-2)', borderRadius: '8px', marginBottom: '16px' }}>
                 <div>
-                  <p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px', color: 'white' }}>{planInfo.name} — {planInfo.price}</p>
-                  <p style={{ fontSize: '13px', color: 'rgba(255,255,255,0.42)' }}>
+                  <p style={{ fontWeight: 700, fontSize: '18px', marginBottom: '4px', color: 'var(--text-primary)' }}>{planInfo.name} — {planInfo.price}</p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
                     {memberSince ? `Member since ${memberSince}` : 'Active plan on this account'}
                   </p>
                 </div>
@@ -2501,14 +2501,14 @@ function SettingsPage({ go, toast, user: userProp }) {
             </div>
             <div className="scard vd-rise" style={{ animationDelay: '0.08s' }}>
               <p className="scard-title">Payment method</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', marginBottom: '16px' }}>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)', marginBottom: '16px' }}>
                 No payment method on file. Payment details are collected when you upgrade to a paid plan.
               </p>
               <button className="btn btn-outline btn-pill btn-sm" onClick={() => go('pricing')}>View plans →</button>
             </div>
             <div className="scard vd-rise" style={{ animationDelay: '0.16s' }}>
               <p className="scard-title">Invoices</p>
-              <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)' }}>
+              <p style={{ fontSize: '14px', color: 'var(--text-muted)' }}>
                 No invoices yet — they will appear here once billing starts on a paid plan.
               </p>
             </div>
@@ -2570,7 +2570,7 @@ function ProjectSetupPage({ go, toast }) {
   };
 
   return (
-    <div style={{ background: 'var(--vd-bg, #0f1117)', minHeight: '100vh' }}>
+    <div style={{ background: 'var(--bg-page)', minHeight: '100vh' }}>
     <div className="vd-root">
       <AppTopBar currentPage="projects" go={go} toast={toast} />
       <div className="vd-main">
@@ -2858,14 +2858,14 @@ function ProjectWorkspacePage({ go, toast, projectId, onBoqReady }) {
                     <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>
                     <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
                   </svg>
-                  <p style={{ fontWeight:600, color:'rgba(255,255,255,0.82)', marginBottom:4 }}>Drop PDF here or click to upload</p>
+                  <p style={{ fontWeight:600, color:'var(--text-primary)', marginBottom:4 }}>Drop PDF here or click to upload</p>
                   <p style={{ fontSize:12, color:'var(--c-400)' }}>NRM2-compliant BoQ generated automatically</p>
                 </label>
               </>
             ) : (
               <div style={{ textAlign:'center', padding:'48px 0' }}>
                 <div style={{ width:48, height:48, border:'3px solid var(--amber)', borderTopColor:'transparent', borderRadius:'50%', margin:'0 auto 24px', animation:'spin 0.8s linear infinite' }} />
-                <p style={{ fontWeight:600, color:'rgba(255,255,255,0.82)' }}>
+                <p style={{ fontWeight:600, color:'var(--text-primary)' }}>
                   {uploadStatus === 'uploading'
                     ? 'Uploading drawing…'
                     : uploadLongRun
@@ -3877,7 +3877,7 @@ function MeasurementGrid({ rows, meta }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '16px', flexWrap: 'wrap', marginBottom: '18px' }}>
         <div>
           <p className="scard-title" style={{ border: 'none', padding: 0, marginBottom: '4px' }}>Measurements</p>
-          <p style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.42)' }}>
+          <p style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
             {meta?.source ? `${meta.source} · ` : ''}{meta?.file ? `${meta.file} · ` : ''}
             {rows.length.toLocaleString('en-GB')} row{rows.length !== 1 ? 's' : ''}
           </p>
@@ -3911,7 +3911,7 @@ function MeasurementGrid({ rows, meta }) {
           </thead>
           <tbody>
             {visible.length === 0 ? (
-              <tr className="rboq-item"><td colSpan={3} style={{ textAlign: 'center', padding: '28px 16px', color: 'rgba(255,255,255,0.45)' }}>
+              <tr className="rboq-item"><td colSpan={3} style={{ textAlign: 'center', padding: '28px 16px', color: 'var(--text-muted)' }}>
                 No measurements match “{q}”.
               </td></tr>
             ) : visible.map((r, i) => (
@@ -3926,7 +3926,7 @@ function MeasurementGrid({ rows, meta }) {
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '16px' }}>
-        <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.45)' }} data-testid="mhub-range">
+        <span style={{ fontSize: '12.5px', color: 'var(--text-muted)' }} data-testid="mhub-range">
           {sorted.length === 0
             ? 'No results'
             : `Showing ${start + 1}–${start + visible.length} of ${sorted.length.toLocaleString('en-GB')}` +
@@ -3935,7 +3935,7 @@ function MeasurementGrid({ rows, meta }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button className="btn btn-outline btn-pill btn-sm" disabled={safePage <= 0}
             onClick={() => setPage(p => Math.max(0, p - 1))} data-testid="mhub-prev">← Prev</button>
-          <span style={{ fontSize: '12.5px', color: 'rgba(255,255,255,0.6)' }} data-testid="mhub-page">
+          <span style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }} data-testid="mhub-page">
             Page {safePage + 1} of {pageCount}
           </span>
           <button className="btn btn-outline btn-pill btn-sm" disabled={safePage >= pageCount - 1}
@@ -3961,7 +3961,7 @@ function MhubConfidence({ value, overridden }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '7px' }}>
       <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: color, flexShrink: 0 }} />
-      <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', color: 'rgba(255,255,255,0.75)' }}>{pct}%</span>
+      <span style={{ fontSize: '12.5px', fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' }}>{pct}%</span>
     </span>
   );
 }

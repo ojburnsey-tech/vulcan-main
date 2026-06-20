@@ -412,6 +412,14 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
   const [openMenu, setOpenMenu]       = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const closeTimer = useRef(null);
+  const [theme, setTheme] = useState(() => {
+    try { return localStorage.getItem('vq-theme') || 'light'; } catch (e) { return 'light'; }
+  });
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('vq-theme', theme); } catch (e) {}
+  }, [theme]);
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
   useEffect(() => {
     if (userProp) { setUser(userProp); return; }
@@ -550,6 +558,7 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
                   <div className="app-profile-name">{profileName}</div>
                   <div className="app-profile-plan">{planLabel}</div>
                 </div>
+                <button className="app-menu-item app-theme-toggle" onClick={toggleTheme}>{theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode'}</button>
                 <button className="app-menu-item" onClick={() => { setProfileOpen(false); go('settings'); }}>Settings</button>
                 <button className="app-menu-item" onClick={() => { setProfileOpen(false); handleSignOut(); }}>Sign out</button>
               </div>
