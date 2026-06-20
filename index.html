@@ -1045,7 +1045,7 @@
       display: flex;
       flex-direction: column;
       height: 100vh;
-      background: #1d2127;
+      background: var(--bg-canvas);
     }
     .app-main { flex: 1; overflow: auto; min-width: 0; }
 
@@ -1163,6 +1163,8 @@
       transition: background var(--t), color var(--t);
     }
     .app-topbar-icon:hover { background: var(--topbar-hover); color: var(--topbar-fg); }
+    .app-topbar-icon-disabled { opacity: .35; cursor: default; pointer-events: none; }
+    .app-topbar-icon-disabled:hover { background: transparent; color: var(--topbar-fg-dim); }
     .app-topbar-profile { position: relative; }
     .app-topbar-avatar-btn {
       display: flex;
@@ -1193,7 +1195,6 @@
     .app-topbar-name { font-size: 12px; font-weight: 500; color: var(--topbar-fg-dim); }
     .app-topbar-chev { font-size: 9px; color: var(--topbar-fg-dim); }
     .app-profile-drop {
-      display: none;
       position: absolute;
       top: calc(100% + 6px);
       right: 0;
@@ -1205,7 +1206,6 @@
       overflow: hidden;
       z-index: 300;
     }
-    .app-topbar-profile.open .app-profile-drop { display: block; }
     .app-profile-head {
       padding: 12px 16px;
       border-bottom: 1px solid var(--menu-border);

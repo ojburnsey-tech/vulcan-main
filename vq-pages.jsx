@@ -1295,7 +1295,7 @@ function DashboardPage({ go, toast, user, onBoqReady }) {
   return (
     <div className="app-wrap">
       <AppTopBar currentPage="dashboard" go={go} user={user} toast={toast} />
-      <main className="app-main vd-main">
+      <main className="app-main">
         <div className="pj-page">
 
           {/* Header */}

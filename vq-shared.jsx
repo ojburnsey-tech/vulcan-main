@@ -411,7 +411,8 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
   const [user, setUser]               = useState(userProp || null);
   const [openMenu, setOpenMenu]       = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
-  const closeTimer = useRef(null);
+  const closeTimer   = useRef(null);
+  const profileRef   = useRef(null);
   const [theme, setTheme] = useState(() => {
     try { return localStorage.getItem('vq-theme') || 'light'; } catch (e) { return 'light'; }
   });
@@ -495,6 +496,13 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
   const openOn    = (label) => { if (closeTimer.current) clearTimeout(closeTimer.current); setOpenMenu(label); };
   const closeSoon = () => { closeTimer.current = setTimeout(() => setOpenMenu(null), 120); };
 
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onOutside = (e) => { if (profileRef.current && !profileRef.current.contains(e.target)) setProfileOpen(false); };
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, [profileOpen]);
+
   const email      = user?.email || '';
   const meta       = user?.user_metadata || {};
   const fullName   = meta.full_name || '';
@@ -543,10 +551,10 @@ function AppTopBar({ currentPage, go, user: userProp, toast }) {
           <button className="app-topbar-icon" title="Search" aria-label="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
-          <button className="app-topbar-icon" title="Notifications" aria-label="Notifications">
+          <button className="app-topbar-icon app-topbar-icon-disabled" title="Notifications — coming soon" aria-label="Notifications (coming soon)" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           </button>
-          <div className="app-topbar-profile" onMouseEnter={() => setProfileOpen(true)} onMouseLeave={() => setProfileOpen(false)}>
+          <div className="app-topbar-profile" ref={profileRef}>
             <button className="app-topbar-avatar-btn" onClick={() => setProfileOpen(o => !o)}>
               <span className="app-topbar-avatar">{initials}</span>
               <span className="app-topbar-name">{profileName}</span>
