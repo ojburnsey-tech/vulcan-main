@@ -1030,9 +1030,9 @@
       border-bottom: 1px solid var(--topbar-border);
       display: flex;
       align-items: center;
-      gap: 0;
-      height: 38px;
-      padding: 0 12px 0 0;
+      gap: 18px;
+      height: 48px;
+      padding: 0 14px;
       user-select: none;
     }
     .app-topbar-brand {
@@ -1181,15 +1181,7 @@
     }
     .app-profile-name { font-size: 13px; font-weight: 600; color: var(--menu-fg); }
     .app-profile-plan { font-size: 11px; color: var(--c-500); margin-top: 2px; }
-    .app-winbar {
-      background: var(--winbar-bg);
-      border-bottom: 1px solid var(--winbar-border);
-      height: 28px;
-      display: flex;
-      align-items: center;
-      padding: 0 14px;
-    }
-    .app-lights { display: flex; align-items: center; gap: 7px; }
+    .app-lights { display: flex; align-items: center; gap: 8px; flex-shrink: 0; padding-right: 14px; margin-right: 4px; border-right: 1px solid var(--topbar-border); }
     .app-light {
       width: 12px;
       height: 12px;
@@ -1207,7 +1199,6 @@
       .app-topbar-menus { display: none; }
       .app-topbar-name  { display: none; }
       .app-topbar-chev  { display: none; }
-      .app-winbar       { display: none; }
     }
 
     /* ── Sidebar ─────────────────────────────────────────────────────────── */
@@ -1447,10 +1438,11 @@
     .vd-proj-time { font-size: 12px; color: #8b92a0; margin-top: 3px; }
     .vd-proj-right { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
     .vd-proj-meta { font-size: 12px; color: #8b92a0; white-space: nowrap; }
-    .vd-badge { font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
-    .vd-badge-green { background: rgba(30,166,114,0.14); color: #2bd496; }
-    .vd-badge-amber { background: rgba(240,160,32,0.16); color: #f0b545; }
-    .vd-badge-grey  { background: rgba(255,255,255,0.07); color: #9aa3b2; }
+    .vd-badge { display:inline-block; font-size:11px; font-weight:600; padding:3px 10px; border-radius:999px; line-height:1.5; white-space:nowrap; }
+    .vd-badge-green { background:#e6f7ee; color:#138a55; }
+    .vd-badge-blue  { background:#e7f0ff; color:#2563eb; }
+    .vd-badge-amber { background:#fff3e0; color:#c77700; }
+    .vd-badge-grey  { background:#eef1f5; color:#5a6678; }
 
     /* Projects toolbar — search, status filter chips, sort */
     .vd-toolbar { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 16px; }
@@ -1625,6 +1617,47 @@
     @media (max-width: 1024px) {
       .app-side { display: none; }
     }
+
+    /* ── Dashboard projects table ────────────────────────────────────────── */
+    .pj-page { background:#f6f7f9; min-height:100%; padding:26px 30px 40px; font-family:'Inter',system-ui,sans-serif; }
+    .pj-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; }
+    .pj-title { font-size:24px; font-weight:700; color:var(--c-900); margin:0; }
+    .pj-head-right { display:flex; align-items:center; gap:10px; }
+    .pj-search { display:flex; align-items:center; gap:8px; background:#fff; border:1px solid var(--c-200); border-radius:9px; padding:7px 10px; min-width:280px; color:var(--c-500); }
+    .pj-search input { border:none; outline:none; background:transparent; font-size:13px; color:var(--c-800); flex:1; }
+    .pj-kbd { font-size:11px; color:var(--c-400); border:1px solid var(--c-200); border-radius:5px; padding:1px 5px; }
+    .pj-newproj { position:relative; display:flex; }
+    .pj-newproj-main { background:#2563eb; color:#fff; border:none; font-size:13px; font-weight:600; padding:9px 14px; border-radius:9px 0 0 9px; cursor:pointer; }
+    .pj-newproj-chev { background:#1d4fd7; color:#fff; border:none; padding:9px 10px; border-radius:0 9px 9px 0; font-size:10px; cursor:pointer; }
+    .pj-newproj-main:hover { background:#1d4fd7; } .pj-newproj-chev:hover { background:#1a46c2; }
+    .pj-newproj-drop { position:absolute; top:calc(100% + 6px); right:0; min-width:200px; background:#fff; border:1px solid var(--c-200); border-radius:10px; box-shadow:0 12px 30px rgba(15,23,42,.16); padding:6px; z-index:200; }
+    .pj-tabs { display:flex; gap:4px; border-bottom:1px solid var(--c-200); margin-bottom:16px; }
+    .pj-tab { background:transparent; border:none; padding:9px 12px; font-size:13px; font-weight:500; color:var(--c-500); border-bottom:2px solid transparent; margin-bottom:-1px; cursor:pointer; }
+    .pj-tab:hover { color:var(--c-800); } .pj-tab.active { color:#2563eb; border-bottom-color:#2563eb; font-weight:600; }
+    .pj-table-card { background:#fff; border:1px solid var(--c-200); border-radius:12px; overflow:hidden; }
+    .pj-table { width:100%; border-collapse:collapse; }
+    .pj-table th { text-align:left; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:var(--c-500); padding:12px 16px; border-bottom:1px solid var(--c-200); white-space:nowrap; }
+    .pj-table td { font-size:13px; color:var(--c-700); padding:13px 16px; border-bottom:1px solid var(--c-100); white-space:nowrap; }
+    .pj-row { cursor:pointer; transition:background .12s; }
+    .pj-row:hover { background:#f8fafc; }
+    .pj-row:last-child td { border-bottom:none; }
+    .pj-name { font-weight:600; color:var(--c-900); }
+    .pj-time { color:var(--c-500); }
+    .pj-actions { text-align:right; width:44px; }
+    .pj-empty { text-align:center; color:var(--c-500); padding:32px 16px !important; }
+    .pj-count { font-size:12px; color:var(--c-500); padding:12px 16px; }
+    .pj-section { font-size:16px; font-weight:700; color:var(--c-900); margin:26px 0 14px; }
+    .pj-overview { display:grid; grid-template-columns:repeat(5,1fr); gap:14px; }
+    .pj-stat { background:#fff; border:1px solid var(--c-200); border-radius:12px; padding:16px; }
+    .pj-stat-ico { display:grid; place-items:center; width:38px; height:38px; border-radius:10px; margin-bottom:12px; }
+    .pj-stat-label { font-size:12px; color:var(--c-500); }
+    .pj-stat-value { font-size:26px; font-weight:700; color:var(--c-900); margin:2px 0 4px; }
+    .pj-stat-sub { font-size:11px; color:var(--c-400); }
+    .pj-foot { display:flex; justify-content:space-between; align-items:center; font-size:12px; color:var(--c-400); margin-top:30px; padding-top:16px; border-top:1px solid var(--c-200); }
+    .pj-foot-right { display:flex; gap:18px; }
+    .pj-foot-right a { color:var(--c-500); cursor:pointer; }
+    .pj-foot-right a:hover { color:var(--c-700); }
+    @media (max-width:1100px){ .pj-overview { grid-template-columns:repeat(2,1fr); } .pj-table-card { overflow-x:auto; } }
   </style>
 </head>
 <body>
